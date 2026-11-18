@@ -1,0 +1,199 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Customer wallet and account summary.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "balanceKs": { "type": "integer", "description": "Available balance in Ks" },
+        "rewardPoints": { "type": "integer", "description": "Reward points" },
+        "activeStakeKs": { "type": "integer", "description": "Active pending/accepted order stake in Ks" },
+        "totalWonKs": { "type": "integer", "description": "Lifetime settled winnings in Ks" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "displayName", "balanceKs", "rewardPoints", "activeStakeKs", "totalWonKs", "createdAt", "updatedAt"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public non-PII standings entry for customer leaderboard.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "rewardPoints": { "type": "integer" },
+        "totalWonKs": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["public"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "rewardPoints", "totalWonKs", "visibility", "updatedAt"]
+    },
+    "AdminMember": {
+      "title": "AdminMember",
+      "description": "Authorized admin or co-admin friend account.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "admin"] },
+        "addedBy": { "type": "string" },
+        "inviteCodeUsed": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "role", "addedBy", "inviteCodeUsed", "createdAt", "updatedAt"]
+    },
+    "AdminInvite": {
+      "title": "AdminInvite",
+      "description": "Shareable invite code allowing friends to join as co-admins.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "label": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "label", "active", "createdBy", "createdAt", "updatedAt"]
+    },
+    "SportMatch": {
+      "title": "SportMatch",
+      "description": "Football match board for Parlay and Body/Goal Total picks.",
+      "type": "object",
+      "properties": {
+        "league": { "type": "string" },
+        "homeTeam": { "type": "string" },
+        "awayTeam": { "type": "string" },
+        "kickoffLabel": { "type": "string" },
+        "handicapLine": { "type": "string" },
+        "goalLine": { "type": "string" },
+        "bodyOdds": { "type": "number" },
+        "goalOdds": { "type": "number" },
+        "status": { "type": "string", "enum": ["open", "closed", "finished"] },
+        "homeScore": { "type": "integer" },
+        "awayScore": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["public", "hidden"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["league", "homeTeam", "awayTeam", "kickoffLabel", "handicapLine", "goalLine", "bodyOdds", "goalOdds", "status", "homeScore", "awayScore", "visibility", "createdBy", "createdAt", "updatedAt"]
+    },
+    "LotteryDraw": {
+      "title": "LotteryDraw",
+      "description": "3D lucky number draw round and published result.",
+      "type": "object",
+      "properties": {
+        "roundTitle": { "type": "string" },
+        "closeTimeLabel": { "type": "string" },
+        "winningNumber": { "type": "string" },
+        "payoutMultiplier": { "type": "number" },
+        "status": { "type": "string", "enum": ["open", "closed", "finished"] },
+        "visibility": { "type": "string", "enum": ["public", "hidden"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roundTitle", "closeTimeLabel", "winningNumber", "payoutMultiplier", "status", "visibility", "createdBy", "createdAt", "updatedAt"]
+    },
+    "BetOrder": {
+      "title": "BetOrder",
+      "description": "Customer order slip for Parlay, Body/Goal, or 3D.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "orderType": { "type": "string", "enum": ["parlay", "body_goal", "three_d"] },
+        "selections": { "type": "array" },
+        "matchIds": { "type": "array" },
+        "drawRound": { "type": "string" },
+        "stakeKs": { "type": "integer" },
+        "multiplier": { "type": "number" },
+        "potentialPayoutKs": { "type": "integer" },
+        "actualPayoutKs": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "won", "lost", "rejected"] },
+        "adminNote": { "type": "string" },
+        "settledBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "customerName", "orderType", "selections", "matchIds", "drawRound", "stakeKs", "multiplier", "potentialPayoutKs", "actualPayoutKs", "status", "adminNote", "settledBy", "createdAt", "updatedAt"]
+    },
+    "WalletRequest": {
+      "title": "WalletRequest",
+      "description": "Customer top-up or cash-out request managed by Admin.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "requestType": { "type": "string", "enum": ["topup", "withdraw"] },
+        "amountKs": { "type": "integer" },
+        "channel": { "type": "string" },
+        "referenceNote": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "adminNote": { "type": "string" },
+        "processedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "customerName", "requestType", "amountKs", "channel", "referenceNote", "status", "adminNote", "processedBy", "createdAt", "updatedAt"]
+    },
+    "LedgerTransaction": {
+      "title": "LedgerTransaction",
+      "description": "Immutable financial ledger record for customer wallet.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "txType": { "type": "string", "enum": ["topup", "withdraw", "order_stake", "order_win", "order_refund", "point_exchange", "admin_adjust"] },
+        "direction": { "type": "string", "enum": ["credit", "debit"] },
+        "amountKs": { "type": "integer" },
+        "title": { "type": "string" },
+        "balanceAfterKs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "txType", "direction", "amountKs", "title", "balanceAfterKs", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Private user account balances and points."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public standings board without PII."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminMember" },
+      "description": "Authorized admin and co-admin members."
+    },
+    "/admin_invites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/AdminInvite" },
+      "description": "Shareable admin invite codes."
+    },
+    "/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/SportMatch" },
+      "description": "Football matches for Parlay and Body/Goal orders."
+    },
+    "/lottery_draws/{drawId}": {
+      "schema": { "$ref": "#/entities/LotteryDraw" },
+      "description": "3D lottery draw rounds and results."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/BetOrder" },
+      "description": "Customer order slips monitored by Admins."
+    },
+    "/wallet_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/WalletRequest" },
+      "description": "Customer top-up and cash-out requests."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/LedgerTransaction" },
+      "description": "Customer balance ledger history."
+    }
+  }
+}

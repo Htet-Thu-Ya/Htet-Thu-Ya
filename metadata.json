@@ -1,0 +1,6 @@
+{
+  "name": "Htet Thu Ya",
+  "description": "Htet Thu Ya sports & 3D order portal with real-time Customer and shared Admin management powered by Firebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
