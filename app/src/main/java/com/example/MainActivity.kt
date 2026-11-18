@@ -170,12 +170,16 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onSettleLoss = vm::settleOrderLost,
                     onRejectOrder = vm::rejectOrder,
                     onProcessWalletRequest = vm::processWalletRequest,
+                    onDeleteWalletRequest = vm::deleteWalletRequest,
+                    onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
                     onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
                         vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
                     },
-                    onUpdateMatchStatusAndScore = vm::updateMatchStatusAndScore,
+                    onUpdateMatchDetails = vm::updateMatchDetails,
+                    onDeleteMatch = vm::deleteMatch,
                     onSaveNewDraw = { t, c, m -> vm.saveNewLotteryDraw(t, c, m) },
-                    onPublishLotteryResult = vm::publishLotteryResult,
+                    onUpdateLotteryDraw = vm::updateLotteryDraw,
+                    onDeleteLotteryDraw = vm::deleteLotteryDraw,
                     onSeedSampleBoard = vm::seedSampleBoard,
                     onCreateAdminInvite = { label -> vm.createAdminInvite(label) },
                     onToggleAdminInvite = vm::toggleAdminInvite,

@@ -932,8 +932,16 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun updateMatchStatusAndScore(
+    suspend fun updateMatchDetails(
         matchId: String,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
         status: String,
         homeScore: Long,
         awayScore: Long
@@ -941,9 +949,19 @@ class HtetThuYaRepository(
         val path = "matches/$matchId"
         return try {
             requireUserId()
+            require(matchId.isNotBlank() && ID_REGEX.matches(matchId)) { "Invalid match ID" }
+            require(league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank()) { "အသင်းနှင့် လိဂ်အမည် ဖြည့်စွက်ပါ" }
             require(status in listOf("open", "closed", "finished"))
             db.collection("matches").document(matchId).update(
                 mapOf(
+                    "league" to league.trim().take(60),
+                    "homeTeam" to homeTeam.trim().take(60),
+                    "awayTeam" to awayTeam.trim().take(60),
+                    "kickoffLabel" to kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40),
+                    "handicapLine" to handicapLine.trim().ifBlank { "Home -0.5" }.take(40),
+                    "goalLine" to goalLine.trim().ifBlank { "2.5" }.take(20),
+                    "bodyOdds" to bodyOdds.coerceIn(1.0, 50.0),
+                    "goalOdds" to goalOdds.coerceIn(1.0, 50.0),
                     "status" to status,
                     "homeScore" to homeScore.coerceIn(0L, 99L),
                     "awayScore" to awayScore.coerceIn(0L, 99L),
@@ -955,6 +973,21 @@ class HtetThuYaRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteMatch(matchId: String): Result<Unit> {
+        val path = "matches/$matchId"
+        return try {
+            requireUserId()
+            require(matchId.isNotBlank() && ID_REGEX.matches(matchId)) { "Invalid match ID" }
+            db.collection("matches").document(matchId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }
@@ -991,13 +1024,26 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun publishLotteryResult(drawId: String, winningNumber: String, status: String): Result<Unit> {
+    suspend fun updateLotteryDraw(
+        drawId: String,
+        roundTitle: String,
+        closeTimeLabel: String,
+        payoutMultiplier: Double,
+        winningNumber: String,
+        status: String
+    ): Result<Unit> {
         val path = "lottery_draws/$drawId"
         return try {
             requireUserId()
+            require(drawId.isNotBlank() && ID_REGEX.matches(drawId)) { "Invalid draw ID" }
+            require(roundTitle.isNotBlank()) { "ထီအကြိမ်အမည် ဖြည့်စွက်ပါ" }
+            require(status in listOf("open", "closed", "finished"))
             val clean = winningNumber.trim().take(10)
             db.collection("lottery_draws").document(drawId).update(
                 mapOf(
+                    "roundTitle" to roundTitle.trim().take(80),
+                    "closeTimeLabel" to closeTimeLabel.trim().ifBlank { "3:30 PM" }.take(40),
+                    "payoutMultiplier" to payoutMultiplier.coerceIn(1.0, 1000.0),
                     "winningNumber" to clean,
                     "status" to status,
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -1008,6 +1054,58 @@ class HtetThuYaRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteLotteryDraw(drawId: String): Result<Unit> {
+        val path = "lottery_draws/$drawId"
+        return try {
+            requireUserId()
+            require(drawId.isNotBlank() && ID_REGEX.matches(drawId)) { "Invalid draw ID" }
+            db.collection("lottery_draws").document(drawId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteWalletRequest(requestId: String): Result<Unit> {
+        val path = "wallet_requests/$requestId"
+        return try {
+            requireUserId()
+            require(requestId.isNotBlank() && ID_REGEX.matches(requestId)) { "Invalid request ID" }
+            db.collection("wallet_requests").document(requestId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun clearProcessedWalletRequests(requestIds: List<String>): Result<Int> {
+        val path = "wallet_requests"
+        return try {
+            requireUserId()
+            val validIds = requestIds.filter { it.isNotBlank() && ID_REGEX.matches(it) }
+            if (validIds.isEmpty()) return Result.success(0)
+            validIds.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { id ->
+                    batch.delete(db.collection("wallet_requests").document(id))
+                }
+                batch.commit().await()
+            }
+            Result.success(validIds.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }

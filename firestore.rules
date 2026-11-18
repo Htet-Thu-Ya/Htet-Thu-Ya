@@ -346,7 +346,7 @@ service cloud.firestore {
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'processedBy', 'updatedAt']);
-      allow delete: if false;
+      allow delete: if isAdmin() && isValidId(requestId) && existing().status in ['approved', 'rejected'];
     }
 
     match /transactions/{txId} {

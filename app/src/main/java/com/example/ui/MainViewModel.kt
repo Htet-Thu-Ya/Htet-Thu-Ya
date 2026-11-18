@@ -231,10 +231,39 @@ class MainViewModel(
         res
     }
 
-    fun updateMatchStatusAndScore(matchId: String, status: String, homeScore: Long, awayScore: Long) =
-        runAction("ပွဲစဉ် ရလဒ်ပြင်ဆင်ပြီးပါပြီ") {
-            repository.updateMatchStatusAndScore(matchId, status, homeScore, awayScore)
-        }
+    fun updateMatchDetails(
+        matchId: String,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
+        status: String,
+        homeScore: Long,
+        awayScore: Long
+    ) = runAction("ပွဲစဉ်အချက်အလက် ပြင်ဆင်ပြီးပါပြီ") {
+        repository.updateMatchDetails(
+            matchId = matchId,
+            league = league,
+            homeTeam = homeTeam,
+            awayTeam = awayTeam,
+            kickoffLabel = kickoffLabel,
+            handicapLine = handicapLine,
+            goalLine = goalLine,
+            bodyOdds = bodyOdds,
+            goalOdds = goalOdds,
+            status = status,
+            homeScore = homeScore,
+            awayScore = awayScore
+        )
+    }
+
+    fun deleteMatch(matchId: String) = runAction("ပွဲစဉ်အဟောင်း ဖျက်ပြီးပါပြီ") {
+        repository.deleteMatch(matchId)
+    }
 
     fun saveNewLotteryDraw(roundTitle: String, closeTimeLabel: String, payoutMultiplier: Double, onSuccess: () -> Unit = {}) =
         runAction("၃လုံးထီ အကြိမ်သစ် ဖွင့်လှစ်ပြီးပါပြီ") {
@@ -243,10 +272,28 @@ class MainViewModel(
             res
         }
 
-    fun publishLotteryResult(drawId: String, winningNumber: String, status: String) =
-        runAction("၃လုံးထီ ရလဒ် ထုတ်ပြန်ပြီးပါပြီ") {
-            repository.publishLotteryResult(drawId, winningNumber, status)
-        }
+    fun updateLotteryDraw(
+        drawId: String,
+        roundTitle: String,
+        closeTimeLabel: String,
+        payoutMultiplier: Double,
+        winningNumber: String,
+        status: String
+    ) = runAction("၃လုံးထီ အချက်အလက် ပြင်ဆင်ပြီးပါပြီ") {
+        repository.updateLotteryDraw(drawId, roundTitle, closeTimeLabel, payoutMultiplier, winningNumber, status)
+    }
+
+    fun deleteLotteryDraw(drawId: String) = runAction("၃လုံးထီ အကြိမ် ဖျက်ပြီးပါပြီ") {
+        repository.deleteLotteryDraw(drawId)
+    }
+
+    fun deleteWalletRequest(requestId: String) = runAction("ငွေစာရင်းအဟောင်း ဖျက်ပြီးပါပြီ") {
+        repository.deleteWalletRequest(requestId)
+    }
+
+    fun clearProcessedWalletRequests(requestIds: List<String>) = runAction("ပြီးစီးပြီးသား ငွေသွင်း/ထုတ် အဟောင်းများ ဖျက်ပြီးပါပြီ") {
+        repository.clearProcessedWalletRequests(requestIds).map { }
+    }
 
     fun createAdminInvite(label: String, onCodeCreated: (String) -> Unit = {}) =
         runAction("သူငယ်ချင်း Admin Invite Code ဖန်တီးပြီးပါပြီ") {

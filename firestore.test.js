@@ -405,3 +405,86 @@ test("Point exchange & future timestamp rejection", async () => {
     })
   );
 });
+
+test("Admin match editing/deletion and processed wallet request deletion", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await assertSucceeds(
+    ownerDb.collection("matches").doc("m_edit").set({
+      league: "Premier League",
+      homeTeam: "A",
+      awayTeam: "B",
+      kickoffLabel: "Tonight 21:00",
+      handicapLine: "Home -0.5",
+      goalLine: "2.5",
+      bodyOdds: 1.92,
+      goalOdds: 1.90,
+      status: "open",
+      homeScore: 0,
+      awayScore: 0,
+      visibility: "public",
+      createdBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  // Admin edits full match details
+  await assertSucceeds(
+    ownerDb.collection("matches").doc("m_edit").update({
+      league: "La Liga",
+      homeTeam: "Real Madrid",
+      awayTeam: "Barcelona",
+      kickoffLabel: "02:00 AM",
+      handicapLine: "Home -1.0",
+      goalLine: "3.0",
+      bodyOdds: 1.95,
+      goalOdds: 1.88,
+      status: "finished",
+      homeScore: 2,
+      awayScore: 1,
+      updatedAt: pastDate(),
+    })
+  );
+
+  // Non-admin cannot edit or delete match
+  await assertFails(aliceDb.collection("matches").doc("m_edit").delete());
+
+  // Admin can delete old match
+  await assertSucceeds(ownerDb.collection("matches").doc("m_edit").delete());
+
+  // Wallet requests: pending cannot be deleted, processed (approved/rejected) can be deleted by admin only
+  await assertSucceeds(
+    aliceDb.collection("wallet_requests").doc("wr_pending").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      requestType: "topup",
+      amountKs: 5000,
+      channel: "KBZPay",
+      referenceNote: "123456",
+      status: "pending",
+      adminNote: "",
+      processedBy: "",
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  await assertFails(ownerDb.collection("wallet_requests").doc("wr_pending").delete());
+
+  await assertSucceeds(
+    ownerDb.collection("wallet_requests").doc("wr_pending").update({
+      status: "approved",
+      adminNote: "Approved",
+      processedBy: OWNER_UID,
+      updatedAt: pastDate(),
+    })
+  );
+
+  await assertFails(aliceDb.collection("wallet_requests").doc("wr_pending").delete());
+  await assertSucceeds(ownerDb.collection("wallet_requests").doc("wr_pending").delete());
+});

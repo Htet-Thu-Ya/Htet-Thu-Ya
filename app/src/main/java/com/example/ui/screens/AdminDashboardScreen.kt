@@ -103,10 +103,14 @@ fun AdminDashboardScreen(
     onSettleLoss: (BetOrder, String) -> Unit,
     onRejectOrder: (BetOrder, String) -> Unit,
     onProcessWalletRequest: (WalletRequest, Boolean, String) -> Unit,
+    onDeleteWalletRequest: (String) -> Unit,
+    onClearProcessedWalletRequests: (List<String>) -> Unit,
     onSaveNewMatch: (String, String, String, String, String, String, Double, Double) -> Unit,
-    onUpdateMatchStatusAndScore: (String, String, Long, Long) -> Unit,
+    onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long) -> Unit,
+    onDeleteMatch: (String) -> Unit,
     onSaveNewDraw: (String, String, Double) -> Unit,
-    onPublishLotteryResult: (String, String, String) -> Unit,
+    onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
+    onDeleteLotteryDraw: (String) -> Unit,
     onSeedSampleBoard: () -> Unit,
     onCreateAdminInvite: (String) -> Unit,
     onToggleAdminInvite: (String, Boolean) -> Unit,
@@ -234,15 +238,19 @@ fun AdminDashboardScreen(
                     )
                     1 -> AdminWalletRequestsTab(
                         requests = walletReqs,
-                        onProcess = onProcessWalletRequest
+                        onProcess = onProcessWalletRequest,
+                        onDeleteRequest = onDeleteWalletRequest,
+                        onClearProcessed = onClearProcessedWalletRequests
                     )
                     2 -> AdminBoardTab(
                         matches = matches,
                         draws = draws,
                         onSaveNewMatch = onSaveNewMatch,
-                        onUpdateMatchStatusAndScore = onUpdateMatchStatusAndScore,
+                        onUpdateMatchDetails = onUpdateMatchDetails,
+                        onDeleteMatch = onDeleteMatch,
                         onSaveNewDraw = onSaveNewDraw,
-                        onPublishLotteryResult = onPublishLotteryResult,
+                        onUpdateLotteryDraw = onUpdateLotteryDraw,
+                        onDeleteLotteryDraw = onDeleteLotteryDraw,
                         onSeedSampleBoard = onSeedSampleBoard
                     )
                     3 -> AdminTeamAndUsersTab(
@@ -326,13 +334,34 @@ private fun AdminOrdersTab(
 @Composable
 private fun AdminWalletRequestsTab(
     requests: List<WalletRequest>,
-    onProcess: (WalletRequest, Boolean, String) -> Unit
+    onProcess: (WalletRequest, Boolean, String) -> Unit,
+    onDeleteRequest: (String) -> Unit,
+    onClearProcessed: (List<String>) -> Unit
 ) {
+    var deletingRequest by remember { mutableStateOf<WalletRequest?>(null) }
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+    val processedIds = remember(requests) {
+        requests.filter { it.status in listOf("approved", "rejected") }.map { it.id }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (processedIds.isNotEmpty()) {
+            item {
+                OutlinedButton(
+                    onClick = { showClearAllConfirm = true },
+                    border = BorderStroke(1.dp, AdminCrimson.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth().testTag("clear_old_wallet_requests_button")
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("ပြီးစီးပြီးသား အဟောင်းများ ဖျက်မည် (${processedIds.size})", color = AdminCrimson)
+                }
+            }
+        }
         if (requests.isEmpty()) {
             item {
                 Text("ငွေသွင်း / ငွေထုတ် တောင်းဆိုမှု မရှိသေးပါ", color = Color(0xFFB4C8BE))
@@ -353,9 +382,20 @@ private fun AdminWalletRequestsTab(
                             Text(
                                 "${req.customerName} • ${if (req.requestType == "topup") "ငွေသွင်း" else "ငွေထုတ်"}",
                                 color = InkDark,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
                             )
-                            StatusBadge(req.status)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                StatusBadge(req.status)
+                                if (req.status != "pending") {
+                                    IconButton(
+                                        onClick = { deletingRequest = req },
+                                        modifier = Modifier.testTag("delete_wallet_request_${req.id}")
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Old Request", tint = AdminCrimson)
+                                    }
+                                }
+                            }
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -394,6 +434,31 @@ private fun AdminWalletRequestsTab(
             }
         }
     }
+
+    deletingRequest?.let { req ->
+        ConfirmDeleteDialog(
+            title = "ငွေစာရင်းအဟောင်း ဖျက်မည်လား?",
+            message = "${req.customerName} (${formatKs(req.amountKs)}) မှတ်တမ်းကို ဖျက်ပစ်ပါမည်။ Customer ၏ လက်ရှိလက်ကျန်ငွေ မပြောင်းလဲပါ။",
+            onDismiss = { deletingRequest = null },
+            onConfirm = {
+                val id = req.id
+                deletingRequest = null
+                onDeleteRequest(id)
+            }
+        )
+    }
+
+    if (showClearAllConfirm) {
+        ConfirmDeleteDialog(
+            title = "ပြီးစီးပြီးသား အဟောင်းများ အားလုံးဖျက်မည်လား?",
+            message = "အတည်ပြုပြီး / ပယ်ဖျက်ပြီး ငွေသွင်း၊ ငွေထုတ် မှတ်တမ်း ${processedIds.size} ခုလုံးကို ဖျက်ပစ်ပါမည်။",
+            onDismiss = { showClearAllConfirm = false },
+            onConfirm = {
+                showClearAllConfirm = false
+                onClearProcessed(processedIds)
+            }
+        )
+    }
 }
 
 @Composable
@@ -401,15 +466,19 @@ private fun AdminBoardTab(
     matches: List<SportMatch>,
     draws: List<LotteryDraw>,
     onSaveNewMatch: (String, String, String, String, String, String, Double, Double) -> Unit,
-    onUpdateMatchStatusAndScore: (String, String, Long, Long) -> Unit,
+    onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long) -> Unit,
+    onDeleteMatch: (String) -> Unit,
     onSaveNewDraw: (String, String, Double) -> Unit,
-    onPublishLotteryResult: (String, String, String) -> Unit,
+    onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
+    onDeleteLotteryDraw: (String) -> Unit,
     onSeedSampleBoard: () -> Unit
 ) {
     var showAddMatch by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
+    var deletingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showAddDraw by remember { mutableStateOf(false) }
     var editingDraw by remember { mutableStateOf<LotteryDraw?>(null) }
+    var deletingDraw by remember { mutableStateOf<LotteryDraw?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
@@ -449,7 +518,7 @@ private fun AdminBoardTab(
         }
 
         item {
-            Text("၃လုံးထီ အကြိမ်များ", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
+            Text("၃လုံးထီ အကြိမ်များ (နှိပ်ပြီး ပြင်ဆင် / ဖျက်ပါ)", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
         }
         items(draws, key = { it.id }) { draw ->
             Card(
@@ -461,22 +530,28 @@ private fun AdminBoardTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
                         Text("${draw.closeTimeLabel} • ${draw.payoutMultiplier.toInt()}x", color = InkMuted)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (draw.winningNumber.isNotBlank()) {
                             Text(draw.winningNumber, color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
                         }
                         StatusBadge(draw.status)
+                        IconButton(
+                            onClick = { deletingDraw = draw },
+                            modifier = Modifier.testTag("delete_draw_${draw.id}")
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Draw", tint = AdminCrimson)
+                        }
                     }
                 }
             }
         }
 
         item {
-            Text("ဘောလုံးပွဲစဉ်များ (နှိပ်ပြီး ရလဒ်ပြင်ပါ)", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
+            Text("ဘောလုံးပွဲစဉ်များ (နှိပ်ပြီး ပြင်ဆင် / ဖျက်ပါ)", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
         }
         items(matches, key = { it.id }) { match ->
             Card(
@@ -490,13 +565,22 @@ private fun AdminBoardTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("${match.homeTeam} vs ${match.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold)
-                        Text("${match.league} • ${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
+                        Text("${match.league} • ${match.kickoffLabel}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
+                        Text("${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        StatusBadge(match.status)
-                        if (match.status == "finished") {
-                            Spacer(Modifier.height(4.dp))
-                            Text("${match.homeScore} - ${match.awayScore}", color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            StatusBadge(match.status)
+                            if (match.status == "finished") {
+                                Spacer(Modifier.height(4.dp))
+                                Text("${match.homeScore} - ${match.awayScore}", color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        IconButton(
+                            onClick = { deletingMatch = match },
+                            modifier = Modifier.testTag("delete_match_${match.id}")
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = AdminCrimson)
                         }
                     }
                 }
@@ -517,9 +601,25 @@ private fun AdminBoardTab(
         EditMatchResultDialog(
             match = m,
             onDismiss = { editingMatch = null },
-            onUpdate = { st, hs, ascore ->
+            onUpdate = { l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore ->
                 editingMatch = null
-                onUpdateMatchStatusAndScore(m.id, st, hs, ascore)
+                onUpdateMatchDetails(m.id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore)
+            },
+            onRequestDelete = {
+                editingMatch = null
+                deletingMatch = m
+            }
+        )
+    }
+    deletingMatch?.let { m ->
+        ConfirmDeleteDialog(
+            title = "ပွဲစဉ် ဖျက်မည်လား?",
+            message = "${m.homeTeam} vs ${m.awayTeam} (${m.league}) ပွဲစဉ်ကို အပြီးတိုင် ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingMatch = null },
+            onConfirm = {
+                val id = m.id
+                deletingMatch = null
+                onDeleteMatch(id)
             }
         )
     }
@@ -536,9 +636,25 @@ private fun AdminBoardTab(
         PublishLotteryResultDialog(
             draw = d,
             onDismiss = { editingDraw = null },
-            onPublish = { num, st ->
+            onPublish = { title, closeLabel, mult, num, st ->
                 editingDraw = null
-                onPublishLotteryResult(d.id, num, st)
+                onUpdateLotteryDraw(d.id, title, closeLabel, mult, num, st)
+            },
+            onRequestDelete = {
+                editingDraw = null
+                deletingDraw = d
+            }
+        )
+    }
+    deletingDraw?.let { d ->
+        ConfirmDeleteDialog(
+            title = "၃လုံးထီ အကြိမ် ဖျက်မည်လား?",
+            message = "${d.roundTitle} ကို ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingDraw = null },
+            onConfirm = {
+                val id = d.id
+                deletingDraw = null
+                onDeleteLotteryDraw(id)
             }
         )
     }
