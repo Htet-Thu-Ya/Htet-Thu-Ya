@@ -82,8 +82,8 @@ class HtetThuYaRepository(
                     mapOf(
                         "userId" to uid,
                         "displayName" to safeName,
-                        "balanceKs" to 10000L,
-                        "rewardPoints" to 100L,
+                        "balanceKs" to 0L,
+                        "rewardPoints" to 0L,
                         "activeStakeKs" to 0L,
                         "totalWonKs" to 0L,
                         "createdAt" to FieldValue.serverTimestamp(),
@@ -95,7 +95,7 @@ class HtetThuYaRepository(
                     mapOf(
                         "userId" to uid,
                         "displayName" to safeName,
-                        "rewardPoints" to 100L,
+                        "rewardPoints" to 0L,
                         "totalWonKs" to 0L,
                         "visibility" to "public",
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -105,7 +105,7 @@ class HtetThuYaRepository(
             } else {
                 val lbSnap = lbRef.get().await()
                 if (!lbSnap.exists()) {
-                    val pts = userSnap.getLong("rewardPoints") ?: 100L
+                    val pts = userSnap.getLong("rewardPoints") ?: 0L
                     val won = userSnap.getLong("totalWonKs") ?: 0L
                     lbRef.set(
                         mapOf(

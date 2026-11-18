@@ -54,8 +54,8 @@ test("Unauthenticated user: cannot read or write any collection", async () => {
     unauthDb.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
       displayName: "Unauth",
-      balanceKs: 10000,
-      rewardPoints: 100,
+      balanceKs: 0,
+      rewardPoints: 0,
       activeStakeKs: 0,
       totalWonKs: 0,
       createdAt: pastDate(),
@@ -64,7 +64,7 @@ test("Unauthenticated user: cannot read or write any collection", async () => {
   );
 });
 
-test("User registration: starter 10000 Ks succeeds, self-minting or ghost fields fail", async () => {
+test("User registration: 0 Ks / 0 pts starter succeeds, self-minting or ghost fields fail", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const now = pastDate();
 
@@ -73,8 +73,8 @@ test("User registration: starter 10000 Ks succeeds, self-minting or ghost fields
     aliceDb.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
       displayName: "Alice",
-      balanceKs: 10000,
-      rewardPoints: 100,
+      balanceKs: 0,
+      rewardPoints: 0,
       activeStakeKs: 0,
       totalWonKs: 0,
       createdAt: now,
@@ -82,13 +82,27 @@ test("User registration: starter 10000 Ks succeeds, self-minting or ghost fields
     })
   );
 
-  // Reject self-minting 999999 Ks
+  // Reject self-minting non-zero balance (e.g. 10000 Ks)
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   await assertFails(
     bobDb.collection("users").doc(BOB_UID).set({
       userId: BOB_UID,
       displayName: "Bob",
-      balanceKs: 999999,
+      balanceKs: 10000,
+      rewardPoints: 0,
+      activeStakeKs: 0,
+      totalWonKs: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Reject self-minting non-zero points
+  await assertFails(
+    bobDb.collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      displayName: "Bob",
+      balanceKs: 0,
       rewardPoints: 100,
       activeStakeKs: 0,
       totalWonKs: 0,
@@ -102,8 +116,8 @@ test("User registration: starter 10000 Ks succeeds, self-minting or ghost fields
     bobDb.collection("users").doc(BOB_UID).set({
       userId: BOB_UID,
       displayName: "Bob",
-      balanceKs: 10000,
-      rewardPoints: 100,
+      balanceKs: 0,
+      rewardPoints: 0,
       activeStakeKs: 0,
       totalWonKs: 0,
       isAdmin: true,
@@ -119,8 +133,8 @@ test("User isolation & PII protection: Bob cannot read or list Alice's wallet", 
     await db.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
       displayName: "Alice",
-      balanceKs: 10000,
-      rewardPoints: 100,
+      balanceKs: 0,
+      rewardPoints: 0,
       activeStakeKs: 0,
       totalWonKs: 0,
       createdAt: pastDate(5000),
@@ -140,14 +154,22 @@ test("Customer order placement & debit conservation: valid order succeeds, fake 
     aliceDb.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
       displayName: "Alice",
-      balanceKs: 10000,
-      rewardPoints: 100,
+      balanceKs: 0,
+      rewardPoints: 0,
       activeStakeKs: 0,
       totalWonKs: 0,
       createdAt: created,
       updatedAt: created,
     })
   );
+
+  // Simulate admin top-up credit so Alice can place an order
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(ALICE_UID).update({
+      balanceKs: 10000,
+      updatedAt: pastDate(5000),
+    });
+  });
 
   // Valid balanceKs -> activeStakeKs debit
   await assertSucceeds(
@@ -326,14 +348,23 @@ test("Point exchange & future timestamp rejection", async () => {
     aliceDb.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
       displayName: "Alice",
-      balanceKs: 10000,
-      rewardPoints: 100,
+      balanceKs: 0,
+      rewardPoints: 0,
       activeStakeKs: 0,
       totalWonKs: 0,
       createdAt: created,
       updatedAt: created,
     })
   );
+
+  // Simulate admin-settled credit/points before point exchange
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(ALICE_UID).update({
+      balanceKs: 10000,
+      rewardPoints: 100,
+      updatedAt: pastDate(5000),
+    });
+  });
 
   // Valid point exchange: 20 pts -> +200 Ks
   await assertSucceeds(

@@ -163,8 +163,8 @@ service cloud.firestore {
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'displayName', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'displayName', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
-                       incoming().balanceKs == 10000 &&
-                       incoming().rewardPoints == 100 &&
+                       incoming().balanceKs == 0 &&
+                       incoming().rewardPoints == 0 &&
                        incoming().activeStakeKs == 0 &&
                        incoming().totalWonKs == 0 &&
                        isValidUserAccount(incoming());
@@ -211,7 +211,7 @@ service cloud.firestore {
                          isAdmin() ||
                          (request.auth.uid == userId &&
                           incoming().userId == request.auth.uid &&
-                          incoming().rewardPoints == 100 &&
+                          incoming().rewardPoints == 0 &&
                           incoming().totalWonKs == 0)
                        );
       allow update: if isSignedIn() &&
