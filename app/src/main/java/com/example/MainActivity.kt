@@ -138,6 +138,9 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val allUsersState by vm.allUsers.collectAsStateWithLifecycle()
     val adminMembersState by vm.adminMembers.collectAsStateWithLifecycle()
     val adminInvitesState by vm.adminInvites.collectAsStateWithLifecycle()
+    val walletConfig by vm.walletConfig.collectAsStateWithLifecycle()
+    val boardConfig by vm.boardConfig.collectAsStateWithLifecycle()
+    val liveFeedState by vm.liveFeed.collectAsStateWithLifecycle()
 
     val balanceKs = (accountState as? UiState.Success)?.data?.balanceKs ?: 0L
     val navController = rememberNavController()
@@ -164,14 +167,20 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     allUsersState = allUsersState,
                     adminMembersState = adminMembersState,
                     adminInvitesState = adminInvitesState,
+                    walletConfig = walletConfig,
+                    boardConfig = boardConfig,
+                    busy = busy,
                     onSwitchToCustomer = { vm.setAdminMode(false) },
                     onAcceptOrder = vm::acceptOrder,
                     onSettleWin = vm::settleOrderWon,
                     onSettleLoss = vm::settleOrderLost,
                     onRejectOrder = vm::rejectOrder,
+                    onDeleteOrder = vm::deleteOrder,
+                    onClearCompletedOrders = vm::clearCompletedOrders,
                     onProcessWalletRequest = vm::processWalletRequest,
                     onDeleteWalletRequest = vm::deleteWalletRequest,
                     onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
+                    onSaveWalletConfig = vm::saveWalletConfig,
                     onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
                         vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
                     },
@@ -181,10 +190,15 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onUpdateLotteryDraw = vm::updateLotteryDraw,
                     onDeleteLotteryDraw = vm::deleteLotteryDraw,
                     onSeedSampleBoard = vm::seedSampleBoard,
+                    onSyncDailyMatchesNow = vm::syncDailyMatchesNow,
+                    onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
+                    onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
+                    onToggleAutoLiveResults = vm::toggleAutoSyncLiveResults,
                     onCreateAdminInvite = { label -> vm.createAdminInvite(label) },
                     onToggleAdminInvite = vm::toggleAdminInvite,
                     onRemoveAdminMember = vm::removeAdminMember,
-                    onAdjustUserBalance = vm::adjustUserBalance
+                    onAdjustUserBalance = vm::adjustUserBalance,
+                    onGiftRewardPoints = vm::giftRewardPoints
                 )
             } else {
                 NavHost(
@@ -263,7 +277,9 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                         OrdersHistoryScreen(
                             activeOnly = false,
                             ordersState = userOrdersState,
-                            onBack = { navController.popBackStack() }
+                            onBack = { navController.popBackStack() },
+                            onDeleteOrder = vm::deleteOrder,
+                            onClearCompletedOrders = vm::clearCompletedOrders
                         )
                     }
                     composable(CustomerRoute.LEDGER.name) {
@@ -271,6 +287,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             accountState = accountState,
                             requestsState = userWalletRequestsState,
                             transactionsState = userTransactionsState,
+                            walletConfig = walletConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
                             onSubmitWalletRequest = { type, amt, ch, ref ->
@@ -282,6 +299,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                         ResultsScreen(
                             matchesState = matchesState,
                             drawsState = drawsState,
+                            liveFeedState = liveFeedState,
+                            onRefreshLiveFeed = vm::refreshLiveFootballFeed,
                             onBack = { navController.popBackStack() }
                         )
                     }

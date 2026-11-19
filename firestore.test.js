@@ -488,3 +488,131 @@ test("Admin match editing/deletion and processed wallet request deletion", async
   await assertFails(aliceDb.collection("wallet_requests").doc("wr_pending").delete());
   await assertSucceeds(ownerDb.collection("wallet_requests").doc("wr_pending").delete());
 });
+
+test("User email registration, gift points, completed order deletion, and app settings config", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  // Alice creates account with Gmail email
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      email: "alice@gmail.com",
+      balanceKs: 0,
+      rewardPoints: 0,
+      activeStakeKs: 0,
+      totalWonKs: 0,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  // Admin can list users and see Alice's email, Bob cannot
+  await assertSucceeds(ownerDb.collection("users").get());
+  await assertFails(bobDb.collection("users").get());
+
+  // Admin can gift reward points & write point_gift transaction
+  await assertSucceeds(
+    ownerDb.collection("users").doc(ALICE_UID).update({
+      rewardPoints: 150,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("transactions").doc("tx_gift_1").set({
+      userId: ALICE_UID,
+      txType: "point_gift",
+      direction: "credit",
+      amountKs: 0,
+      title: "Admin လက်ဆောင်ပွိုင့် +150 Pts",
+      balanceAfterKs: 0,
+      createdAt: pastDate(),
+      updatedAt: pastDate(),
+    })
+  );
+
+  // Only Admin can configure wallet_config and board_config; signed-in customers can read
+  await assertFails(
+    aliceDb.collection("app_settings").doc("wallet_config").set({
+      depositPercent: 10.0,
+      depositMode: "bonus",
+      withdrawPercent: 2.0,
+      withdrawMode: "fee",
+      updatedBy: ALICE_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("wallet_config").set({
+      depositPercent: 5.0,
+      depositMode: "bonus",
+      withdrawPercent: 2.0,
+      withdrawMode: "fee",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("board_config").set({
+      autoSyncDailyMatches: true,
+      autoSyncLiveResults: true,
+      lastSyncedDate: "2026-11-19",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("app_settings").doc("wallet_config").get());
+
+  // Completed orders (won/lost/rejected) can be deleted by owner or Admin; pending orders cannot
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.collection("orders").doc("ord_pending_del").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "body_goal",
+      selections: ["Arsenal"],
+      matchIds: ["m1"],
+      drawRound: "Round 1",
+      stakeKs: 1000,
+      multiplier: 1.9,
+      potentialPayoutKs: 1900,
+      actualPayoutKs: 0,
+      status: "pending",
+      adminNote: "",
+      settledBy: "",
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    });
+    await db.collection("orders").doc("ord_won_del").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "body_goal",
+      selections: ["Arsenal"],
+      matchIds: ["m1"],
+      drawRound: "Round 1",
+      stakeKs: 1000,
+      multiplier: 1.9,
+      potentialPayoutKs: 1900,
+      actualPayoutKs: 1900,
+      status: "won",
+      adminNote: "Won",
+      settledBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    });
+  });
+
+  await assertFails(aliceDb.collection("orders").doc("ord_pending_del").delete());
+  await assertFails(ownerDb.collection("orders").doc("ord_pending_del").delete());
+  await assertFails(bobDb.collection("orders").doc("ord_won_del").delete());
+  await assertSucceeds(aliceDb.collection("orders").doc("ord_won_del").delete());
+});
+

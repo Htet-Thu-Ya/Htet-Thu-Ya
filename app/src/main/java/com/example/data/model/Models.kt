@@ -18,6 +18,7 @@ data class UserAccount(
     @DocumentId val id: String = "",
     val userId: String = "",
     val displayName: String = "",
+    val email: String = "",
     val balanceKs: Long = 0L,
     val rewardPoints: Long = 0L,
     val activeStakeKs: Long = 0L,
@@ -79,6 +80,9 @@ data class SportMatch(
     val homeScore: Long = 0L,
     val awayScore: Long = 0L,
     val visibility: String = "public",
+    val externalId: String = "",
+    val matchDate: String = "",
+    val liveClock: String = "",
     val createdBy: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -133,6 +137,9 @@ data class WalletRequest(
     val status: String = "pending",
     val adminNote: String = "",
     val processedBy: String = "",
+    val ratePercent: Double = 0.0,
+    val rateMode: String = "none",
+    val netAmountKs: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -149,4 +156,62 @@ data class LedgerTransaction(
     val balanceAfterKs: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class WalletConfig(
+    val depositPercent: Double = 0.0,
+    val depositMode: String = "bonus",
+    val withdrawPercent: Double = 0.0,
+    val withdrawMode: String = "fee",
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun computeNetTopup(requestedKs: Long): Long {
+        if (depositPercent <= 0.0 || depositMode == "none") return requestedKs
+        val delta = ((requestedKs * depositPercent) / 100.0).toLong()
+        return when (depositMode) {
+            "bonus" -> (requestedKs + delta).coerceAtLeast(0L)
+            "fee" -> (requestedKs - delta).coerceAtLeast(0L)
+            else -> requestedKs
+        }
+    }
+
+    fun computeNetWithdraw(requestedKs: Long): Long {
+        if (withdrawPercent <= 0.0 || withdrawMode == "none") return requestedKs
+        val delta = ((requestedKs * withdrawPercent) / 100.0).toLong()
+        return when (withdrawMode) {
+            "fee" -> (requestedKs - delta).coerceAtLeast(0L)
+            "bonus" -> (requestedKs + delta).coerceAtLeast(0L)
+            else -> requestedKs
+        }
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class BoardConfig(
+    val autoSyncDailyMatches: Boolean = false,
+    val autoSyncLiveResults: Boolean = false,
+    val lastSyncedDate: String = "",
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+data class LiveFootballFixture(
+    val externalId: String,
+    val league: String,
+    val homeTeam: String,
+    val awayTeam: String,
+    val kickoffLabel: String,
+    val matchDate: String,
+    val handicapLine: String,
+    val goalLine: String,
+    val bodyOdds: Double,
+    val goalOdds: Double,
+    val status: String, // open, closed, finished
+    val liveClock: String,
+    val homeScore: Long,
+    val awayScore: Long
 )

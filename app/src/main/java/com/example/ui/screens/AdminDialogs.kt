@@ -399,6 +399,9 @@ fun AdjustUserBalanceDialog(
         title = { Text("${user.displayName} လက်ကျန်ငွေ ပြင်ရန်") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (user.email.isNotBlank()) {
+                    Text(user.email, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = isAdd, onClick = { isAdd = true }, label = { Text("+ ထည့်မည်") })
                     FilterChip(selected = !isAdd, onClick = { isAdd = false }, label = { Text("- နှုတ်မည်") })
@@ -432,3 +435,77 @@ fun AdjustUserBalanceDialog(
         }
     )
 }
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun GiftRewardPointsDialog(
+    user: UserAccount,
+    onDismiss: () -> Unit,
+    onGift: (deltaPoints: Long, note: String) -> Unit
+) {
+    var pointsInput by remember { mutableStateOf("100") }
+    var isAdd by remember { mutableStateOf(true) }
+    var note by remember { mutableStateOf("Admin မှ လက်ဆောင်ပွိုင့်") }
+    val parsedPts = pointsInput.toLongOrNull() ?: 0L
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${user.displayName} ထံ ပွိုင့်လက်ဆောင်ပေးရန်") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (user.email.isNotBlank()) {
+                    Text(user.email, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                }
+                Text("လက်ရှိပွိုင့်: ${user.rewardPoints} Pts", style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = isAdd, onClick = { isAdd = true }, label = { Text("+ လက်ဆောင်ပေးမည်") })
+                    FilterChip(selected = !isAdd, onClick = { isAdd = false }, label = { Text("- ပြန်နှုတ်မည်") })
+                }
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(50L, 100L, 500L, 1000L).forEach { preset ->
+                        FilterChip(
+                            selected = parsedPts == preset,
+                            onClick = { pointsInput = preset.toString() },
+                            label = { Text("$preset Pts") }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = pointsInput,
+                    onValueChange = { pointsInput = it.filter { c -> c.isDigit() }.take(7) },
+                    label = { Text("ပွိုင့်ပမာဏ (Pts)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("gift_points_amount_input")
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("လက်ဆောင်မှတ်ချက်") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("gift_points_note_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (parsedPts > 0L) {
+                        onGift(if (isAdd) parsedPts else -parsedPts, note.ifBlank { "Admin လက်ဆောင်ပွိုင့်" })
+                    }
+                },
+                enabled = parsedPts > 0L,
+                modifier = Modifier.testTag("confirm_gift_points_button")
+            ) {
+                Text(if (isAdd) "လက်ဆောင်ပို့မည်" else "ပွိုင့်နှုတ်မည်")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }
+        }
+    )
+}
+

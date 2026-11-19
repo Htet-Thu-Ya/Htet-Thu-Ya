@@ -6,13 +6,17 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.BetOrder
+import com.example.data.model.BoardConfig
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
+import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
+import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
+import com.example.data.network.FootballFeedService
 import com.example.data.repository.HtetThuYaRepository
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
@@ -27,6 +31,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -39,7 +44,8 @@ class MainViewModel(
     val currentUserId: String,
     private val currentUserEmail: String?,
     private val isEmailVerified: Boolean,
-    val displayName: String
+    val displayName: String,
+    private val feedService: FootballFeedService = FootballFeedService()
 ) : ViewModel() {
 
     private val _isAdminMode = MutableStateFlow(false)
@@ -51,17 +57,13 @@ class MainViewModel(
     private val _events = MutableSharedFlow<String>()
     val events: SharedFlow<String> = _events.asSharedFlow()
 
+    private val _liveFeed = MutableStateFlow<UiState<List<LiveFootballFixture>>>(UiState.Loading)
+    val liveFeed: StateFlow<UiState<List<LiveFootballFixture>>> = _liveFeed.asStateFlow()
+
     private val isBootstrappedOwner =
         isEmailVerified && currentUserEmail.equals(HtetThuYaRepository.BOOTSTRAPPED_ADMIN_EMAIL, ignoreCase = true)
 
-    init {
-        viewModelScope.launch {
-            val result = repository.ensureUserInitialized(currentUserId, displayName)
-            result.onFailure { err ->
-                _events.emit(err.localizedMessage ?: "Account setup error")
-            }
-        }
-    }
+    private var autoSyncedSession = false
 
     val adminMember: StateFlow<AdminMember?> = repository.observeAdminMember(currentUserId)
         .catch { error ->
@@ -95,6 +97,22 @@ class MainViewModel(
 
     val leaderboard: StateFlow<UiState<List<LeaderboardEntry>>> = repository.observeLeaderboard(currentUserId)
         .toUiState("Failed to load standings")
+
+    val walletConfig: StateFlow<WalletConfig> = repository.observeWalletConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Wallet config stream error", error)
+            emit(WalletConfig())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), WalletConfig())
+
+    val boardConfig: StateFlow<BoardConfig> = repository.observeBoardConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Board config stream error", error)
+            emit(BoardConfig())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), BoardConfig())
 
     // Admin-only live streams (only attached when user is actually an Admin!)
     val allOrders: StateFlow<UiState<List<BetOrder>>> = isAdmin
@@ -143,6 +161,46 @@ class MainViewModel(
         pendingOrders + pendingReqs
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), 0)
 
+    init {
+        viewModelScope.launch {
+            val result = repository.ensureUserInitialized(
+                userId = currentUserId,
+                rawDisplayName = displayName,
+                rawEmail = currentUserEmail ?: ""
+            )
+            result.onFailure { err ->
+                _events.emit(err.localizedMessage ?: "Account setup error")
+            }
+        }
+        refreshLiveFootballFeed()
+        viewModelScope.launch {
+            combine(isAdmin, boardConfig) { admin, cfg -> admin to cfg }
+                .collect { (admin, cfg) ->
+                    if (admin && !autoSyncedSession) {
+                        autoSyncedSession = true
+                        val today = feedService.todayDateIso()
+                        if (cfg.autoSyncDailyMatches && cfg.lastSyncedDate != today) {
+                            repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cfg)
+                        } else if (cfg.autoSyncLiveResults) {
+                            repository.syncLiveMatchResults(feedService)
+                        }
+                    }
+                }
+        }
+    }
+
+    fun refreshLiveFootballFeed() {
+        viewModelScope.launch {
+            _liveFeed.value = UiState.Loading
+            val res = feedService.fetchFixturesForDays(listOf(-1, 0, 1))
+            res.onSuccess { fixtures ->
+                _liveFeed.value = UiState.Success(fixtures)
+            }.onFailure { err ->
+                _liveFeed.value = UiState.Error(err.localizedMessage ?: "တိုက်ရိုက်ရလဒ် ဆွဲယူမရပါ")
+            }
+        }
+    }
+
     fun setAdminMode(enabled: Boolean) {
         if (enabled && !isAdmin.value) {
             emitMessage("Admin ခွင့်ပြုချက် မရှိသေးပါ")
@@ -166,6 +224,14 @@ class MainViewModel(
         res.map { }
     }
 
+    fun deleteOrder(orderId: String) = runAction("အော်ဒါမှတ်တမ်း ဖျက်ပြီးပါပြီ") {
+        repository.deleteOrder(orderId)
+    }
+
+    fun clearCompletedOrders(orderIds: List<String>) = runAction("ပြီးဆုံးပြီးသား အော်ဒါများ ဖျက်ပြီးပါပြီ") {
+        repository.clearCompletedOrders(orderIds).map { }
+    }
+
     fun submitWalletRequest(
         requestType: String,
         amountKs: Long,
@@ -174,7 +240,7 @@ class MainViewModel(
         onSuccess: () -> Unit = {}
     ) = runAction("တောင်းဆိုမှု ပေးပို့ပြီးပါပြီ") {
         val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
-        val res = repository.submitWalletRequest(name, requestType, amountKs, channel, referenceNote)
+        val res = repository.submitWalletRequest(name, requestType, amountKs, channel, referenceNote, walletConfig.value)
         if (res.isSuccess) onSuccess()
         res
     }
@@ -210,10 +276,84 @@ class MainViewModel(
         repository.rejectOrder(order, note)
     }
 
-    fun processWalletRequest(req: WalletRequest, approve: Boolean, note: String) =
+    fun processWalletRequest(req: WalletRequest, approve: Boolean, adminNote: String) =
         runAction(if (approve) "ငွေစာရင်း အတည်ပြုပြီးပါပြီ" else "တောင်းဆိုမှု ပယ်ဖျက်ပြီးပါပြီ") {
-            repository.processWalletRequest(req, approve, note)
+            repository.processWalletRequest(req, approve, adminNote, walletConfig.value)
         }
+
+    fun saveWalletConfig(
+        depositPercent: Double,
+        depositMode: String,
+        withdrawPercent: Double,
+        withdrawMode: String
+    ) = runAction("ငွေသွင်း / ငွေထုတ် ရာခိုင်နှုန်း သိမ်းဆည်းပြီးပါပြီ") {
+        repository.saveWalletConfig(depositPercent, depositMode, withdrawPercent, withdrawMode)
+    }
+
+    fun toggleAutoSyncDailyMatches(enabled: Boolean) = runAction(
+        if (enabled) "ပွဲရှိသည့်နေ့တိုင်း အလိုအလျောက်ထည့်ခြင်း ဖွင့်ပြီးပါပြီ"
+        else "အလိုအလျောက်ပွဲစဉ်ထည့်ခြင်း ပိတ်ပြီးပါပြီ"
+    ) {
+        val cur = boardConfig.value
+        val res = repository.saveBoardConfig(enabled, cur.autoSyncLiveResults, cur.lastSyncedDate)
+        if (res.isSuccess && enabled) {
+            repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cur.copy(autoSyncDailyMatches = true))
+        }
+        res
+    }
+
+    fun toggleAutoSyncLiveResults(enabled: Boolean) = runAction(
+        if (enabled) "တိုက်ရိုက်ရလဒ် အလိုအလျောက်ချိတ်ဆက်ခြင်း ဖွင့်ပြီးပါပြီ"
+        else "တိုက်ရိုက်ရလဒ် အလိုအလျောက်ချိတ်ဆက်ခြင်း ပိတ်ပြီးပါပြီ"
+    ) {
+        val cur = boardConfig.value
+        val res = repository.saveBoardConfig(cur.autoSyncDailyMatches, enabled, cur.lastSyncedDate)
+        if (res.isSuccess && enabled) {
+            repository.syncLiveMatchResults(feedService)
+        }
+        res
+    }
+
+    fun syncDailyMatchesNow() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), boardConfig.value)
+                res.onSuccess { count ->
+                    if (count > 0) {
+                        _events.emit("ယနေ့/မနက်ဖြန် ဘောလုံးပွဲစဉ် $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                    } else {
+                        _events.emit("ယနေ့အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                    }
+                    refreshLiveFootballFeed()
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "ပွဲစဉ်ဆွဲယူမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun syncLiveMatchResultsNow() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.syncLiveMatchResults(feedService)
+                res.onSuccess { updated ->
+                    _events.emit(
+                        if (updated > 0) "တိုက်ရိုက်/ပွဲပြီး ရလဒ် $updated ပွဲ အပ်ဒိတ်လုပ်ပြီးပါပြီ"
+                        else "တိုက်ရိုက်ရလဒ်များ စစ်ဆေးပြီးပါပြီ (ပြောင်းလဲမှုမရှိသေးပါ)"
+                    )
+                    refreshLiveFootballFeed()
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "တိုက်ရိုက်ရလဒ် ချိတ်ဆက်မှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
 
     fun saveNewMatch(
         league: String,
@@ -313,6 +453,11 @@ class MainViewModel(
     fun adjustUserBalance(targetUid: String, deltaKs: Long, note: String) = runAction("Customer လက်ကျန်ငွေ ပြင်ဆင်ပြီးပါပြီ") {
         repository.adjustUserBalance(targetUid, deltaKs, note)
     }
+
+    fun giftRewardPoints(targetUid: String, targetName: String, deltaPoints: Long, note: String) =
+        runAction("Customer ထံ လက်ဆောင်ပွိုင့် ပေးပို့ပြီးပါပြီ") {
+            repository.giftRewardPoints(targetUid, targetName, deltaPoints, note)
+        }
 
     fun seedSampleBoard() = runAction("နမူနာ ပွဲစဉ်များနှင့် ၃လုံးထီ ထည့်သွင်းပြီးပါပြီ") {
         repository.seedSampleBoard()

@@ -7,6 +7,7 @@
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID" },
         "displayName": { "type": "string", "description": "Display name" },
+        "email": { "type": "string", "description": "Verified Google account email visible to Admin" },
         "balanceKs": { "type": "integer", "description": "Available balance in Ks" },
         "rewardPoints": { "type": "integer", "description": "Reward points" },
         "activeStakeKs": { "type": "integer", "description": "Active pending/accepted order stake in Ks" },
@@ -76,6 +77,9 @@
         "homeScore": { "type": "integer" },
         "awayScore": { "type": "integer" },
         "visibility": { "type": "string", "enum": ["public", "hidden"] },
+        "externalId": { "type": "string" },
+        "matchDate": { "type": "string" },
+        "liveClock": { "type": "string" },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -136,6 +140,9 @@
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "adminNote": { "type": "string" },
         "processedBy": { "type": "string" },
+        "ratePercent": { "type": "number" },
+        "rateMode": { "type": "string", "enum": ["none", "bonus", "fee"] },
+        "netAmountKs": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -147,7 +154,7 @@
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
-        "txType": { "type": "string", "enum": ["topup", "withdraw", "order_stake", "order_win", "order_refund", "point_exchange", "admin_adjust"] },
+        "txType": { "type": "string", "enum": ["topup", "withdraw", "order_stake", "order_win", "order_refund", "point_exchange", "admin_adjust", "point_gift"] },
         "direction": { "type": "string", "enum": ["credit", "debit"] },
         "amountKs": { "type": "integer" },
         "title": { "type": "string" },
@@ -156,12 +163,39 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "txType", "direction", "amountKs", "title", "balanceAfterKs", "createdAt", "updatedAt"]
+    },
+    "WalletConfig": {
+      "title": "WalletConfig",
+      "description": "Admin-configurable deposit and withdrawal percentage rules.",
+      "type": "object",
+      "properties": {
+        "depositPercent": { "type": "number" },
+        "depositMode": { "type": "string", "enum": ["none", "bonus", "fee"] },
+        "withdrawPercent": { "type": "number" },
+        "withdrawMode": { "type": "string", "enum": ["none", "bonus", "fee"] },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["depositPercent", "depositMode", "withdrawPercent", "withdrawMode", "updatedBy", "updatedAt"]
+    },
+    "BoardConfig": {
+      "title": "BoardConfig",
+      "description": "Admin-configurable automatic daily fixtures and live result sync flags.",
+      "type": "object",
+      "properties": {
+        "autoSyncDailyMatches": { "type": "boolean" },
+        "autoSyncLiveResults": { "type": "boolean" },
+        "lastSyncedDate": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["autoSyncDailyMatches", "autoSyncLiveResults", "lastSyncedDate", "updatedBy", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserAccount" },
-      "description": "Private user account balances and points."
+      "description": "Private user account balances, points, and email."
     },
     "/leaderboard/{userId}": {
       "schema": { "$ref": "#/entities/LeaderboardEntry" },
@@ -194,6 +228,14 @@
     "/transactions/{txId}": {
       "schema": { "$ref": "#/entities/LedgerTransaction" },
       "description": "Customer balance ledger history."
+    },
+    "/app_settings/wallet_config": {
+      "schema": { "$ref": "#/entities/WalletConfig" },
+      "description": "Deposit and withdrawal percentage configuration."
+    },
+    "/app_settings/board_config": {
+      "schema": { "$ref": "#/entities/BoardConfig" },
+      "description": "Daily match and live result sync configuration."
     }
   }
 }

@@ -41,6 +41,7 @@ service cloud.firestore {
     function isValidUserAccount(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
              data.balanceKs is int && data.balanceKs >= 0 && data.balanceKs <= 1000000000 &&
              data.rewardPoints is int && data.rewardPoints >= 0 && data.rewardPoints <= 100000000 &&
              data.activeStakeKs is int && data.activeStakeKs >= 0 && data.activeStakeKs <= 1000000000 &&
@@ -90,6 +91,9 @@ service cloud.firestore {
              data.homeScore is int && data.homeScore >= 0 && data.homeScore <= 99 &&
              data.awayScore is int && data.awayScore >= 0 && data.awayScore <= 99 &&
              data.visibility in ['public', 'hidden'] &&
+             (!('externalId' in data) || (data.externalId is string && data.externalId.size() <= 80)) &&
+             (!('matchDate' in data) || (data.matchDate is string && data.matchDate.size() <= 20)) &&
+             (!('liveClock' in data) || (data.liveClock is string && data.liveClock.size() <= 24)) &&
              data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -137,18 +141,42 @@ service cloud.firestore {
              data.status in ['pending', 'approved', 'rejected'] &&
              data.adminNote is string && data.adminNote.size() <= 200 &&
              data.processedBy is string && data.processedBy.size() <= 128 &&
+             (!('ratePercent' in data) || (data.ratePercent is number && data.ratePercent >= 0.0 && data.ratePercent <= 100.0)) &&
+             (!('rateMode' in data) || data.rateMode in ['none', 'bonus', 'fee']) &&
+             (!('netAmountKs' in data) || (data.netAmountKs is int && data.netAmountKs >= 0 && data.netAmountKs <= 100000000)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
     function isValidTransaction(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
-             data.txType in ['topup', 'withdraw', 'order_stake', 'order_win', 'order_refund', 'point_exchange', 'admin_adjust'] &&
+             data.txType in ['topup', 'withdraw', 'order_stake', 'order_win', 'order_refund', 'point_exchange', 'admin_adjust', 'point_gift'] &&
              data.direction in ['credit', 'debit'] &&
              data.amountKs is int && data.amountKs >= 0 && data.amountKs <= 100000000 &&
              data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
              data.balanceAfterKs is int && data.balanceAfterKs >= 0 && data.balanceAfterKs <= 1000000000 &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidWalletConfig(data) {
+      return data.keys().hasAll(['depositPercent', 'depositMode', 'withdrawPercent', 'withdrawMode', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['depositPercent', 'depositMode', 'withdrawPercent', 'withdrawMode', 'updatedBy', 'updatedAt']) &&
+             data.depositPercent is number && data.depositPercent >= 0.0 && data.depositPercent <= 100.0 &&
+             data.depositMode in ['none', 'bonus', 'fee'] &&
+             data.withdrawPercent is number && data.withdrawPercent >= 0.0 && data.withdrawPercent <= 100.0 &&
+             data.withdrawMode in ['none', 'bonus', 'fee'] &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidBoardConfig(data) {
+      return data.keys().hasAll(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'updatedBy', 'updatedAt']) &&
+             data.autoSyncDailyMatches is bool &&
+             data.autoSyncLiveResults is bool &&
+             data.lastSyncedDate is string && data.lastSyncedDate.size() <= 20 &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
@@ -162,7 +190,7 @@ service cloud.firestore {
                        request.auth.uid == userId &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'displayName', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
                        incoming().balanceKs == 0 &&
                        incoming().rewardPoints == 0 &&
                        incoming().activeStakeKs == 0 &&
@@ -174,11 +202,11 @@ service cloud.firestore {
                        isValidUserAccount(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt && (
-                         // Tier 1: Admin adjustment / settlement
+                         // Tier 1: Admin adjustment / settlement / gift points
                          isAdmin() ||
-                         // Tier 2a: Owner profile rename
+                         // Tier 2a: Owner profile rename / email sync
                          (request.auth.uid == userId &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])) ||
+                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'updatedAt'])) ||
                          // Tier 2b: Owner placing an order (moves balanceKs -> activeStakeKs with strict conservation)
                          (request.auth.uid == userId &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'activeStakeKs', 'updatedAt']) &&
@@ -278,7 +306,7 @@ service cloud.firestore {
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().keys().hasAll(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'liveClock', 'createdBy', 'createdAt', 'updatedAt']);
       allow update: if isAdmin() &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
@@ -323,7 +351,10 @@ service cloud.firestore {
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'actualPayoutKs', 'adminNote', 'settledBy', 'updatedAt']);
-      allow delete: if false;
+      allow delete: if isSignedIn() &&
+                       isValidId(orderId) &&
+                       existing().status in ['won', 'lost', 'rejected'] &&
+                       (existing().userId == request.auth.uid || isAdmin());
     }
 
     match /wallet_requests/{requestId} {
@@ -337,7 +368,7 @@ service cloud.firestore {
                        incoming().processedBy == '' &&
                        incoming().adminNote == '' &&
                        incoming().keys().hasAll(['userId', 'customerName', 'requestType', 'amountKs', 'channel', 'referenceNote', 'status', 'adminNote', 'processedBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'customerName', 'requestType', 'amountKs', 'channel', 'referenceNote', 'status', 'adminNote', 'processedBy', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['userId', 'customerName', 'requestType', 'amountKs', 'channel', 'referenceNote', 'status', 'adminNote', 'processedBy', 'ratePercent', 'rateMode', 'netAmountKs', 'createdAt', 'updatedAt']);
       allow update: if isSignedIn() &&
                        isValidId(requestId) &&
                        isValidWalletRequest(incoming()) &&
@@ -345,7 +376,7 @@ service cloud.firestore {
                        existing().status == 'pending' &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'processedBy', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'processedBy', 'netAmountKs', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(requestId) && existing().status in ['approved', 'rejected'];
     }
 
@@ -362,6 +393,16 @@ service cloud.firestore {
                           incoming().txType in ['order_stake', 'point_exchange', 'withdraw'])
                        );
       allow update, delete: if false;
+    }
+
+    match /app_settings/{settingId} {
+      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config'];
+      allow list: if isSignedIn();
+      allow create, update: if isAdmin() && (
+                              (settingId == 'wallet_config' && isValidWalletConfig(incoming())) ||
+                              (settingId == 'board_config' && isValidBoardConfig(incoming()))
+                            );
+      allow delete: if false;
     }
   }
 }

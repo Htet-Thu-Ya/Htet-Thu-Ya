@@ -7,12 +7,16 @@ import com.example.data.firebase.handleFirestoreError
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.BetOrder
+import com.example.data.model.BoardConfig
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
+import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UserAccount
+import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
+import com.example.data.network.FootballFeedService
 import com.google.firebase.Firebase
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
@@ -66,12 +70,17 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun ensureUserInitialized(userId: String, rawDisplayName: String): Result<Unit> {
+    suspend fun ensureUserInitialized(
+        userId: String,
+        rawDisplayName: String,
+        rawEmail: String = ""
+    ): Result<Unit> {
         val userPath = "users/$userId"
         return try {
             val uid = requireUserId()
             check(uid == userId) { "Signed-in user mismatch" }
             val safeName = rawDisplayName.trim().ifBlank { "Member" }.take(60)
+            val safeEmail = rawEmail.trim().take(120)
             val userRef = db.collection("users").document(uid)
             val lbRef = db.collection("leaderboard").document(uid)
             val userSnap = userRef.get().await()
@@ -82,6 +91,7 @@ class HtetThuYaRepository(
                     mapOf(
                         "userId" to uid,
                         "displayName" to safeName,
+                        "email" to safeEmail,
                         "balanceKs" to 0L,
                         "rewardPoints" to 0L,
                         "activeStakeKs" to 0L,
@@ -103,6 +113,15 @@ class HtetThuYaRepository(
                 )
                 batch.commit().await()
             } else {
+                val existingEmail = userSnap.getString("email").orEmpty()
+                if (safeEmail.isNotBlank() && existingEmail != safeEmail) {
+                    userRef.update(
+                        mapOf(
+                            "email" to safeEmail,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
                 val lbSnap = lbRef.get().await()
                 if (!lbSnap.exists()) {
                     val pts = userSnap.getLong("rewardPoints") ?: 0L
@@ -270,6 +289,36 @@ class HtetThuYaRepository(
         )
     }
 
+    fun observeWalletConfig(userId: String): Flow<WalletConfig> = flow {
+        val path = "app_settings/wallet_config"
+        emitAll(
+            db.collection("app_settings").document("wallet_config")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(WalletConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                            ?: WalletConfig()
+                    } else WalletConfig()
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeBoardConfig(userId: String): Flow<BoardConfig> = flow {
+        val path = "app_settings/board_config"
+        emitAll(
+            db.collection("app_settings").document("board_config")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(BoardConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                            ?: BoardConfig()
+                    } else BoardConfig()
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
     // --- ADMIN STREAMS ---
     fun observeAllOrders(userId: String): Flow<List<BetOrder>> = flow {
         emitAll(
@@ -301,7 +350,7 @@ class HtetThuYaRepository(
                 .snapshots()
                 .map { snap ->
                     snap.toObjects(UserAccount::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                        .sortedByDescending { it.balanceKs }
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
                 }
                 .wrapFirestoreCatch(OperationType.LIST, "users", userId)
         )
@@ -429,7 +478,8 @@ class HtetThuYaRepository(
         requestType: String,
         amountKs: Long,
         channel: String,
-        referenceNote: String
+        referenceNote: String,
+        walletConfig: WalletConfig = WalletConfig()
     ): Result<Unit> {
         val reqId = "wr_${UUID.randomUUID().toString().replace("-", "").take(16)}"
         val reqPath = "wallet_requests/$reqId"
@@ -443,6 +493,10 @@ class HtetThuYaRepository(
             require(safeRef.isNotBlank()) { "အထောက်အထား / ဖုန်းနံပါတ် ထည့်သွင်းပါ" }
             val safeName = customerName.trim().ifBlank { "Member" }.take(60)
 
+            val ratePercent = if (requestType == "topup") walletConfig.depositPercent else walletConfig.withdrawPercent
+            val rateMode = if (ratePercent <= 0.0) "none" else if (requestType == "topup") walletConfig.depositMode else walletConfig.withdrawMode
+            val netAmountKs = if (requestType == "topup") walletConfig.computeNetTopup(amountKs) else walletConfig.computeNetWithdraw(amountKs)
+
             val reqRef = db.collection("wallet_requests").document(reqId)
             val payload = mapOf(
                 "userId" to uid,
@@ -454,6 +508,9 @@ class HtetThuYaRepository(
                 "status" to "pending",
                 "adminNote" to "",
                 "processedBy" to "",
+                "ratePercent" to ratePercent.coerceIn(0.0, 100.0),
+                "rateMode" to if (rateMode in listOf("none", "bonus", "fee")) rateMode else "none",
+                "netAmountKs" to netAmountKs.coerceIn(0L, 100_000_000L),
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -483,7 +540,7 @@ class HtetThuYaRepository(
                             "txType" to "withdraw",
                             "direction" to "debit",
                             "amountKs" to amountKs,
-                            "title" to "ငွေထုတ်တောင်းဆိုခြင်း ($safeChannel)",
+                            "title" to "ငွေထုတ်တောင်းဆိုခြင်း ($safeChannel • ရမည့်ငွေ ${netAmountKs} Ks)",
                             "balanceAfterKs" to newBalance,
                             "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp()
@@ -498,6 +555,43 @@ class HtetThuYaRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, reqPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteOrder(orderId: String): Result<Unit> {
+        val path = "orders/$orderId"
+        return try {
+            requireUserId()
+            require(orderId.isNotBlank() && ID_REGEX.matches(orderId)) { "Invalid order ID" }
+            db.collection("orders").document(orderId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun clearCompletedOrders(orderIds: List<String>): Result<Int> {
+        val path = "orders"
+        return try {
+            requireUserId()
+            val validIds = orderIds.filter { it.isNotBlank() && ID_REGEX.matches(it) }
+            if (validIds.isEmpty()) return Result.success(0)
+            validIds.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { id ->
+                    batch.delete(db.collection("orders").document(id))
+                }
+                batch.commit().await()
+            }
+            Result.success(validIds.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }
@@ -810,7 +904,12 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun processWalletRequest(req: WalletRequest, approve: Boolean, adminNote: String): Result<Unit> {
+    suspend fun processWalletRequest(
+        req: WalletRequest,
+        approve: Boolean,
+        adminNote: String,
+        walletConfig: WalletConfig = WalletConfig()
+    ): Result<Unit> {
         val path = "wallet_requests/${req.id}"
         return try {
             val adminUid = requireUserId()
@@ -820,6 +919,12 @@ class HtetThuYaRepository(
             val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
             val nextStatus = if (approve) "approved" else "rejected"
 
+            val authoritativeNetKs = if (req.requestType == "topup") {
+                walletConfig.computeNetTopup(req.amountKs)
+            } else {
+                walletConfig.computeNetWithdraw(req.amountKs)
+            }
+
             db.runTransaction { tx ->
                 val userSnap = tx.get(userRef)
                 val curBalance = userSnap.getLong("balanceKs") ?: 0L
@@ -828,6 +933,7 @@ class HtetThuYaRepository(
                     reqRef,
                     mapOf(
                         "status" to nextStatus,
+                        "netAmountKs" to authoritativeNetKs.coerceIn(0L, 100_000_000L),
                         "adminNote" to adminNote.trim().ifBlank { if (approve) "အတည်ပြုပြီး" else "ပယ်ဖျက်ပြီး" }.take(200),
                         "processedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -835,7 +941,12 @@ class HtetThuYaRepository(
                 )
 
                 if (req.requestType == "topup" && approve) {
-                    val newBalance = curBalance + req.amountKs
+                    val creditKs = authoritativeNetKs
+                    val newBalance = curBalance + creditKs
+                    val rateText = if (walletConfig.depositPercent > 0.0 && walletConfig.depositMode != "none") {
+                        val sign = if (walletConfig.depositMode == "bonus") "+" else "-"
+                        " ($sign${walletConfig.depositPercent}%)"
+                    } else ""
                     tx.update(
                         userRef,
                         mapOf(
@@ -849,8 +960,8 @@ class HtetThuYaRepository(
                             "userId" to req.userId,
                             "txType" to "topup",
                             "direction" to "credit",
-                            "amountKs" to req.amountKs,
-                            "title" to "ငွေသွင်းအတည်ပြုပြီး (${req.channel})",
+                            "amountKs" to creditKs,
+                            "title" to "ငွေသွင်းအတည်ပြုပြီး (${req.channel}$rateText)",
                             "balanceAfterKs" to newBalance,
                             "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp()
@@ -1201,6 +1312,281 @@ class HtetThuYaRepository(
                 )
             }.await()
             Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun giftRewardPoints(
+        targetUid: String,
+        displayName: String,
+        deltaPoints: Long,
+        note: String
+    ): Result<Unit> {
+        val path = "users/$targetUid"
+        return try {
+            requireUserId()
+            require(targetUid.isNotBlank() && ID_REGEX.matches(targetUid)) { "Invalid target user ID" }
+            require(deltaPoints != 0L) { "ပွိုင့်ပမာဏ ထည့်သွင်းပါ" }
+            val userRef = db.collection("users").document(targetUid)
+            val lbRef = db.collection("leaderboard").document(targetUid)
+            val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
+            db.runTransaction { tx ->
+                val snap = tx.get(userRef)
+                val lbSnap = tx.get(lbRef)
+                val curPts = snap.getLong("rewardPoints") ?: 0L
+                val curBalance = snap.getLong("balanceKs") ?: 0L
+                val curWon = snap.getLong("totalWonKs") ?: 0L
+                val nextPts = (curPts + deltaPoints).coerceIn(0L, 100_000_000L)
+                tx.update(
+                    userRef,
+                    mapOf(
+                        "rewardPoints" to nextPts,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                if (lbSnap.exists()) {
+                    tx.update(
+                        lbRef,
+                        mapOf(
+                            "rewardPoints" to nextPts,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                } else {
+                    tx.set(
+                        lbRef,
+                        mapOf(
+                            "userId" to targetUid,
+                            "displayName" to displayName.ifBlank { "Member" }.take(60),
+                            "rewardPoints" to nextPts,
+                            "totalWonKs" to curWon,
+                            "visibility" to "public",
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                val sign = if (deltaPoints >= 0) "+" else ""
+                val cleanNote = note.trim().ifBlank { "Admin လက်ဆောင်ပွိုင့်" }
+                tx.set(
+                    txRef,
+                    mapOf(
+                        "userId" to targetUid,
+                        "txType" to "point_gift",
+                        "direction" to if (deltaPoints >= 0) "credit" else "debit",
+                        "amountKs" to 0L,
+                        "title" to "$cleanNote ($sign$deltaPoints Pts)".take(120),
+                        "balanceAfterKs" to curBalance,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveWalletConfig(
+        depositPercent: Double,
+        depositMode: String,
+        withdrawPercent: Double,
+        withdrawMode: String
+    ): Result<Unit> {
+        val path = "app_settings/wallet_config"
+        return try {
+            val adminUid = requireUserId()
+            require(depositMode in listOf("none", "bonus", "fee"))
+            require(withdrawMode in listOf("none", "bonus", "fee"))
+            db.collection("app_settings").document("wallet_config").set(
+                mapOf(
+                    "depositPercent" to depositPercent.coerceIn(0.0, 100.0),
+                    "depositMode" to depositMode,
+                    "withdrawPercent" to withdrawPercent.coerceIn(0.0, 100.0),
+                    "withdrawMode" to withdrawMode,
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveBoardConfig(
+        autoSyncDailyMatches: Boolean,
+        autoSyncLiveResults: Boolean,
+        lastSyncedDate: String
+    ): Result<Unit> {
+        val path = "app_settings/board_config"
+        return try {
+            val adminUid = requireUserId()
+            db.collection("app_settings").document("board_config").set(
+                mapOf(
+                    "autoSyncDailyMatches" to autoSyncDailyMatches,
+                    "autoSyncLiveResults" to autoSyncLiveResults,
+                    "lastSyncedDate" to lastSyncedDate.take(20),
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun syncDailyMatchesFromFeed(
+        feedService: FootballFeedService,
+        dayOffsets: List<Int> = listOf(0, 1),
+        currentConfig: BoardConfig? = null
+    ): Result<Int> {
+        val path = "matches/daily_sync"
+        return try {
+            val adminUid = requireUserId()
+            val feedResult = feedService.fetchFixturesForDays(dayOffsets)
+            val fixtures = feedResult.getOrElse { throw it }
+            if (fixtures.isEmpty()) {
+                return Result.success(0)
+            }
+            val existingSnap = db.collection("matches").get().await()
+            val existingById = existingSnap.documents.associateBy { it.id }
+
+            var syncedCount = 0
+            fixtures.chunked(200).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { fix ->
+                    val docId = "ext_${fix.externalId}".replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(80)
+                    val docRef = db.collection("matches").document(docId)
+                    val prev = existingById[docId]
+                    if (prev == null || !prev.exists()) {
+                        batch.set(
+                            docRef,
+                            mapOf(
+                                "league" to fix.league,
+                                "homeTeam" to fix.homeTeam,
+                                "awayTeam" to fix.awayTeam,
+                                "kickoffLabel" to fix.kickoffLabel,
+                                "handicapLine" to fix.handicapLine,
+                                "goalLine" to fix.goalLine,
+                                "bodyOdds" to fix.bodyOdds,
+                                "goalOdds" to fix.goalOdds,
+                                "status" to fix.status,
+                                "homeScore" to fix.homeScore,
+                                "awayScore" to fix.awayScore,
+                                "visibility" to "public",
+                                "externalId" to fix.externalId,
+                                "matchDate" to fix.matchDate,
+                                "liveClock" to fix.liveClock,
+                                "createdBy" to adminUid,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                        syncedCount++
+                    } else {
+                        batch.update(
+                            docRef,
+                            mapOf(
+                                "kickoffLabel" to fix.kickoffLabel,
+                                "status" to fix.status,
+                                "homeScore" to fix.homeScore,
+                                "awayScore" to fix.awayScore,
+                                "liveClock" to fix.liveClock,
+                                "matchDate" to fix.matchDate,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                        syncedCount++
+                    }
+                }
+                batch.commit().await()
+            }
+
+            if (currentConfig != null) {
+                db.collection("app_settings").document("board_config").set(
+                    mapOf(
+                        "autoSyncDailyMatches" to currentConfig.autoSyncDailyMatches,
+                        "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
+                        "lastSyncedDate" to feedService.todayDateIso(),
+                        "updatedBy" to adminUid,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(syncedCount)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun syncLiveMatchResults(feedService: FootballFeedService): Result<Int> {
+        val path = "matches/live_sync"
+        return try {
+            requireUserId()
+            val fixtures = feedService.fetchFixturesForDays(listOf(-1, 0, 1)).getOrElse { throw it }
+            if (fixtures.isEmpty()) return Result.success(0)
+
+            val byExternalId = fixtures.associateBy { it.externalId }
+            val byNormalizedTeams = fixtures.associateBy {
+                "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}"
+            }
+
+            val existingMatches = db.collection("matches").get().await()
+                .toObjects(SportMatch::class.java)
+
+            val updates = mutableListOf<Pair<String, LiveFootballFixture>>()
+            existingMatches.forEach { m ->
+                val matched = byExternalId[m.externalId]
+                    ?: byNormalizedTeams["${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}"]
+                if (matched != null) {
+                    val changed = m.homeScore != matched.homeScore ||
+                        m.awayScore != matched.awayScore ||
+                        m.status != matched.status ||
+                        m.liveClock != matched.liveClock ||
+                        m.kickoffLabel != matched.kickoffLabel
+                    if (changed) {
+                        updates.add(m.id to matched)
+                    }
+                }
+            }
+
+            updates.chunked(200).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { (docId, fix) ->
+                    batch.update(
+                        db.collection("matches").document(docId),
+                        mapOf(
+                            "status" to fix.status,
+                            "homeScore" to fix.homeScore,
+                            "awayScore" to fix.awayScore,
+                            "liveClock" to fix.liveClock,
+                            "kickoffLabel" to fix.kickoffLabel,
+                            "externalId" to fix.externalId,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                batch.commit().await()
+            }
+            Result.success(updates.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

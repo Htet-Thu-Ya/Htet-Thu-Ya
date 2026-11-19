@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.AlertDialog
@@ -186,8 +187,10 @@ fun OrderSlipCard(
     onAccept: ((BetOrder) -> Unit)? = null,
     onSettleWin: ((BetOrder) -> Unit)? = null,
     onSettleLoss: ((BetOrder) -> Unit)? = null,
-    onReject: ((BetOrder) -> Unit)? = null
+    onReject: ((BetOrder) -> Unit)? = null,
+    onDeleteOrder: ((BetOrder) -> Unit)? = null
 ) {
+    val isCompleted = order.status in listOf("won", "lost", "rejected")
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -202,7 +205,7 @@ fun OrderSlipCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Surface(
                         color = DeepPitchSurface,
                         shape = RoundedCornerShape(8.dp)
@@ -220,11 +223,27 @@ fun OrderSlipCard(
                             text = order.customerName,
                             color = InkDark,
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                StatusBadge(order.status)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    StatusBadge(order.status)
+                    if (isCompleted && onDeleteOrder != null) {
+                        IconButton(
+                            onClick = { onDeleteOrder(order) },
+                            modifier = Modifier.testTag("delete_order_${order.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete Completed Order",
+                                tint = AdminCrimson
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(8.dp))

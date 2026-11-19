@@ -211,7 +211,7 @@ fun AuthScreen(
                     Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "Google ဖြင့် ဝင်ရောက်မည်",
+                        text = "Login",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )

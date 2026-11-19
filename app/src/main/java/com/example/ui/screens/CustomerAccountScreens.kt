@@ -24,8 +24,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -33,7 +36,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -57,10 +62,12 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.BetOrder
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
+import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
+import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
 import com.example.ui.components.OrderSlipCard
 import com.example.ui.components.StatusBadge
@@ -83,9 +90,14 @@ import com.example.ui.theme.PitchEmeraldDark
 fun OrdersHistoryScreen(
     activeOnly: Boolean,
     ordersState: UiState<List<BetOrder>>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onDeleteOrder: (String) -> Unit = {},
+    onClearCompletedOrders: (List<String>) -> Unit = {}
 ) {
-    val title = if (activeOnly) "လောင်းထားသောပွဲစဉ်များ" else "ပွဲစဉ်ဟောင်းများ"
+    val title = if (activeOnly) "လောင်းထားသောပွဲစဉ်များ" else "ပွဲစဉ်ဟောင်းများ (ပြီးဆုံး)"
+    var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+
     Scaffold(
         containerColor = DeepPitchBg,
         topBar = { SubScreenTopBar(title = title, onBack = onBack) }
@@ -126,9 +138,52 @@ fun OrdersHistoryScreen(
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(filtered, key = { it.id }) { order ->
-                                OrderSlipCard(order = order, isAdminView = false)
+                            if (!activeOnly && filtered.isNotEmpty()) {
+                                item {
+                                    OutlinedButton(
+                                        onClick = { showClearAllConfirm = true },
+                                        border = BorderStroke(1.dp, AdminCrimson.copy(alpha = 0.7f)),
+                                        modifier = Modifier.fillMaxWidth().testTag("customer_clear_completed_orders_button")
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("ပြီးဆုံးပြီးသား အော်ဒါအားလုံး ဖျက်မည် (${filtered.size})", color = AdminCrimson)
+                                    }
+                                }
                             }
+                            items(filtered, key = { it.id }) { order ->
+                                OrderSlipCard(
+                                    order = order,
+                                    isAdminView = false,
+                                    onDeleteOrder = if (!activeOnly) { target -> deletingOrder = target } else null
+                                )
+                            }
+                        }
+
+                        deletingOrder?.let { target ->
+                            ConfirmDeleteDialog(
+                                title = "ပြီးဆုံးအော်ဒါ ဖျက်မည်လား?",
+                                message = "${target.drawRound.ifBlank { "အော်ဒါ" }} (${formatKs(target.stakeKs)}) မှတ်တမ်းကို ဖျက်ပစ်ပါမည်။",
+                                onDismiss = { deletingOrder = null },
+                                onConfirm = {
+                                    val id = target.id
+                                    deletingOrder = null
+                                    onDeleteOrder(id)
+                                }
+                            )
+                        }
+
+                        if (showClearAllConfirm) {
+                            val ids = filtered.map { it.id }
+                            ConfirmDeleteDialog(
+                                title = "ပြီးဆုံးပြီးသား အားလုံးဖျက်မည်လား?",
+                                message = "ပြီးဆုံးပြီးသော အော်ဒါမှတ်တမ်း ${ids.size} ခုလုံးကို ဖျက်ပစ်ပါမည်။",
+                                onDismiss = { showClearAllConfirm = false },
+                                onConfirm = {
+                                    showClearAllConfirm = false
+                                    onClearCompletedOrders(ids)
+                                }
+                            )
                         }
                     }
                 }
@@ -143,6 +198,7 @@ fun WalletLedgerScreen(
     accountState: UiState<UserAccount?>,
     requestsState: UiState<List<WalletRequest>>,
     transactionsState: UiState<List<LedgerTransaction>>,
+    walletConfig: WalletConfig,
     busy: Boolean,
     onBack: () -> Unit,
     onSubmitWalletRequest: (requestType: String, amountKs: Long, channel: String, referenceNote: String) -> Unit
@@ -157,6 +213,10 @@ fun WalletLedgerScreen(
     val parsedAmt = amountInput.toLongOrNull() ?: 0L
     val canSubmit = !busy && parsedAmt >= 500L && refNote.trim().isNotEmpty() &&
         (reqType == "topup" || parsedAmt <= balanceKs)
+
+    val activePercent = if (reqType == "topup") walletConfig.depositPercent else walletConfig.withdrawPercent
+    val activeMode = if (reqType == "topup") walletConfig.depositMode else walletConfig.withdrawMode
+    val netPreviewKs = if (reqType == "topup") walletConfig.computeNetTopup(parsedAmt) else walletConfig.computeNetWithdraw(parsedAmt)
 
     Scaffold(
         containerColor = DeepPitchBg,
@@ -236,6 +296,23 @@ fun WalletLedgerScreen(
                                     ),
                                     modifier = Modifier.fillMaxWidth().testTag("wallet_amount_input")
                                 )
+                                if (activePercent > 0.0 && activeMode != "none" && parsedAmt > 0L) {
+                                    Spacer(Modifier.height(8.dp))
+                                    val modeText = if (activeMode == "bonus") "အပိုဆု +${activePercent}%" else "ဝန်ဆောင်ခ -${activePercent}%"
+                                    Surface(
+                                        color = Color(0xFFE6F4EE),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "$modeText → အမှန်တကယ် ရရှိမည့်ငွေ: ${formatKs(netPreviewKs)}",
+                                            color = PitchEmeraldDark,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(10.dp)
+                                        )
+                                    }
+                                }
                                 Spacer(Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = refNote,
@@ -295,6 +372,14 @@ fun WalletLedgerScreen(
                                             color = InkMuted,
                                             style = MaterialTheme.typography.bodyMedium
                                         )
+                                        if (req.netAmountKs > 0L && req.netAmountKs != req.amountKs) {
+                                            Text(
+                                                text = "နှုန်း (${if (req.rateMode == "bonus") "+" else "-"}${req.ratePercent}%) → အသားတင်: ${formatKs(req.netAmountKs)}",
+                                                color = PitchEmeraldDark,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                         if (req.adminNote.isNotBlank()) {
                                             Text("Admin: ${req.adminNote}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                                         }
@@ -335,12 +420,24 @@ fun WalletLedgerScreen(
                                             style = MaterialTheme.typography.bodyMedium
                                         )
                                     }
-                                    Text(
-                                        text = "${if (tx.direction == "credit") "+" else "-"}${formatKs(tx.amountKs)}",
-                                        color = if (tx.direction == "credit") PitchEmeraldDark else AdminCrimson,
-                                        fontFamily = JetBrainsMonoFontFamily,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    if (tx.txType == "point_gift") {
+                                        Surface(color = ChampionshipGold.copy(alpha = 0.25f), shape = RoundedCornerShape(8.dp)) {
+                                            Text(
+                                                text = "Gift Pts",
+                                                color = InkDark,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "${if (tx.direction == "credit") "+" else "-"}${formatKs(tx.amountKs)}",
+                                            color = if (tx.direction == "credit") PitchEmeraldDark else AdminCrimson,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -355,14 +452,21 @@ fun WalletLedgerScreen(
 fun ResultsScreen(
     matchesState: UiState<List<SportMatch>>,
     drawsState: UiState<List<LotteryDraw>>,
+    liveFeedState: UiState<List<LiveFootballFixture>>,
+    onRefreshLiveFeed: () -> Unit,
     onBack: () -> Unit
 ) {
-    val finishedMatches = (matchesState as? UiState.Success)?.data?.filter { it.status == "finished" } ?: emptyList()
+    val liveOrFinishedMatches = (matchesState as? UiState.Success)?.data?.filter {
+        it.status == "finished" || (it.status == "closed" && it.liveClock.isNotBlank())
+    } ?: emptyList()
     val finishedDraws = (drawsState as? UiState.Success)?.data?.filter { it.status == "finished" } ?: emptyList()
+    val liveFeed = (liveFeedState as? UiState.Success)?.data?.filter {
+        it.status == "closed" || it.status == "finished"
+    } ?: emptyList()
 
     Scaffold(
         containerColor = DeepPitchBg,
-        topBar = { SubScreenTopBar(title = "ပွဲပြီး ရလဒ်များ", onBack = onBack) }
+        topBar = { SubScreenTopBar(title = "တိုက်ရိုက် & ပွဲပြီး ရလဒ်များ", onBack = onBack) }
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -371,12 +475,26 @@ fun ResultsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text(
-                    "၃လုံးထီ ရလဒ်များ",
-                    color = ChampionshipGold,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "၃လုံးထီ ရလဒ်များ",
+                        color = ChampionshipGold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    OutlinedButton(
+                        onClick = onRefreshLiveFeed,
+                        border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.6f)),
+                        modifier = Modifier.testTag("refresh_live_results_button")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh Live Scores", tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("တိုက်ရိုက်ပြန်စစ်", color = ChampionshipGold, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             }
             if (finishedDraws.isEmpty()) {
                 item {
@@ -414,31 +532,50 @@ fun ResultsScreen(
             item {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "ဘောလုံး ပွဲပြီး ရလဒ်များ",
+                    "App ပွဲစဉ် ရလဒ်များ",
                     color = ChampionshipGold,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp)
                 )
             }
-            if (finishedMatches.isEmpty()) {
+            if (liveOrFinishedMatches.isEmpty()) {
                 item {
-                    Text("ပြီးဆုံးပြီးသော ပွဲစဉ် မရှိသေးပါ", color = Color(0xFFB4C8BE))
+                    Text("ပြီးဆုံး/တိုက်ရိုက် App ပွဲစဉ် မရှိသေးပါ", color = Color(0xFFB4C8BE))
                 }
             } else {
-                items(finishedMatches, key = { it.id }) { m ->
+                items(liveOrFinishedMatches, key = { it.id }) { m ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = PearlCard),
                         modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp)
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            Text(m.league, color = PitchEmeraldDark, style = MaterialTheme.typography.labelLarge)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(m.league, color = PitchEmeraldDark, style = MaterialTheme.typography.labelLarge)
+                                val badgeLabel = if (m.status == "closed" && m.liveClock.isNotBlank()) m.liveClock else "FT"
+                                Surface(
+                                    color = if (m.status == "closed") AdminCrimson else Color(0xFFE2E8F0),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = badgeLabel,
+                                        color = if (m.status == "closed") Color.White else InkDark,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("${m.homeTeam} vs ${m.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold)
+                                Text("${m.homeTeam} vs ${m.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                                 Text(
                                     "${m.homeScore} - ${m.awayScore}",
                                     color = InkDark,
@@ -446,6 +583,81 @@ fun ResultsScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.LiveTv, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "တိုက်ရိုက် ဘောလုံးရလဒ်များ (Live Feed)",
+                        color = ChampionshipGold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+            when (liveFeedState) {
+                is UiState.Loading -> item {
+                    CircularProgressIndicator(color = ChampionshipGold, modifier = Modifier.padding(12.dp))
+                }
+                is UiState.Error -> item {
+                    Text(liveFeedState.message, color = Color(0xFFFCA5A5))
+                }
+                is UiState.Success -> {
+                    if (liveFeed.isEmpty()) {
+                        item {
+                            Text("လက်ရှိ ကစားနေဆဲ / ပြီးဆုံး နိုင်ငံတကာပွဲစဉ် မရှိသေးပါ", color = Color(0xFFB4C8BE))
+                        }
+                    } else {
+                        items(liveFeed, key = { it.externalId }) { fx ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = PearlCard),
+                                modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("${fx.league} • ${fx.matchDate}", color = PitchEmeraldDark, style = MaterialTheme.typography.labelLarge)
+                                        Surface(
+                                            color = if (fx.status == "closed") AdminCrimson else Color(0xFFE2E8F0),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = fx.liveClock.ifBlank { if (fx.status == "finished") "FT" else "LIVE" },
+                                                color = if (fx.status == "closed") Color.White else InkDark,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("${fx.homeTeam} vs ${fx.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        Text(
+                                            "${fx.homeScore} - ${fx.awayScore}",
+                                            color = InkDark,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
