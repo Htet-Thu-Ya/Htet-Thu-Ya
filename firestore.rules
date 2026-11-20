@@ -32,9 +32,44 @@ service cloud.firestore {
              request.auth.token.email == 'onimusha.033310@gmail.com';
     }
 
+    function hasAdminDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function isActiveAdmin() {
+      return isBootstrappedAdmin() || (
+        hasAdminDoc() && adminDoc().get('status', 'active') == 'active'
+      );
+    }
+
+    function isOwnerAdmin() {
+      return isBootstrappedAdmin() || (
+        hasAdminDoc() &&
+        adminDoc().role == 'owner' &&
+        adminDoc().get('status', 'active') == 'active'
+      );
+    }
+
+    function hasAdminPerm(permKey) {
+      return isOwnerAdmin() || (
+        isActiveAdmin() &&
+        'permissions' in adminDoc() &&
+        adminDoc().permissions.get(permKey, false) == true
+      );
+    }
+
+    // Backwards-compatible alias for active admin
     function isAdmin() {
-      return isBootstrappedAdmin() ||
-             (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      return isActiveAdmin();
+    }
+
+    function isUserNotLocked(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)) ||
+             get(/databases/$(database)/documents/users/$(uid)).data.get('isLocked', false) == false;
     }
 
     // --- VALIDATION HELPERS ---
@@ -46,6 +81,12 @@ service cloud.firestore {
              data.rewardPoints is int && data.rewardPoints >= 0 && data.rewardPoints <= 100000000 &&
              data.activeStakeKs is int && data.activeStakeKs >= 0 && data.activeStakeKs <= 1000000000 &&
              data.totalWonKs is int && data.totalWonKs >= 0 && data.totalWonKs <= 1000000000 &&
+             (!('isOnline' in data) || data.isOnline is bool) &&
+             (!('lastSeenAt' in data) || (data.lastSeenAt is timestamp && data.lastSeenAt <= request.time)) &&
+             (!('isLocked' in data) || data.isLocked is bool) &&
+             (!('forceLogoutAtMs' in data) || (data.forceLogoutAtMs is int && data.forceLogoutAtMs >= 0)) &&
+             (!('securityPinHash' in data) || (data.securityPinHash is string && data.securityPinHash.size() <= 128)) &&
+             (!('lastRoundId' in data) || (data.lastRoundId is string && data.lastRoundId.size() <= 128)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -62,9 +103,14 @@ service cloud.firestore {
     function isValidAdminMember(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
              data.role in ['owner', 'admin'] &&
+             (!('status' in data) || data.status in ['active', 'suspended']) &&
              data.addedBy is string && data.addedBy.size() >= 1 && data.addedBy.size() <= 128 &&
              data.inviteCodeUsed is string && data.inviteCodeUsed.size() <= 64 &&
+             (!('pinHash' in data) || (data.pinHash is string && data.pinHash.size() <= 128)) &&
+             (!('forceLogoutAtMs' in data) || (data.forceLogoutAtMs is int && data.forceLogoutAtMs >= 0)) &&
+             (!('permissions' in data) || data.permissions is map) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -73,6 +119,9 @@ service cloud.firestore {
       return data.code is string && isValidId(data.code) && data.code.size() >= 4 && data.code.size() <= 32 &&
              data.label is string && data.label.size() >= 1 && data.label.size() <= 60 &&
              data.active is bool &&
+             (!('assignedEmail' in data) || (data.assignedEmail is string && data.assignedEmail.size() <= 120)) &&
+             (!('initialPinHash' in data) || (data.initialPinHash is string && data.initialPinHash.size() <= 128)) &&
+             (!('defaultPermissions' in data) || data.defaultPermissions is map) &&
              data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -82,6 +131,8 @@ service cloud.firestore {
       return data.league is string && data.league.size() >= 1 && data.league.size() <= 60 &&
              data.homeTeam is string && data.homeTeam.size() >= 1 && data.homeTeam.size() <= 60 &&
              data.awayTeam is string && data.awayTeam.size() >= 1 && data.awayTeam.size() <= 60 &&
+             (!('homeLogoUrl' in data) || (data.homeLogoUrl is string && data.homeLogoUrl.size() <= 300)) &&
+             (!('awayLogoUrl' in data) || (data.awayLogoUrl is string && data.awayLogoUrl.size() <= 300)) &&
              data.kickoffLabel is string && data.kickoffLabel.size() >= 1 && data.kickoffLabel.size() <= 40 &&
              data.handicapLine is string && data.handicapLine.size() >= 1 && data.handicapLine.size() <= 40 &&
              data.goalLine is string && data.goalLine.size() >= 1 && data.goalLine.size() <= 20 &&
@@ -100,7 +151,8 @@ service cloud.firestore {
     }
 
     function isValidLotteryDraw(data) {
-      return data.roundTitle is string && data.roundTitle.size() >= 1 && data.roundTitle.size() <= 80 &&
+      return (!('drawType' in data) || data.drawType in ['2d', '3d']) &&
+             data.roundTitle is string && data.roundTitle.size() >= 1 && data.roundTitle.size() <= 80 &&
              data.closeTimeLabel is string && data.closeTimeLabel.size() >= 1 && data.closeTimeLabel.size() <= 40 &&
              data.winningNumber is string && data.winningNumber.size() <= 10 &&
              data.payoutMultiplier is number && data.payoutMultiplier >= 1.0 && data.payoutMultiplier <= 1000.0 &&
@@ -114,8 +166,8 @@ service cloud.firestore {
     function isValidOrder(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 60 &&
-             data.orderType in ['parlay', 'body_goal', 'three_d'] &&
-             data.selections is list && data.selections.size() >= 1 && data.selections.size() <= 15 &&
+             data.orderType in ['parlay', 'body_goal', 'three_d', 'two_d'] &&
+             data.selections is list && data.selections.size() >= 1 && data.selections.size() <= 30 &&
              (data.selections.size() == 0 || (data.selections[0] is string && data.selections[0].size() <= 120)) &&
              data.matchIds is list && data.matchIds.size() <= 15 &&
              (data.matchIds.size() == 0 || (data.matchIds[0] is string && data.matchIds[0].size() <= 128)) &&
@@ -134,6 +186,19 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isValidMiniGameRound(data) {
+      return data.keys().hasAll(['userId', 'customerName', 'gameType', 'betLabel', 'outcomeLabel', 'stakeKs', 'payoutKs', 'createdAt']) &&
+             data.keys().hasOnly(['userId', 'customerName', 'gameType', 'betLabel', 'outcomeLabel', 'stakeKs', 'payoutKs', 'createdAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 60 &&
+             data.gameType in ['dice', 'six_animals'] &&
+             data.betLabel is string && data.betLabel.size() >= 1 && data.betLabel.size() <= 120 &&
+             data.outcomeLabel is string && data.outcomeLabel.size() >= 1 && data.outcomeLabel.size() <= 120 &&
+             data.stakeKs is int && data.stakeKs >= 100 && data.stakeKs <= 1000000 &&
+             data.payoutKs is int && data.payoutKs >= 0 && data.payoutKs <= (data.stakeKs * 36) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     function isValidWalletRequest(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 60 &&
@@ -141,7 +206,7 @@ service cloud.firestore {
              data.amountKs is int && data.amountKs >= 500 && data.amountKs <= 10000000 &&
              data.channel is string && data.channel.size() >= 1 && data.channel.size() <= 40 &&
              data.referenceNote is string && data.referenceNote.size() >= 1 && data.referenceNote.size() <= 120 &&
-             data.status in ['pending', 'approved', 'rejected'] &&
+             data.status in ['pending', 'awaiting_main_approval', 'approved', 'rejected'] &&
              data.adminNote is string && data.adminNote.size() <= 200 &&
              data.processedBy is string && data.processedBy.size() <= 128 &&
              (!('ratePercent' in data) || (data.ratePercent is number && data.ratePercent >= 0.0 && data.ratePercent <= 100.0)) &&
@@ -151,9 +216,36 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isValidPaymentAccount(data) {
+      return data.keys().hasAll(['providerName', 'accountName', 'accountNumber', 'note', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['providerName', 'accountName', 'accountNumber', 'note', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
+             data.providerName is string && data.providerName.size() >= 1 && data.providerName.size() <= 40 &&
+             data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 80 &&
+             data.accountNumber is string && data.accountNumber.size() >= 1 && data.accountNumber.size() <= 60 &&
+             data.note is string && data.note.size() <= 120 &&
+             data.active is bool &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAuditLogEntry(data) {
+      return data.keys().hasAll(['actorId', 'actorName', 'actorRole', 'action', 'category', 'targetId', 'targetName', 'details', 'createdAt']) &&
+             data.keys().hasOnly(['actorId', 'actorName', 'actorRole', 'action', 'category', 'targetId', 'targetName', 'details', 'createdAt']) &&
+             data.actorId is string && data.actorId.size() >= 1 && data.actorId.size() <= 128 &&
+             data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 60 &&
+             data.actorRole in ['owner', 'admin'] &&
+             data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+             data.category in ['wallet', 'order', 'user', 'admin', 'board', 'settings', 'security'] &&
+             data.targetId is string && data.targetId.size() <= 128 &&
+             data.targetName is string && data.targetName.size() <= 80 &&
+             data.details is string && data.details.size() <= 300 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     function isValidTransaction(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
-             data.txType in ['topup', 'withdraw', 'order_stake', 'order_win', 'order_refund', 'point_exchange', 'admin_adjust', 'point_gift'] &&
+             data.txType in ['topup', 'withdraw', 'order_stake', 'order_win', 'order_refund', 'point_exchange', 'admin_adjust', 'point_gift', 'mini_game_stake', 'mini_game_win'] &&
              data.direction in ['credit', 'debit'] &&
              data.amountKs is int && data.amountKs >= 0 && data.amountKs <= 100000000 &&
              data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
@@ -201,6 +293,35 @@ service cloud.firestore {
              data.downloadUrl is string && data.downloadUrl.size() >= 8 && data.downloadUrl.size() <= 300 && data.downloadUrl.matches('^https://.*') &&
              data.releaseNotes is string && data.releaseNotes.size() <= 500 &&
              data.forceUpdate is bool &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSystemGameConfig(data) {
+      return data.keys().hasAll(['enabledGames', 'dualApprovalThresholdKs', 'minStakeKs', 'maxStakeKs', 'twoDPayoutMultiplier', 'threeDPayoutMultiplier', 'dicePayoutMultiplier', 'sixAnimalsPayoutMultiplier', 'bonusPromoText', 'maintenanceMode', 'maintenanceMessage', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['enabledGames', 'dualApprovalThresholdKs', 'minStakeKs', 'maxStakeKs', 'twoDPayoutMultiplier', 'threeDPayoutMultiplier', 'dicePayoutMultiplier', 'sixAnimalsPayoutMultiplier', 'bonusPromoText', 'maintenanceMode', 'maintenanceMessage', 'updatedBy', 'updatedAt']) &&
+             data.enabledGames is list && data.enabledGames.size() <= 12 &&
+             data.dualApprovalThresholdKs is int && data.dualApprovalThresholdKs >= 0 && data.dualApprovalThresholdKs <= 100000000 &&
+             data.minStakeKs is int && data.minStakeKs >= 100 && data.minStakeKs <= 1000000 &&
+             data.maxStakeKs is int && data.maxStakeKs >= data.minStakeKs && data.maxStakeKs <= 50000000 &&
+             data.twoDPayoutMultiplier is number && data.twoDPayoutMultiplier >= 1.0 && data.twoDPayoutMultiplier <= 200.0 &&
+             data.threeDPayoutMultiplier is number && data.threeDPayoutMultiplier >= 1.0 && data.threeDPayoutMultiplier <= 1000.0 &&
+             data.dicePayoutMultiplier is number && data.dicePayoutMultiplier >= 1.0 && data.dicePayoutMultiplier <= 100.0 &&
+             data.sixAnimalsPayoutMultiplier is number && data.sixAnimalsPayoutMultiplier >= 1.0 && data.sixAnimalsPayoutMultiplier <= 100.0 &&
+             data.bonusPromoText is string && data.bonusPromoText.size() <= 200 &&
+             data.maintenanceMode is bool &&
+             data.maintenanceMessage is string && data.maintenanceMessage.size() <= 300 &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSecurityConfig(data) {
+      return data.keys().hasAll(['requireAdminPin', 'ipWhitelistEnabled', 'allowedIps', 'globalForceLogoutAtMs', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['requireAdminPin', 'ipWhitelistEnabled', 'allowedIps', 'globalForceLogoutAtMs', 'updatedBy', 'updatedAt']) &&
+             data.requireAdminPin is bool &&
+             data.ipWhitelistEnabled is bool &&
+             data.allowedIps is list && data.allowedIps.size() <= 50 &&
+             data.globalForceLogoutAtMs is int && data.globalForceLogoutAtMs >= 0 &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -268,18 +389,20 @@ service cloud.firestore {
     // --- COLLECTIONS ---
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isActiveAdmin());
+      allow list: if isActiveAdmin();
       allow create: if isSignedIn() &&
                        isValidId(userId) &&
                        request.auth.uid == userId &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'displayName', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'balanceKs', 'rewardPoints', 'activeStakeKs', 'totalWonKs', 'isOnline', 'lastSeenAt', 'isLocked', 'forceLogoutAtMs', 'securityPinHash', 'createdAt', 'updatedAt']) &&
                        incoming().balanceKs == 0 &&
                        incoming().rewardPoints == 0 &&
                        incoming().activeStakeKs == 0 &&
                        incoming().totalWonKs == 0 &&
+                       incoming().get('isLocked', false) == false &&
+                       incoming().get('forceLogoutAtMs', 0) == 0 &&
                        isValidUserAccount(incoming());
 
       allow update: if isSignedIn() &&
@@ -287,41 +410,66 @@ service cloud.firestore {
                        isValidUserAccount(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt && (
-                         // Tier 1: Admin adjustment / settlement / gift points
-                         isAdmin() ||
-                         // Tier 2a: Owner profile rename / email sync
+                         // Tier 1a: Main Admin full management (adjust, force logout, lock, etc.)
+                         isOwnerAdmin() ||
+                         // Tier 1b: Active Second Admin with permitted scopes
+                         (hasAdminPerm('canLockUsers') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['isLocked', 'updatedAt'])) ||
+                         (hasAdminPerm('canApproveWallet') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'updatedAt'])) ||
+                         (hasAdminPerm('canManageOrders') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'activeStakeKs', 'totalWonKs', 'rewardPoints', 'updatedAt'])) ||
+                         (hasAdminPerm('canAdjustBalance') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'rewardPoints', 'updatedAt'])) ||
+                         // Tier 2a: Owner profile rename / email / presence / PIN sync
                          (request.auth.uid == userId &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'updatedAt'])) ||
-                         // Tier 2b: Owner placing an order (moves balanceKs -> activeStakeKs with strict conservation)
+                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'isOnline', 'lastSeenAt', 'securityPinHash', 'updatedAt'])) ||
+                         // Tier 2b: Owner placing an order (must not be locked; conservation check)
                          (request.auth.uid == userId &&
+                          existing().get('isLocked', false) == false &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'activeStakeKs', 'updatedAt']) &&
                           incoming().balanceKs < existing().balanceKs &&
                           (existing().balanceKs - incoming().balanceKs) == (incoming().activeStakeKs - existing().activeStakeKs)) ||
                          // Tier 2c: Owner exchanging rewardPoints -> balanceKs (1 point = 10 Ks, min 10 points)
                          (request.auth.uid == userId &&
+                          existing().get('isLocked', false) == false &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'rewardPoints', 'updatedAt']) &&
                           incoming().rewardPoints < existing().rewardPoints &&
                           (existing().rewardPoints - incoming().rewardPoints) >= 10 &&
                           (incoming().balanceKs - existing().balanceKs) == ((existing().rewardPoints - incoming().rewardPoints) * 10)) ||
-                         // Tier 2d: Owner requesting cash-out withdrawal (deducts balanceKs immediately upon request)
+                         // Tier 2d: Owner requesting cash-out withdrawal
                          (request.auth.uid == userId &&
+                          existing().get('isLocked', false) == false &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'updatedAt']) &&
                           incoming().balanceKs < existing().balanceKs &&
-                          (existing().balanceKs - incoming().balanceKs) >= 500)
+                          (existing().balanceKs - incoming().balanceKs) >= 500) ||
+                         // Tier 2e: Owner playing verified mini-game round (Dice / 6-Animal) atomically
+                         (request.auth.uid == userId &&
+                          existing().get('isLocked', false) == false &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'totalWonKs', 'lastRoundId', 'updatedAt']) &&
+                          incoming().lastRoundId is string &&
+                          isValidId(incoming().lastRoundId) &&
+                          incoming().lastRoundId != existing().get('lastRoundId', '') &&
+                          existsAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)) &&
+                          getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.userId == request.auth.uid &&
+                          (incoming().balanceKs - existing().balanceKs) ==
+                            (getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.payoutKs -
+                             getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.stakeKs) &&
+                          incoming().totalWonKs == (existing().totalWonKs + getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.payoutKs))
                        );
 
       allow delete: if false;
     }
 
     match /leaderboard/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (isAdmin() || resource.data.visibility == 'public' || resource.data.userId == request.auth.uid);
-      allow list: if isSignedIn() && (isAdmin() || resource.data.visibility == 'public');
+      allow get: if isSignedIn() && isValidId(userId) && (isActiveAdmin() || resource.data.visibility == 'public' || resource.data.userId == request.auth.uid);
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.visibility == 'public');
       allow create: if isSignedIn() &&
                        isValidId(userId) &&
                        isValidLeaderboardEntry(incoming()) &&
                        incoming().keys().hasAll(['userId', 'displayName', 'rewardPoints', 'totalWonKs', 'visibility', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'displayName', 'rewardPoints', 'totalWonKs', 'visibility', 'updatedAt']) && (
-                         isAdmin() ||
+                         isActiveAdmin() ||
                          (request.auth.uid == userId &&
                           incoming().userId == request.auth.uid &&
                           incoming().rewardPoints == 0 &&
@@ -331,97 +479,101 @@ service cloud.firestore {
                        isValidId(userId) &&
                        isValidLeaderboardEntry(incoming()) &&
                        incoming().userId == existing().userId && (
-                         isAdmin() ||
+                         isActiveAdmin() ||
                          (request.auth.uid == userId &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])) ||
                          (request.auth.uid == userId &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['rewardPoints', 'updatedAt']) &&
                           incoming().rewardPoints <= existing().rewardPoints)
                        );
-      allow delete: if isAdmin() && isValidId(userId);
+      allow delete: if isOwnerAdmin() && isValidId(userId);
     }
 
     match /admins/{adminUid} {
-      allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isActiveAdmin());
+      allow list: if isActiveAdmin();
       allow create: if isSignedIn() &&
                        isValidId(adminUid) &&
                        isValidAdminMember(incoming()) &&
                        incoming().keys().hasAll(['userId', 'displayName', 'role', 'addedBy', 'inviteCodeUsed', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'role', 'addedBy', 'inviteCodeUsed', 'createdAt', 'updatedAt']) && (
-                         isAdmin() ||
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'role', 'status', 'addedBy', 'inviteCodeUsed', 'pinHash', 'forceLogoutAtMs', 'permissions', 'createdAt', 'updatedAt']) && (
+                         isOwnerAdmin() ||
                          (request.auth.uid == adminUid &&
                           incoming().userId == request.auth.uid &&
                           incoming().role == 'admin' &&
+                          incoming().get('status', 'active') == 'active' &&
                           isValidId(incoming().inviteCodeUsed) &&
                           exists(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)) &&
-                          get(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)).data.active == true)
+                          get(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)).data.active == true &&
+                          (!('defaultPermissions' in get(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)).data) ||
+                           incoming().get('permissions', {}) == get(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)).data.defaultPermissions))
                        );
       allow update: if isSignedIn() &&
                        isValidId(adminUid) &&
                        isValidAdminMember(incoming()) &&
-                       isAdmin() &&
+                       isOwnerAdmin() &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt;
-      allow delete: if isAdmin() && isValidId(adminUid) && (adminUid != request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isOwnerAdmin() && isValidId(adminUid) && (adminUid != request.auth.uid || isBootstrappedAdmin());
     }
 
     match /admin_invites/{inviteCode} {
       allow get: if isSignedIn() && isValidId(inviteCode);
-      allow list: if isAdmin();
-      allow create: if isAdmin() &&
+      allow list: if isOwnerAdmin();
+      allow create: if isOwnerAdmin() &&
                        isValidId(inviteCode) &&
                        isValidAdminInvite(incoming()) &&
                        incoming().code == inviteCode &&
                        incoming().keys().hasAll(['code', 'label', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['code', 'label', 'active', 'createdBy', 'createdAt', 'updatedAt']);
-      allow update: if isAdmin() &&
+                       incoming().keys().hasOnly(['code', 'label', 'active', 'assignedEmail', 'initialPinHash', 'defaultPermissions', 'createdBy', 'createdAt', 'updatedAt']);
+      allow update: if isOwnerAdmin() &&
                        isValidId(inviteCode) &&
                        isValidAdminInvite(incoming()) &&
                        incoming().code == existing().code &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['label', 'active', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(inviteCode);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['label', 'active', 'assignedEmail', 'initialPinHash', 'defaultPermissions', 'updatedAt']);
+      allow delete: if isOwnerAdmin() && isValidId(inviteCode);
     }
 
     match /matches/{matchId} {
-      allow get: if isSignedIn() && isValidId(matchId) && (isAdmin() || resource.data.visibility == 'public');
-      allow list: if isSignedIn() && (isAdmin() || resource.data.visibility == 'public');
-      allow create: if isAdmin() &&
+      allow get: if isSignedIn() && isValidId(matchId) && (isActiveAdmin() || resource.data.visibility == 'public');
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.visibility == 'public');
+      allow create: if hasAdminPerm('canManageBoard') &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().keys().hasAll(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'liveClock', 'createdBy', 'createdAt', 'updatedAt']);
-      allow update: if isAdmin() &&
+                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'liveClock', 'createdBy', 'createdAt', 'updatedAt']);
+      allow update: if hasAdminPerm('canManageBoard') &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().createdBy == existing().createdBy &&
                        incoming().createdAt == existing().createdAt;
-      allow delete: if isAdmin() && isValidId(matchId);
+      allow delete: if hasAdminPerm('canManageBoard') && isValidId(matchId);
     }
 
     match /lottery_draws/{drawId} {
-      allow get: if isSignedIn() && isValidId(drawId) && (isAdmin() || resource.data.visibility == 'public');
-      allow list: if isSignedIn() && (isAdmin() || resource.data.visibility == 'public');
-      allow create: if isAdmin() &&
+      allow get: if isSignedIn() && isValidId(drawId) && (isActiveAdmin() || resource.data.visibility == 'public');
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.visibility == 'public');
+      allow create: if hasAdminPerm('canManageBoard') &&
                        isValidId(drawId) &&
                        isValidLotteryDraw(incoming()) &&
                        incoming().keys().hasAll(['roundTitle', 'closeTimeLabel', 'winningNumber', 'payoutMultiplier', 'status', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['roundTitle', 'closeTimeLabel', 'winningNumber', 'payoutMultiplier', 'status', 'visibility', 'createdBy', 'createdAt', 'updatedAt']);
-      allow update: if isAdmin() &&
+                       incoming().keys().hasOnly(['drawType', 'roundTitle', 'closeTimeLabel', 'winningNumber', 'payoutMultiplier', 'status', 'visibility', 'createdBy', 'createdAt', 'updatedAt']);
+      allow update: if hasAdminPerm('canManageBoard') &&
                        isValidId(drawId) &&
                        isValidLotteryDraw(incoming()) &&
                        incoming().createdBy == existing().createdBy &&
                        incoming().createdAt == existing().createdAt;
-      allow delete: if isAdmin() && isValidId(drawId);
+      allow delete: if hasAdminPerm('canManageBoard') && isValidId(drawId);
     }
 
     match /orders/{orderId} {
-      allow get: if isSignedIn() && isValidId(orderId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(orderId) && (resource.data.userId == request.auth.uid || isActiveAdmin());
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() &&
                        isValidId(orderId) &&
                        isValidOrder(incoming()) &&
+                       isUserNotLocked(request.auth.uid) &&
                        incoming().userId == request.auth.uid &&
                        incoming().status == 'pending' &&
                        incoming().actualPayoutKs == 0 &&
@@ -432,22 +584,34 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidId(orderId) &&
                        isValidOrder(incoming()) &&
-                       isAdmin() &&
+                       hasAdminPerm('canManageOrders') &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'actualPayoutKs', 'commissionPercent', 'commissionKs', 'adminNote', 'settledBy', 'updatedAt']);
       allow delete: if isSignedIn() &&
                        isValidId(orderId) &&
                        existing().status in ['won', 'lost', 'rejected'] &&
-                       (existing().userId == request.auth.uid || isAdmin());
+                       (existing().userId == request.auth.uid || hasAdminPerm('canManageOrders'));
+    }
+
+    match /mini_game_rounds/{roundId} {
+      allow get: if isSignedIn() && isValidId(roundId) && (resource.data.userId == request.auth.uid || isActiveAdmin());
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() &&
+                       isValidId(roundId) &&
+                       isValidMiniGameRound(incoming()) &&
+                       isUserNotLocked(request.auth.uid) &&
+                       incoming().userId == request.auth.uid;
+      allow update, delete: if false;
     }
 
     match /wallet_requests/{requestId} {
-      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isActiveAdmin());
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() &&
                        isValidId(requestId) &&
                        isValidWalletRequest(incoming()) &&
+                       isUserNotLocked(request.auth.uid) &&
                        incoming().userId == request.auth.uid &&
                        incoming().status == 'pending' &&
                        incoming().processedBy == '' &&
@@ -457,53 +621,82 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidId(requestId) &&
                        isValidWalletRequest(incoming()) &&
-                       isAdmin() &&
-                       existing().status == 'pending' &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'processedBy', 'netAmountKs', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(requestId) && existing().status in ['approved', 'rejected'];
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'processedBy', 'netAmountKs', 'updatedAt']) && (
+                         (existing().status == 'pending' && hasAdminPerm('canApproveWallet')) ||
+                         (existing().status == 'awaiting_main_approval' && isOwnerAdmin() && incoming().status in ['approved', 'rejected'])
+                       );
+      allow delete: if isOwnerAdmin() && isValidId(requestId) && existing().status in ['approved', 'rejected'];
+    }
+
+    match /payment_accounts/{accountId} {
+      allow get: if isSignedIn() && isValidId(accountId) && (isActiveAdmin() || resource.data.active == true);
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.active == true);
+      allow create: if isOwnerAdmin() &&
+                       isValidId(accountId) &&
+                       isValidPaymentAccount(incoming());
+      allow update: if isOwnerAdmin() &&
+                       isValidId(accountId) &&
+                       isValidPaymentAccount(incoming()) &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isOwnerAdmin() && isValidId(accountId);
+    }
+
+    match /audit_logs/{logId} {
+      allow get, list: if isSignedIn() && (
+        hasAdminPerm('canViewAllLogs') ||
+        (isActiveAdmin() && resource.data.actorId == request.auth.uid)
+      );
+      allow create: if isActiveAdmin() &&
+                       isValidId(logId) &&
+                       isValidAuditLogEntry(incoming()) &&
+                       incoming().actorId == request.auth.uid;
+      allow update, delete: if false;
     }
 
     match /transactions/{txId} {
-      allow get: if isSignedIn() && isValidId(txId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(txId) && (resource.data.userId == request.auth.uid || isActiveAdmin());
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() &&
                        isValidId(txId) &&
                        isValidTransaction(incoming()) &&
                        incoming().keys().hasAll(['userId', 'txType', 'direction', 'amountKs', 'title', 'balanceAfterKs', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'txType', 'direction', 'amountKs', 'title', 'balanceAfterKs', 'createdAt', 'updatedAt']) && (
-                         isAdmin() ||
+                         isActiveAdmin() ||
                          (incoming().userId == request.auth.uid &&
-                          incoming().txType in ['order_stake', 'point_exchange', 'withdraw'])
+                          incoming().txType in ['order_stake', 'point_exchange', 'withdraw', 'mini_game_stake', 'mini_game_win'])
                        );
       allow update, delete: if false;
     }
 
     match /app_settings/{settingId} {
-      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config', 'app_update'];
+      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config', 'app_update', 'system_config', 'security_config'];
       allow list: if isSignedIn();
-      allow create, update: if isAdmin() && (
-                              (settingId == 'wallet_config' && isValidWalletConfig(incoming())) ||
-                              (settingId == 'board_config' && isValidBoardConfig(incoming())) ||
-                              (settingId == 'betting_config' && isValidBettingConfig(incoming())) ||
-                              (settingId == 'app_update' && isValidAppUpdateConfig(incoming()))
+      allow create, update: if isActiveAdmin() && (
+                              (settingId == 'wallet_config' && hasAdminPerm('canEditWalletRates') && isValidWalletConfig(incoming())) ||
+                              (settingId == 'board_config' && hasAdminPerm('canManageBoard') && isValidBoardConfig(incoming())) ||
+                              (settingId == 'betting_config' && hasAdminPerm('canEditGameConfig') && isValidBettingConfig(incoming())) ||
+                              (settingId == 'app_update' && hasAdminPerm('canEditGameConfig') && isValidAppUpdateConfig(incoming())) ||
+                              (settingId == 'system_config' && hasAdminPerm('canEditGameConfig') && isValidSystemGameConfig(incoming())) ||
+                              (settingId == 'security_config' && isOwnerAdmin() && isValidSecurityConfig(incoming()))
                             );
       allow delete: if false;
     }
 
     match /direct_messages/{msgId} {
-      allow get: if isSignedIn() && isValidId(msgId) && (resource.data.threadUserId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (isAdmin() || resource.data.threadUserId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(msgId) && (resource.data.threadUserId == request.auth.uid || isActiveAdmin());
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.threadUserId == request.auth.uid);
       allow create: if isSignedIn() &&
                        isValidId(msgId) &&
                        isValidDirectMessage(incoming()) &&
                        incoming().senderId == request.auth.uid && (
                          (incoming().threadUserId == request.auth.uid && incoming().senderRole == 'customer') ||
-                         (isAdmin() && incoming().senderRole == 'admin')
+                         (hasAdminPerm('canChat') && incoming().senderRole == 'admin')
                        );
       allow update: if false;
-      allow delete: if isAdmin() && isValidId(msgId);
+      allow delete: if hasAdminPerm('canChat') && isValidId(msgId);
     }
 
     match /group_messages/{msgId} {
@@ -514,10 +707,10 @@ service cloud.firestore {
                        isValidGroupMessage(incoming()) &&
                        incoming().senderId == request.auth.uid && (
                          incoming().senderRole == 'customer' ||
-                         (incoming().senderRole == 'admin' && isAdmin())
+                         (incoming().senderRole == 'admin' && hasAdminPerm('canChat'))
                        );
       allow update: if false;
-      allow delete: if isSignedIn() && isValidId(msgId) && (isAdmin() || existing().senderId == request.auth.uid);
+      allow delete: if isSignedIn() && isValidId(msgId) && (hasAdminPerm('canChat') || existing().senderId == request.auth.uid);
     }
 
     match /app_reviews/{userId} {
@@ -528,12 +721,12 @@ service cloud.firestore {
                                userId == request.auth.uid &&
                                isValidAppReview(incoming()) &&
                                incoming().userId == request.auth.uid;
-      allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isOwnerAdmin());
     }
 
     match /call_sessions/{callId} {
-      allow get: if isSignedIn() && isValidId(callId) && (resource.data.threadUserId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (isAdmin() || resource.data.threadUserId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(callId) && (resource.data.threadUserId == request.auth.uid || isActiveAdmin());
+      allow list: if isSignedIn() && (isActiveAdmin() || resource.data.threadUserId == request.auth.uid);
       allow create: if isSignedIn() &&
                        isValidId(callId) &&
                        isValidCallSession(incoming()) &&
@@ -543,12 +736,12 @@ service cloud.firestore {
                        incoming().answeredBy == '' &&
                        incoming().answeredByName == '' && (
                          (incoming().threadUserId == request.auth.uid && incoming().callerRole == 'customer') ||
-                         (isAdmin() && incoming().callerRole == 'admin')
+                         (hasAdminPerm('canChat') && incoming().callerRole == 'admin')
                        );
       allow update: if isSignedIn() &&
                        isValidId(callId) &&
                        isValidCallSession(incoming()) &&
-                       (existing().threadUserId == request.auth.uid || isAdmin()) &&
+                       (existing().threadUserId == request.auth.uid || hasAdminPerm('canChat')) &&
                        incoming().threadUserId == existing().threadUserId &&
                        incoming().callerId == existing().callerId &&
                        incoming().callerRole == existing().callerRole &&
@@ -563,12 +756,12 @@ service cloud.firestore {
                          (incoming().status in ['rejected', 'ended'] &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
                        );
-      allow delete: if isSignedIn() && isValidId(callId) && (existing().threadUserId == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() && isValidId(callId) && (existing().threadUserId == request.auth.uid || isOwnerAdmin());
 
       match /candidates/{candId} {
         allow get, list: if isSignedIn() &&
                               isValidId(callId) && (
-                                isAdmin() ||
+                                isActiveAdmin() ||
                                 get(/databases/$(database)/documents/call_sessions/$(callId)).data.threadUserId == request.auth.uid
                               );
         allow create: if isSignedIn() &&
@@ -576,14 +769,14 @@ service cloud.firestore {
                          isValidId(candId) &&
                          isValidCallCandidate(incoming()) &&
                          incoming().senderId == request.auth.uid && (
-                           isAdmin() ||
+                           isActiveAdmin() ||
                            get(/databases/$(database)/documents/call_sessions/$(callId)).data.threadUserId == request.auth.uid
                          );
         allow update: if false;
         allow delete: if isSignedIn() &&
                          isValidId(callId) &&
                          isValidId(candId) && (
-                           isAdmin() ||
+                           isOwnerAdmin() ||
                            get(/databases/$(database)/documents/call_sessions/$(callId)).data.threadUserId == request.auth.uid
                          );
       }

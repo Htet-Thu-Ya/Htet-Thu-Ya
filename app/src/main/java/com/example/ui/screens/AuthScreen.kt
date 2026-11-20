@@ -102,8 +102,8 @@ fun AuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Image(
-                painter = painterResource(id = R.drawable.htet_thu_ya_logo),
-                contentDescription = "Htet Thu Ya Logo",
+                painter = painterResource(id = R.drawable.lotaya_logo),
+                contentDescription = "လိုတရ Logo",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(144.dp)
@@ -114,14 +114,14 @@ fun AuthScreen(
             Spacer(Modifier.height(20.dp))
 
             Text(
-                text = "Htet Thu Ya",
+                text = "လိုတရ",
                 style = MaterialTheme.typography.displaySmall,
                 color = ChampionshipGoldBright,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Sports Picks • 3D • Real-Time Order Hub",
+                text = "2D • 3D • Sports Picks • Mini Games",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color(0xFFD2E2DA),
                 textAlign = TextAlign.Center
@@ -142,12 +142,12 @@ fun AuthScreen(
                     FeatureRow(
                         icon = Icons.Default.Public,
                         title = "Customer Portal (Online)",
-                        subtitle = "မောင်း၊ ဘော်ဒီ/ဂိုးပေါင်း၊ ၃လုံးထီ အော်ဒါများနှင့် ငွေစာရင်း တိုက်ရိုက်ကြည့်ရှုနိုင်သည်"
+                        subtitle = "မောင်း၊ ဘော်ဒီ/ဂိုးပေါင်း၊ ၂လုံး/၃လုံးထီ၊ အံစာတုံး၊ ၆ကောင်ဂျင်နှင့် ငွေစာရင်း တိုက်ရိုက်ကစားနိုင်သည်"
                     )
                     FeatureRow(
                         icon = Icons.Default.AdminPanelSettings,
-                        title = "Shared Admin Management",
-                        subtitle = "Admin နှင့် ဖိတ်ကြားထားသော သူငယ်ချင်းများ အော်ဒါများကို အတူတကွ စီမံနိုင်သည်"
+                        title = "Main & Second Admin Governance",
+                        subtitle = "Main Admin နှင့် ခွင့်ပြုချက်ကန့်သတ်ထားသော Second Admin များ စနစ်တကျ ပူးပေါင်းစီမံနိုင်သည်"
                     )
                 }
             }

@@ -37,22 +37,28 @@ object AutoSettleEngine {
     ): AutoSettleDecision {
         if (order.status !in listOf("pending", "accepted")) return AutoSettleDecision.NotReady
         return when (order.orderType) {
-            "three_d" -> evaluateThreeD(order, draws)
+            "three_d" -> evaluateLottery(order, draws, digitCount = 3, label = "3D")
+            "two_d" -> evaluateLottery(order, draws, digitCount = 2, label = "2D")
             "body_goal", "parlay" -> evaluateSports(order, matchesById)
             else -> AutoSettleDecision.NotReady
         }
     }
 
-    private fun evaluateThreeD(order: BetOrder, draws: List<LotteryDraw>): AutoSettleDecision {
+    private fun evaluateLottery(
+        order: BetOrder,
+        draws: List<LotteryDraw>,
+        digitCount: Int,
+        label: String
+    ): AutoSettleDecision {
         val round = order.drawRound.trim()
         val draw = draws.firstOrNull {
             it.status == "finished" &&
-                it.winningNumber.length == 3 &&
+                it.winningNumber.trim().length == digitCount &&
                 (round.isBlank() || it.roundTitle.equals(round, ignoreCase = true))
         } ?: return AutoSettleDecision.NotReady
 
         val winNum = draw.winningNumber.trim()
-        val regex = Regex("""(\d{3})""")
+        val regex = Regex("""(\d{$digitCount})""")
         val stakeRegex = Regex("""\((\d[\d,]*)\s*Ks\)""")
 
         var matchedCount = 0
@@ -77,11 +83,11 @@ object AutoSettleEngine {
             val gross = matchedGrossKs.roundToLong().coerceAtLeast(order.stakeKs)
             AutoSettleDecision.Win(
                 grossPayoutKs = gross,
-                note = "အလိုအလျောက် 3D ထွက်ဂဏန်း $winNum အနိုင်"
+                note = "အလိုအလျောက် $label ထွက်ဂဏန်း $winNum အနိုင်"
             )
         } else {
             AutoSettleDecision.Loss(
-                note = "အလိုအလျောက် 3D ထွက်ဂဏန်း $winNum ရှုံး"
+                note = "အလိုအလျောက် $label ထွက်ဂဏန်း $winNum ရှုံး"
             )
         }
     }

@@ -59,11 +59,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import com.example.data.model.BetOrder
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
+import com.example.data.model.PaymentAccount
 import com.example.data.model.SportMatch
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
@@ -72,6 +76,7 @@ import com.example.data.model.WalletRequest
 import com.example.ui.components.OrderSlipCard
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.SubScreenTopBar
+import com.example.ui.components.TeamLogoAvatar
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.AdminCrimson
@@ -199,15 +204,27 @@ fun WalletLedgerScreen(
     requestsState: UiState<List<WalletRequest>>,
     transactionsState: UiState<List<LedgerTransaction>>,
     walletConfig: WalletConfig,
+    paymentAccounts: List<PaymentAccount> = emptyList(),
     busy: Boolean,
     onBack: () -> Unit,
     onSubmitWalletRequest: (requestType: String, amountKs: Long, channel: String, referenceNote: String) -> Unit
 ) {
+    val clipboard = LocalClipboardManager.current
     var selectedTab by remember { mutableIntStateOf(0) }
     var reqType by remember { mutableStateOf("topup") }
     var channel by remember { mutableStateOf("KBZPay") }
     var amountInput by remember { mutableStateOf("5000") }
     var refNote by remember { mutableStateOf("") }
+    var copiedAccountId by remember { mutableStateOf<String?>(null) }
+
+    val activePaymentAccounts = remember(paymentAccounts) {
+        paymentAccounts.filter { it.active }
+    }
+    val channelOptions = remember(activePaymentAccounts) {
+        (activePaymentAccounts.map { it.providerName } + listOf("KBZPay", "WavePay", "CB Pay", "Cash"))
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
 
     val balanceKs = (accountState as? UiState.Success)?.data?.balanceKs ?: 0L
     val parsedAmt = amountInput.toLongOrNull() ?: 0L
@@ -243,6 +260,70 @@ fun WalletLedgerScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (reqType == "topup" && activePaymentAccounts.isNotEmpty()) {
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.6f)),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        "ငွေလွှဲပို့ရန် Admin အကောင့်များ",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    activePaymentAccounts.forEach { acc ->
+                                        Surface(
+                                            color = Color(0xFF1E372D),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        "${acc.providerName} • ${acc.accountName}",
+                                                        color = Color.White,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text(
+                                                        acc.accountNumber,
+                                                        color = ChampionshipGold,
+                                                        fontFamily = JetBrainsMonoFontFamily,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    if (acc.note.isNotBlank()) {
+                                                        Text(acc.note, color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                                    }
+                                                }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        clipboard.setText(AnnotatedString(acc.accountNumber))
+                                                        copiedAccountId = acc.id
+                                                        channel = acc.providerName
+                                                    }
+                                                ) {
+                                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text(
+                                                        if (copiedAccountId == acc.id) "ကူးပြီး" else "Copy",
+                                                        color = ChampionshipGold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = PearlCard),
@@ -275,7 +356,7 @@ fun WalletLedgerScreen(
                                 }
                                 Spacer(Modifier.height(8.dp))
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("KBZPay", "WavePay", "CB Pay", "Cash").forEach { ch ->
+                                    channelOptions.forEach { ch ->
                                         FilterChip(
                                             selected = channel == ch,
                                             onClick = { channel = ch },
@@ -481,7 +562,7 @@ fun ResultsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "၃လုံးထီ ရလဒ်များ",
+                        "၂လုံး / ၃လုံးထီ ရလဒ်များ",
                         color = ChampionshipGold,
                         style = MaterialTheme.typography.titleMedium
                     )
@@ -498,7 +579,7 @@ fun ResultsScreen(
             }
             if (finishedDraws.isEmpty()) {
                 item {
-                    Text("၃လုံးထီ ရလဒ် မရှိသေးပါ", color = Color(0xFFB4C8BE))
+                    Text("၂လုံး / ၃လုံးထီ ရလဒ် မရှိသေးပါ", color = Color(0xFFB4C8BE))
                 }
             } else {
                 items(finishedDraws, key = { it.id }) { draw ->
@@ -512,7 +593,18 @@ fun ResultsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Surface(color = ChampionshipGold, shape = RoundedCornerShape(6.dp)) {
+                                        Text(
+                                            text = draw.drawType.uppercase(),
+                                            color = InkDark,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
+                                }
                                 Text(draw.closeTimeLabel, color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                             }
                             Surface(color = PitchEmeraldDark, shape = RoundedCornerShape(10.dp)) {
@@ -575,7 +667,14 @@ fun ResultsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("${m.homeTeam} vs ${m.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    TeamLogoAvatar(logoUrl = m.homeLogoUrl, teamName = m.homeTeam, size = 24.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("${m.homeTeam} vs ${m.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+                                    Spacer(Modifier.width(6.dp))
+                                    TeamLogoAvatar(logoUrl = m.awayLogoUrl, teamName = m.awayTeam, size = 24.dp)
+                                }
+                                Spacer(Modifier.width(8.dp))
                                 Text(
                                     "${m.homeScore} - ${m.awayScore}",
                                     color = InkDark,

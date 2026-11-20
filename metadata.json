@@ -1,6 +1,6 @@
 {
-  "name": "Htet Thu Ya",
-  "description": "Htet Thu Ya sports & 3D order portal with real-time Customer and shared Admin management powered by Firebase.",
+  "name": "လိုတရ",
+  "description": "လိုတရ (Lo Ta Ya) sports, 2D/3D lottery, mini-games & RBAC admin portal powered by Firebase.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.htetthuya.krmvxp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "3.0"
+    versionCode = 4
+    versionName = "4.0"
 
     buildConfigField("long", "BUILD_EPOCH_MS", "${System.currentTimeMillis()}L")
 
@@ -107,7 +107,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   // implementation(libs.androidx.room.ktx)
   // implementation(libs.androidx.room.runtime)
-  // implementation(libs.coil.compose)
+  implementation(libs.coil.compose)
   // implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
   implementation(libs.firebase.firestore)

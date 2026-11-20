@@ -56,8 +56,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
 import com.example.R
 import com.example.data.model.BetOrder
+import com.example.ui.theme.CinzelFontFamily
+import com.example.ui.theme.PadaukFontFamily
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.AdminCrimsonSoft
 import com.example.ui.theme.AmberPending
@@ -95,7 +99,26 @@ fun orderTypeBurmese(type: String): String = when (type) {
     "parlay" -> "မောင်း"
     "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
     "three_d" -> "သုံးလုံးထီ"
+    "two_d" -> "နှစ်လုံးထီ (2D)"
+    "dice" -> "အံစာတုံး"
+    "six_animals" -> "၆ကောင်ဂျင်"
     else -> type
+}
+
+@Composable
+fun LoTaYaBrandLogo(
+    size: Dp = 44.dp,
+    modifier: Modifier = Modifier
+) {
+    Image(
+        painter = painterResource(id = R.drawable.lotaya_logo),
+        contentDescription = "လိုတရ Logo",
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.24f))
+            .border(1.5.dp, ChampionshipGold, RoundedCornerShape(size * 0.24f))
+    )
 }
 
 @Composable
@@ -103,15 +126,110 @@ fun HtetThuYaBrandLogo(
     size: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
-    Image(
-        painter = painterResource(id = R.drawable.htet_thu_ya_logo),
-        contentDescription = "Htet Thu Ya Logo",
-        contentScale = ContentScale.Crop,
+    LoTaYaBrandLogo(size = size, modifier = modifier)
+}
+
+@Composable
+fun TeamLogoAvatar(
+    logoUrl: String,
+    teamName: String,
+    size: Dp = 28.dp,
+    modifier: Modifier = Modifier
+) {
+    val initials = remember(teamName) {
+        val parts = teamName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        when {
+            parts.size >= 2 -> "${parts[0].first().uppercaseChar()}${parts[1].first().uppercaseChar()}"
+            parts.size == 1 && parts[0].length >= 2 -> parts[0].take(2).uppercase()
+            parts.size == 1 -> parts[0].take(1).uppercase()
+            else -> "FC"
+        }
+    }
+    val fallbackBg = remember(teamName) {
+        val palette = listOf(
+            Color(0xFF1E3A8A),
+            Color(0xFF065F46),
+            Color(0xFF991B1B),
+            Color(0xFF92400E),
+            Color(0xFF4C1D95),
+            Color(0xFF0F766E)
+        )
+        val idx = kotlin.math.abs(teamName.hashCode()) % palette.size
+        palette[idx]
+    }
+
+    if (logoUrl.isNotBlank()) {
+        SubcomposeAsyncImage(
+            model = logoUrl,
+            contentDescription = "$teamName Logo",
+            contentScale = ContentScale.Fit,
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.9f)),
+            loading = {
+                TeamMonogramBadge(initials = initials, bg = fallbackBg, size = size)
+            },
+            error = {
+                TeamMonogramBadge(initials = initials, bg = fallbackBg, size = size)
+            }
+        )
+    } else {
+        TeamMonogramBadge(initials = initials, bg = fallbackBg, size = size, modifier = modifier)
+    }
+}
+
+@Composable
+private fun TeamMonogramBadge(
+    initials: String,
+    bg: Color,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.24f))
-            .border(1.5.dp, ChampionshipGold, RoundedCornerShape(size * 0.24f))
-    )
+            .clip(CircleShape)
+            .background(bg)
+            .border(1.dp, ChampionshipGold.copy(alpha = 0.6f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = initials,
+            color = Color.White,
+            fontSize = (size.value * 0.36f).sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun OnlineStatusDot(
+    isOnline: Boolean,
+    lastSeenTs: Timestamp? = null,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(if (isOnline) Color(0xFF22C55E) else Color(0xFF9CA3AF))
+                .border(1.dp, Color.White, CircleShape)
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = if (isOnline) "Online" else if (lastSeenTs != null) formatTimestamp(lastSeenTs) else "Offline",
+            color = if (isOnline) PitchEmeraldDark else InkMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isOnline) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,7 +242,7 @@ fun SubScreenTopBar(
     TopAppBar(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                HtetThuYaBrandLogo(size = 30.dp)
+                LoTaYaBrandLogo(size = 30.dp)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     text = title,
@@ -157,11 +275,14 @@ fun SubScreenTopBar(
 fun StatusBadge(status: String) {
     val (label, bg, fg) = when (status) {
         "pending" -> Triple("စောင့်ဆိုင်းဆဲ", AmberPendingSoft, AmberPending)
+        "awaiting_main_approval" -> Triple("Main Admin စောင့်ဆိုင်း", AmberPendingSoft, AmberPending)
         "accepted" -> Triple("အတည်ပြုပြီး", SkyInfoSoft, SkyInfo)
         "approved" -> Triple("အတည်ပြုပြီး", EmeraldSoft, PitchEmeraldDark)
         "won" -> Triple("အနိုင်ရ", EmeraldSoft, PitchEmeraldDark)
         "lost" -> Triple("ရှုံး", Color(0xFFE5E7EB), InkMuted)
         "rejected" -> Triple("ပယ်ဖျက်", AdminCrimsonSoft, AdminCrimson)
+        "suspended" -> Triple("ယာယီပိတ်", AdminCrimsonSoft, AdminCrimson)
+        "active" -> Triple("အသုံးပြုနေ", EmeraldSoft, PitchEmeraldDark)
         "open" -> Triple("ဖွင့်ထားသည်", EmeraldSoft, PitchEmeraldDark)
         "closed" -> Triple("ပိတ်ထားသည်", AmberPendingSoft, AmberPending)
         "finished" -> Triple("ပြီးဆုံး", SkyInfoSoft, SkyInfo)
@@ -420,18 +541,18 @@ fun AdminInviteRedeemDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Key, contentDescription = null, tint = ChampionshipGold) },
-        title = { Text("သူငယ်ချင်း Admin ဝင်ရောက်ရန်") },
+        title = { Text("Second Admin ဝင်ရောက်ရန်") },
         text = {
             Column {
                 Text(
-                    "Admin ထံမှ ရရှိထားသော Invite Code (ဥပမာ- HTY-XXXXXX) ကို ထည့်သွင်းပြီး Admin စီမံခန့်ခွဲမှု ဖွင့်လှစ်ပါ။",
+                    "Main Admin ထံမှ ရရှိထားသော Invite Code (ဥပမာ- HTY-XXXXXX) ကို ထည့်သွင်းပြီး Admin စီမံခန့်ခွဲမှု ဖွင့်လှစ်ပါ။",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = code,
                     onValueChange = { code = it.uppercase() },
-                    label = { Text("Invite Code") },
+                    label = { Text("Admin Invite Code") },
                     placeholder = { Text("HTY-XXXXXX") },
                     singleLine = true,
                     modifier = Modifier

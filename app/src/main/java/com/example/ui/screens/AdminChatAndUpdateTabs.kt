@@ -199,7 +199,15 @@ fun AdminChatTab(
                                         Icon(Icons.Default.Person, contentDescription = null, tint = PitchEmeraldDark)
                                         Spacer(Modifier.width(10.dp))
                                         Column {
-                                            Text(name, color = InkDark, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text(name, color = InkDark, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                                if (user != null) {
+                                                    com.example.ui.components.OnlineStatusDot(
+                                                        isOnline = user.isOnline,
+                                                        lastSeenTs = user.lastSeenAt
+                                                    )
+                                                }
+                                            }
                                             if (user?.email?.isNotBlank() == true) {
                                                 Text(user.email, color = PitchEmeraldDark, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
@@ -266,7 +274,15 @@ fun AdminChatTab(
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ChampionshipGold)
                             }
                             Column {
-                                Text(targetName, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(targetName, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (targetUser != null) {
+                                        com.example.ui.components.OnlineStatusDot(
+                                            isOnline = targetUser.isOnline,
+                                            lastSeenTs = targetUser.lastSeenAt
+                                        )
+                                    }
+                                }
                                 if (targetUser?.email?.isNotBlank() == true) {
                                     Text(targetUser.email, color = ChampionshipGold, style = MaterialTheme.typography.labelSmall)
                                 }
@@ -451,10 +467,10 @@ fun AdminUpdateAndQualityTab(
                         OutlinedButton(
                             onClick = {
                                 val target = downloadUrlText.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
-                                val msg = "Htet Thu Ya APK Update ($versionNameText)\nDownload Link: $target"
+                                val msg = "လိုတရ APK Update ($versionNameText)\nDownload Link: $target"
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "Htet Thu Ya APK Update")
+                                    putExtra(Intent.EXTRA_SUBJECT, "လိုတရ APK Update")
                                     putExtra(Intent.EXTRA_TEXT, msg)
                                 }
                                 context.startActivity(Intent.createChooser(shareIntent, "APK Update Link မျှဝေမည်"))

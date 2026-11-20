@@ -1,17 +1,32 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -21,8 +36,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -41,14 +65,18 @@ import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ChatHubScreen
 import com.example.ui.screens.CustomerHomeScreen
 import com.example.ui.screens.CustomerRoute
+import com.example.ui.screens.DiceGameScreen
 import com.example.ui.screens.IncomingCallDialog
 import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.OrdersHistoryScreen
 import com.example.ui.screens.PointExchangeScreen
 import com.example.ui.screens.QualityRatingScreen
 import com.example.ui.screens.ResultsScreen
+import com.example.ui.screens.SettingsAndRulesScreen
+import com.example.ui.screens.SixAnimalsGameScreen
 import com.example.ui.screens.SportsOrderScreen
 import com.example.ui.screens.ThreeDLotteryScreen
+import com.example.ui.screens.TwoDLotteryScreen
 import com.example.ui.screens.WalletLedgerScreen
 import com.example.ui.screens.rememberCallPermissionLauncher
 import com.example.ui.theme.DeepPitchBg
@@ -101,6 +129,7 @@ fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
 @Composable
 private fun AuthenticatedRoot(user: FirebaseUser) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -125,6 +154,37 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
         }
     )
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> vm.updateOnlinePresence(true)
+                Lifecycle.Event.ON_STOP -> vm.updateOnlinePresence(false)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.updateOnlinePresence(false)
+        }
+    }
+
     LaunchedEffect(vm) {
         vm.events.collect { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -132,12 +192,22 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     }
 
     val isAdmin by vm.isAdmin.collectAsStateWithLifecycle()
+    val isOwnerAdmin by vm.isOwnerAdmin.collectAsStateWithLifecycle()
+    val adminMember by vm.adminMember.collectAsStateWithLifecycle()
+    val currentAdminPermissions by vm.currentAdminPermissions.collectAsStateWithLifecycle()
     val isAdminMode by vm.isAdminMode.collectAsStateWithLifecycle()
+    val adminPinVerified by vm.adminPinVerified.collectAsStateWithLifecycle()
+    val currentPublicIp by vm.currentPublicIp.collectAsStateWithLifecycle()
+    val isForceLoggedOut by vm.isForceLoggedOut.collectAsStateWithLifecycle()
+    val appLanguage by vm.appLanguage.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+
     val accountState by vm.userAccount.collectAsStateWithLifecycle()
     val matchesState by vm.matches.collectAsStateWithLifecycle()
     val drawsState by vm.lotteryDraws.collectAsStateWithLifecycle()
+    val live2DStatus by vm.live2DStatus.collectAsStateWithLifecycle()
     val userOrdersState by vm.userOrders.collectAsStateWithLifecycle()
+    val userMiniGameRoundsState by vm.userMiniGameRounds.collectAsStateWithLifecycle()
     val userWalletRequestsState by vm.userWalletRequests.collectAsStateWithLifecycle()
     val userTransactionsState by vm.userTransactions.collectAsStateWithLifecycle()
     val leaderboardState by vm.leaderboard.collectAsStateWithLifecycle()
@@ -148,9 +218,13 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val allUsersState by vm.allUsers.collectAsStateWithLifecycle()
     val adminMembersState by vm.adminMembers.collectAsStateWithLifecycle()
     val adminInvitesState by vm.adminInvites.collectAsStateWithLifecycle()
+    val auditLogsState by vm.auditLogs.collectAsStateWithLifecycle()
+    val paymentAccounts by vm.paymentAccounts.collectAsStateWithLifecycle()
     val walletConfig by vm.walletConfig.collectAsStateWithLifecycle()
     val boardConfig by vm.boardConfig.collectAsStateWithLifecycle()
     val bettingConfig by vm.bettingConfig.collectAsStateWithLifecycle()
+    val systemGameConfig by vm.systemGameConfig.collectAsStateWithLifecycle()
+    val securityConfig by vm.securityConfig.collectAsStateWithLifecycle()
     val liveFeedState by vm.liveFeed.collectAsStateWithLifecycle()
 
     val appUpdateConfig by vm.appUpdateConfig.collectAsStateWithLifecycle()
@@ -164,6 +238,13 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val incomingCall by vm.incomingCall.collectAsStateWithLifecycle()
     var manualOpenUpdateDialog by remember { mutableStateOf(false) }
 
+    LaunchedEffect(isForceLoggedOut) {
+        if (isForceLoggedOut) {
+            snackbarHostState.showSnackbar("Admin မှ သင့် Session ကို Force Logout ပြုလုပ်လိုက်ပါသည်")
+            signOut(credentialManager, scope)
+        }
+    }
+
     val requestCallWithPermission = rememberCallPermissionLauncher { deniedMsg ->
         scope.launch {
             snackbarHostState.showSnackbar(deniedMsg)
@@ -171,7 +252,21 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     }
 
     val balanceKs = (accountState as? UiState.Success)?.data?.balanceKs ?: 0L
+    val currentUserAccount = (accountState as? UiState.Success)?.data
     val navController = rememberNavController()
+
+    val ipAllowedForAdmin = remember(securityConfig, currentPublicIp, isOwnerAdmin) {
+        !securityConfig.ipWhitelistEnabled ||
+            securityConfig.allowedIps.isEmpty() ||
+            isOwnerAdmin ||
+            (currentPublicIp != null && securityConfig.allowedIps.any { it.trim() == currentPublicIp?.trim() })
+    }
+    val needsAdminPin = remember(securityConfig, adminMember, adminPinVerified, isOwnerAdmin) {
+        !isOwnerAdmin &&
+            securityConfig.requireAdminPin &&
+            (adminMember?.pinHash?.isNotBlank() == true) &&
+            !adminPinVerified
+    }
 
     Scaffold(
         containerColor = DeepPitchBg,
@@ -186,69 +281,152 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                 BackHandler {
                     vm.setAdminMode(false)
                 }
-                AdminDashboardScreen(
-                    currentUserId = user.uid,
-                    allOrdersState = allOrdersState,
-                    allWalletRequestsState = allWalletRequestsState,
-                    matchesState = matchesState,
-                    drawsState = drawsState,
-                    allUsersState = allUsersState,
-                    adminMembersState = adminMembersState,
-                    adminInvitesState = adminInvitesState,
-                    allDirectMessagesState = allDirectMessagesState,
-                    groupMessagesState = groupMessagesState,
-                    appReviewsState = appReviewsState,
-                    appUpdateConfig = appUpdateConfig,
-                    walletConfig = walletConfig,
-                    boardConfig = boardConfig,
-                    bettingConfig = bettingConfig,
-                    busy = busy,
-                    onSwitchToCustomer = { vm.setAdminMode(false) },
-                    onRefreshAll = vm::refreshAllData,
-                    onAcceptOrder = vm::acceptOrder,
-                    onSettleWin = vm::settleOrderWon,
-                    onSettleLoss = vm::settleOrderLost,
-                    onRejectOrder = vm::rejectOrder,
-                    onDeleteOrder = vm::deleteOrder,
-                    onClearCompletedOrders = vm::clearCompletedOrders,
-                    onProcessWalletRequest = vm::processWalletRequest,
-                    onDeleteWalletRequest = vm::deleteWalletRequest,
-                    onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
-                    onSaveWalletConfig = vm::saveWalletConfig,
-                    onSaveBettingConfig = vm::saveBettingConfig,
-                    onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
-                    onAutoSettleCustomer = vm::autoSettleCustomerOrdersNow,
-                    onAutoSettleOrder = vm::autoSettleSingleOrderNow,
-                    onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
-                        vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
-                    },
-                    onUpdateMatchDetails = vm::updateMatchDetails,
-                    onDeleteMatch = vm::deleteMatch,
-                    onSaveNewDraw = { t, c, m -> vm.saveNewLotteryDraw(t, c, m) },
-                    onUpdateLotteryDraw = vm::updateLotteryDraw,
-                    onDeleteLotteryDraw = vm::deleteLotteryDraw,
-                    onSeedSampleBoard = vm::seedSampleBoard,
-                    onSyncDailyMatchesNow = vm::syncDailyMatchesNow,
-                    onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
-                    onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
-                    onToggleAutoLiveResults = vm::toggleAutoSyncLiveResults,
-                    onCreateAdminInvite = { label -> vm.createAdminInvite(label) },
-                    onToggleAdminInvite = vm::toggleAdminInvite,
-                    onRemoveAdminMember = vm::removeAdminMember,
-                    onAdjustUserBalance = vm::adjustUserBalance,
-                    onGiftRewardPoints = vm::giftRewardPoints,
-                    onSendAdminDirectMessage = vm::sendAdminDirectMessage,
-                    onDeleteDirectMessage = vm::deleteDirectMessage,
-                    onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = true) },
-                    onDeleteGroupMessage = vm::deleteGroupMessage,
-                    onSaveAppUpdateConfig = vm::saveAppUpdateConfig,
-                    onDeleteQualityReview = vm::deleteQualityReview,
-                    onCallCustomer = { uid, name, callType ->
-                        requestCallWithPermission(callType) {
-                            vm.startAdminCallToCustomer(uid, name, callType)
-                        }
+                when {
+                    !ipAllowedForAdmin -> {
+                        AlertDialog(
+                            onDismissRequest = { vm.setAdminMode(false) },
+                            title = { Text("IP Whitelist ကန့်သတ်ချက်", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text(
+                                    "လက်ရှိ IP (${currentPublicIp ?: "Checking..."}) သည် ခွင့်ပြုထားသော Admin IP စာရင်းတွင် မပါဝင်သေးပါ။ Main Admin မှ IP ထည့်သွင်းပေးမှသာ Admin Panel ဝင်နိုင်ပါမည်။"
+                                )
+                            },
+                            confirmButton = {
+                                Button(onClick = { vm.refreshPublicIp() }) {
+                                    Text("IP ပြန်စစ်မည်")
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { vm.setAdminMode(false) }) {
+                                    Text("Customer Mode")
+                                }
+                            }
+                        )
                     }
-                )
+                    needsAdminPin -> {
+                        var pinInput by remember { mutableStateOf("") }
+                        AlertDialog(
+                            onDismissRequest = { vm.setAdminMode(false) },
+                            title = { Text("Second Admin 2FA PIN ထည့်ပါ", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Admin Panel သို့ ဝင်ရောက်ရန် သတ်မှတ်ထားသော 2FA PIN ကို ရိုက်ထည့်ပါ။")
+                                    OutlinedTextField(
+                                        value = pinInput,
+                                        onValueChange = { pinInput = it.filter { c -> c.isDigit() }.take(8) },
+                                        label = { Text("Admin PIN (4-8 digits)") },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("admin_pin_prompt_input")
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = { vm.verifyAdminPin(pinInput) },
+                                    enabled = pinInput.length >= 4,
+                                    modifier = Modifier.testTag("admin_pin_prompt_confirm")
+                                ) {
+                                    Text("အတည်ပြု ဝင်မည်")
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { vm.setAdminMode(false) }) {
+                                    Text("ပိတ်မည်")
+                                }
+                            }
+                        )
+                    }
+                    else -> {
+                        AdminDashboardScreen(
+                            currentUserId = user.uid,
+                            isOwnerAdmin = isOwnerAdmin,
+                            permissions = currentAdminPermissions,
+                            allOrdersState = allOrdersState,
+                            allWalletRequestsState = allWalletRequestsState,
+                            matchesState = matchesState,
+                            drawsState = drawsState,
+                            allUsersState = allUsersState,
+                            adminMembersState = adminMembersState,
+                            adminInvitesState = adminInvitesState,
+                            allDirectMessagesState = allDirectMessagesState,
+                            groupMessagesState = groupMessagesState,
+                            appReviewsState = appReviewsState,
+                            auditLogsState = auditLogsState,
+                            paymentAccounts = paymentAccounts,
+                            appUpdateConfig = appUpdateConfig,
+                            walletConfig = walletConfig,
+                            boardConfig = boardConfig,
+                            bettingConfig = bettingConfig,
+                            systemGameConfig = systemGameConfig,
+                            securityConfig = securityConfig,
+                            currentPublicIp = currentPublicIp,
+                            busy = busy,
+                            onSwitchToCustomer = { vm.setAdminMode(false) },
+                            onRefreshAll = vm::refreshAllData,
+                            onAcceptOrder = vm::acceptOrder,
+                            onSettleWin = vm::settleOrderWon,
+                            onSettleLoss = vm::settleOrderLost,
+                            onRejectOrder = vm::rejectOrder,
+                            onDeleteOrder = vm::deleteOrder,
+                            onClearCompletedOrders = vm::clearCompletedOrders,
+                            onProcessWalletRequest = vm::processWalletRequest,
+                            onDeleteWalletRequest = vm::deleteWalletRequest,
+                            onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
+                            onSaveWalletConfig = vm::saveWalletConfig,
+                            onSaveBettingConfig = vm::saveBettingConfig,
+                            onSaveSystemGameConfig = vm::saveSystemGameConfig,
+                            onSaveSecurityConfig = vm::saveSecurityConfig,
+                            onRefreshPublicIp = vm::refreshPublicIp,
+                            onTriggerGlobalForceLogout = vm::triggerGlobalForceLogout,
+                            onSavePaymentAccount = vm::savePaymentAccount,
+                            onDeletePaymentAccount = vm::deletePaymentAccount,
+                            onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
+                            onAutoSettleCustomer = vm::autoSettleCustomerOrdersNow,
+                            onAutoSettleOrder = vm::autoSettleSingleOrderNow,
+                            onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
+                                vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
+                            },
+                            onUpdateMatchDetails = vm::updateMatchDetails,
+                            onDeleteMatch = vm::deleteMatch,
+                            onSaveNewDraw = { t, c, m, drawType -> vm.saveNewLotteryDraw(t, c, m, drawType) },
+                            onUpdateLotteryDraw = vm::updateLotteryDraw,
+                            onDeleteLotteryDraw = vm::deleteLotteryDraw,
+                            onSeedSampleBoard = vm::seedSampleBoard,
+                            onSyncDailyMatchesNow = vm::syncDailyMatchesNow,
+                            onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
+                            onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
+                            onToggleAutoLiveResults = vm::toggleAutoSyncLiveResults,
+                            onCreateAdminInvite = { label, email, pin, perms ->
+                                vm.createAdminInvite(label, email, pin, perms)
+                            },
+                            onToggleAdminInvite = vm::toggleAdminInvite,
+                            onUpdateAdminPermissions = vm::updateAdminMemberPermissions,
+                            onSetAdminStatus = vm::setAdminMemberStatus,
+                            onResetAdminPin = vm::resetAdminMemberPin,
+                            onForceLogoutAdmin = vm::triggerForceLogoutAdmin,
+                            onRemoveAdminMember = vm::removeAdminMember,
+                            onAdjustUserBalance = vm::adjustUserBalance,
+                            onGiftRewardPoints = vm::giftRewardPoints,
+                            onToggleLockUser = vm::setCustomerLocked,
+                            onForceLogoutUser = vm::triggerForceLogoutUser,
+                            onSendAdminDirectMessage = vm::sendAdminDirectMessage,
+                            onDeleteDirectMessage = vm::deleteDirectMessage,
+                            onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = true) },
+                            onDeleteGroupMessage = vm::deleteGroupMessage,
+                            onSaveAppUpdateConfig = vm::saveAppUpdateConfig,
+                            onDeleteQualityReview = vm::deleteQualityReview,
+                            onCallCustomer = { uid, name, callType ->
+                                requestCallWithPermission(callType) {
+                                    vm.startAdminCallToCustomer(uid, name, callType)
+                                }
+                            }
+                        )
+                    }
+                }
             } else {
                 NavHost(
                     navController = navController,
@@ -260,6 +438,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             displayName = vm.displayName,
                             isAdmin = isAdmin,
                             pendingAdminCount = pendingAdminBadge,
+                            systemGameConfig = systemGameConfig,
+                            appLanguage = appLanguage,
                             availableApkUpdate = availableApkUpdate,
                             onOpenUpdateDialog = { manualOpenUpdateDialog = true },
                             onNavigate = { route -> navController.navigate(route.name) },
@@ -286,6 +466,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             isParlay = true,
                             matchesState = matchesState,
                             balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
                             onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult ->
@@ -302,6 +483,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             isParlay = false,
                             matchesState = matchesState,
                             balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
                             onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult ->
@@ -313,10 +495,29 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             }
                         )
                     }
+                    composable(CustomerRoute.TWO_D.name) {
+                        TwoDLotteryScreen(
+                            drawsState = drawsState,
+                            live2DStatus = live2DStatus,
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            busy = busy,
+                            onRefreshLive2D = vm::refreshLive2DStatus,
+                            onBack = { navController.popBackStack() },
+                            onSubmit2DOrder = { sel, round, stake, mult ->
+                                vm.placeOrder("two_d", sel, emptyList(), round, stake, mult) {
+                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                        popUpTo(ROUTE_HOME)
+                                    }
+                                }
+                            }
+                        )
+                    }
                     composable(CustomerRoute.THREE_D.name) {
                         ThreeDLotteryScreen(
                             drawsState = drawsState,
                             balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
                             onSubmit3DOrder = { sel, round, stake, mult ->
@@ -324,6 +525,44 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.DICE_GAME.name) {
+                        DiceGameScreen(
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            roundsState = userMiniGameRoundsState,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onPlayDice = { opt, exact, stake, onDone ->
+                                vm.playDiceGame(opt, exact, stake) { res ->
+                                    res.onSuccess { (dice, round) -> onDone(dice, round) }
+                                        .onFailure { err ->
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(err.localizedMessage ?: "Dice game failed")
+                                            }
+                                        }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.SIX_ANIMALS.name) {
+                        SixAnimalsGameScreen(
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            roundsState = userMiniGameRoundsState,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onPlaySixAnimals = { idx, labels, stake, onDone ->
+                                vm.playSixAnimalsGame(idx, labels, stake) { res ->
+                                    res.onSuccess { (rolls, round) -> onDone(rolls, round) }
+                                        .onFailure { err ->
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(err.localizedMessage ?: "6 Animals game failed")
+                                            }
+                                        }
                                 }
                             }
                         )
@@ -350,6 +589,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             requestsState = userWalletRequestsState,
                             transactionsState = userTransactionsState,
                             walletConfig = walletConfig,
+                            paymentAccounts = paymentAccounts,
                             busy = busy,
                             onBack = { navController.popBackStack() },
                             onSubmitWalletRequest = { type, amt, ch, ref ->
@@ -379,6 +619,17 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             busy = busy,
                             onBack = { navController.popBackStack() },
                             onExchange = { pts -> vm.exchangePoints(pts) }
+                        )
+                    }
+                    composable(CustomerRoute.SETTINGS.name) {
+                        SettingsAndRulesScreen(
+                            account = currentUserAccount,
+                            displayName = vm.displayName,
+                            currentLanguage = appLanguage,
+                            systemGameConfig = systemGameConfig,
+                            onSelectLanguage = vm::setAppLanguage,
+                            onUpdateSecurityPin = vm::updateCustomerSecurityPin,
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     composable(CustomerRoute.CHAT.name) {
@@ -458,3 +709,4 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
         }
     }
 }
+

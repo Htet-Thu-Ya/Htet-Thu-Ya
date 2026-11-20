@@ -38,11 +38,12 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Percent
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Videocam
@@ -67,7 +68,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,7 +75,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -84,22 +83,29 @@ import androidx.compose.ui.unit.dp
 import com.example.data.betting.SettlementCalculator
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
+import com.example.data.model.AdminPermissions
 import com.example.data.model.AppQualityReview
 import com.example.data.model.AppUpdateConfig
+import com.example.data.model.AuditLogEntry
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
 import com.example.data.model.LotteryDraw
+import com.example.data.model.PaymentAccount
+import com.example.data.model.SecurityConfig
 import com.example.data.model.SportMatch
+import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
-import com.example.ui.components.HtetThuYaBrandLogo
+import com.example.ui.components.LoTaYaBrandLogo
+import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
 import com.example.ui.components.StatusBadge
+import com.example.ui.components.TeamLogoAvatar
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.AdminCrimson
@@ -113,9 +119,26 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PitchEmeraldDark
 
+private enum class AdminTabKey {
+    ORDERS,
+    SETTLEMENT,
+    WALLET,
+    BOARD,
+    CUSTOMERS,
+    FINANCE,
+    SUB_ADMINS,
+    SYSTEM_SETTINGS,
+    SECURITY,
+    AUDIT_LOGS,
+    CHAT,
+    UPDATE_QUALITY
+}
+
 @Composable
 fun AdminDashboardScreen(
     currentUserId: String,
+    isOwnerAdmin: Boolean = true,
+    permissions: AdminPermissions = AdminPermissions.ALL_GRANTED,
     allOrdersState: UiState<List<BetOrder>>,
     allWalletRequestsState: UiState<List<WalletRequest>>,
     matchesState: UiState<List<SportMatch>>,
@@ -126,10 +149,15 @@ fun AdminDashboardScreen(
     allDirectMessagesState: UiState<List<DirectChatMessage>>,
     groupMessagesState: UiState<List<GroupChatMessage>>,
     appReviewsState: UiState<List<AppQualityReview>>,
+    auditLogsState: UiState<List<AuditLogEntry>> = UiState.Success(emptyList()),
+    paymentAccounts: List<PaymentAccount> = emptyList(),
     appUpdateConfig: AppUpdateConfig?,
     walletConfig: WalletConfig,
     boardConfig: BoardConfig,
     bettingConfig: BettingConfig,
+    systemGameConfig: SystemGameConfig = SystemGameConfig(),
+    securityConfig: SecurityConfig = SecurityConfig(),
+    currentPublicIp: String? = null,
     busy: Boolean,
     onSwitchToCustomer: () -> Unit,
     onRefreshAll: () -> Unit,
@@ -144,13 +172,19 @@ fun AdminDashboardScreen(
     onClearProcessedWalletRequests: (List<String>) -> Unit,
     onSaveWalletConfig: (Double, String, Double, String) -> Unit,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
+    onSaveSystemGameConfig: (SystemGameConfig) -> Unit = {},
+    onSaveSecurityConfig: (SecurityConfig) -> Unit = {},
+    onRefreshPublicIp: () -> Unit = {},
+    onTriggerGlobalForceLogout: () -> Unit = {},
+    onSavePaymentAccount: (id: String?, providerName: String, accountName: String, accountNumber: String, note: String, active: Boolean) -> Unit = { _, _, _, _, _, _ -> },
+    onDeletePaymentAccount: (String) -> Unit = {},
     onAutoSettleNow: () -> Unit,
     onAutoSettleCustomer: (String, String) -> Unit,
     onAutoSettleOrder: (BetOrder) -> Unit,
     onSaveNewMatch: (String, String, String, String, String, String, Double, Double) -> Unit,
     onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long) -> Unit,
     onDeleteMatch: (String) -> Unit,
-    onSaveNewDraw: (String, String, Double) -> Unit,
+    onSaveNewDraw: (roundTitle: String, closeTimeLabel: String, payoutMultiplier: Double, drawType: String) -> Unit,
     onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
     onDeleteLotteryDraw: (String) -> Unit,
     onSeedSampleBoard: () -> Unit,
@@ -158,11 +192,17 @@ fun AdminDashboardScreen(
     onSyncLiveResultsNow: () -> Unit,
     onToggleAutoDailyMatches: (Boolean) -> Unit,
     onToggleAutoLiveResults: (Boolean) -> Unit,
-    onCreateAdminInvite: (String) -> Unit,
+    onCreateAdminInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
     onToggleAdminInvite: (String, Boolean) -> Unit,
+    onUpdateAdminPermissions: (String, String, AdminPermissions) -> Unit = { _, _, _ -> },
+    onSetAdminStatus: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onResetAdminPin: (String, String, String) -> Unit = { _, _, _ -> },
+    onForceLogoutAdmin: (String, String) -> Unit = { _, _ -> },
     onRemoveAdminMember: (String) -> Unit,
     onAdjustUserBalance: (String, Long, String) -> Unit,
     onGiftRewardPoints: (String, String, Long, String) -> Unit,
+    onToggleLockUser: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onForceLogoutUser: (String, String) -> Unit = { _, _ -> },
     onSendAdminDirectMessage: (String, String) -> Unit,
     onDeleteDirectMessage: (String) -> Unit,
     onSendGroupMessage: (String) -> Unit,
@@ -171,7 +211,45 @@ fun AdminDashboardScreen(
     onDeleteQualityReview: (String) -> Unit,
     onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit = { _, _, _ -> }
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val visibleTabs = remember(isOwnerAdmin, permissions) {
+        buildList {
+            if (isOwnerAdmin || permissions.canManageOrders) {
+                add(AdminTabKey.ORDERS)
+                add(AdminTabKey.SETTLEMENT)
+            }
+            if (isOwnerAdmin || permissions.canApproveWallet || permissions.canEditWalletRates) {
+                add(AdminTabKey.WALLET)
+            }
+            if (isOwnerAdmin || permissions.canManageBoard) {
+                add(AdminTabKey.BOARD)
+            }
+            if (isOwnerAdmin || permissions.canViewUsers) {
+                add(AdminTabKey.CUSTOMERS)
+            }
+            if (isOwnerAdmin) {
+                add(AdminTabKey.FINANCE)
+                add(AdminTabKey.SUB_ADMINS)
+                add(AdminTabKey.SYSTEM_SETTINGS)
+                add(AdminTabKey.SECURITY)
+            }
+            add(AdminTabKey.AUDIT_LOGS)
+            if (isOwnerAdmin || permissions.canChat) {
+                add(AdminTabKey.CHAT)
+            }
+            if (isOwnerAdmin || permissions.canEditGameConfig) {
+                add(AdminTabKey.UPDATE_QUALITY)
+            }
+        }
+    }
+
+    var activeTabKey by remember { mutableStateOf(visibleTabs.firstOrNull() ?: AdminTabKey.AUDIT_LOGS) }
+    LaunchedEffect(visibleTabs) {
+        if (!visibleTabs.contains(activeTabKey)) {
+            activeTabKey = visibleTabs.firstOrNull() ?: AdminTabKey.AUDIT_LOGS
+        }
+    }
+    val selectedTabIndex = visibleTabs.indexOf(activeTabKey).coerceAtLeast(0)
+
     var chatCustomerUid by remember { mutableStateOf<String?>(null) }
     var inspectingUserId by remember { mutableStateOf<String?>(null) }
     var settlingWinOrder by remember { mutableStateOf<BetOrder?>(null) }
@@ -188,10 +266,13 @@ fun AdminDashboardScreen(
     val directMsgs = (allDirectMessagesState as? UiState.Success)?.data ?: emptyList()
     val groupMsgs = (groupMessagesState as? UiState.Success)?.data ?: emptyList()
     val reviews = (appReviewsState as? UiState.Success)?.data ?: emptyList()
+    val auditLogs = (auditLogsState as? UiState.Success)?.data ?: emptyList()
     val usersById = remember(users) { users.associateBy { it.userId } }
 
     val pendingOrderCount = orders.count { it.status == "pending" }
-    val pendingWalletCount = walletReqs.count { it.status == "pending" }
+    val pendingWalletCount = walletReqs.count {
+        it.status == "pending" || (isOwnerAdmin && it.status == "awaiting_main_approval")
+    }
 
     Scaffold(
         containerColor = DeepPitchBg,
@@ -213,19 +294,34 @@ fun AdminDashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        HtetThuYaBrandLogo(size = 40.dp)
+                        LoTaYaBrandLogo(size = 40.dp)
                         Spacer(Modifier.width(10.dp))
                         Column {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "လိုတရ Admin",
+                                    color = ChampionshipGold,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Surface(
+                                    color = if (isOwnerAdmin) ChampionshipGold else Color(0xFF0284C7),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = if (isOwnerAdmin) "MAIN ADMIN" else "SECOND ADMIN",
+                                        color = if (isOwnerAdmin) InkDark else Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                "Htet Thu Ya Admin",
-                                color = ChampionshipGold,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                "အော်ဒါစောင့်ကြည့် & စီမံခန့်ခွဲမှု",
+                                if (isOwnerAdmin) "စနစ်တစ်ခုလုံး စီမံခန့်ခွဲမှု Dashboard"
+                                else "ခွင့်ပြုထားသော ကဏ္ဍများ (Scoped Dashboard)",
                                 color = Color(0xFFE5D2D4),
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
@@ -270,70 +366,45 @@ fun AdminDashboardScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             ScrollableTabRow(
-                selectedTabIndex = selectedTab,
+                selectedTabIndex = selectedTabIndex,
                 containerColor = DeepPitchSurface,
                 contentColor = ChampionshipGold,
                 edgePadding = 12.dp
             ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("အော်ဒါ ($pendingOrderCount)") },
-                    modifier = Modifier.testTag("admin_tab_orders")
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text("စာရင်းချုပ်") },
-                    modifier = Modifier.testTag("admin_tab_settlement")
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = { Text("ငွေသွင်း/ထုတ် ($pendingWalletCount)") },
-                    modifier = Modifier.testTag("admin_tab_wallet")
-                )
-                Tab(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
-                    text = { Text("ပွဲစဉ် / ၃လုံး") },
-                    modifier = Modifier.testTag("admin_tab_board")
-                )
-                Tab(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
-                    text = { Text("Customer (${users.size})") },
-                    modifier = Modifier.testTag("admin_tab_customers")
-                )
-                Tab(
-                    selected = selectedTab == 5,
-                    onClick = { selectedTab = 5 },
-                    text = { Text("သူငယ်ချင်း Admin") },
-                    modifier = Modifier.testTag("admin_tab_team")
-                )
-                Tab(
-                    selected = selectedTab == 6,
-                    onClick = { selectedTab = 6 },
-                    text = { Text("Chat (${directMsgs.size + groupMsgs.size})") },
-                    modifier = Modifier.testTag("admin_tab_chat")
-                )
-                Tab(
-                    selected = selectedTab == 7,
-                    onClick = { selectedTab = 7 },
-                    text = { Text("Update / အဆင့် (${reviews.size})") },
-                    modifier = Modifier.testTag("admin_tab_update_quality")
-                )
+                visibleTabs.forEach { tabKey ->
+                    val (label, tag) = when (tabKey) {
+                        AdminTabKey.ORDERS -> "အော်ဒါ ($pendingOrderCount)" to "admin_tab_orders"
+                        AdminTabKey.SETTLEMENT -> "စာရင်းချုပ်" to "admin_tab_settlement"
+                        AdminTabKey.WALLET -> "ငွေသွင်း/ထုတ် ($pendingWalletCount)" to "admin_tab_wallet"
+                        AdminTabKey.BOARD -> "ပွဲစဉ် / ထီ" to "admin_tab_board"
+                        AdminTabKey.CUSTOMERS -> "Customer (${users.size})" to "admin_tab_customers"
+                        AdminTabKey.FINANCE -> "ဘဏ္ဍာရေး/Bank" to "admin_tab_finance"
+                        AdminTabKey.SUB_ADMINS -> "Second Admin" to "admin_tab_sub_admins"
+                        AdminTabKey.SYSTEM_SETTINGS -> "ဂိမ်း/စနစ်" to "admin_tab_system_settings"
+                        AdminTabKey.SECURITY -> "လုံခြုံရေး" to "admin_tab_security"
+                        AdminTabKey.AUDIT_LOGS -> "Audit Log (${auditLogs.size})" to "admin_tab_audit_logs"
+                        AdminTabKey.CHAT -> "Chat (${directMsgs.size + groupMsgs.size})" to "admin_tab_chat"
+                        AdminTabKey.UPDATE_QUALITY -> "Update / အဆင့် (${reviews.size})" to "admin_tab_update_quality"
+                    }
+                    Tab(
+                        selected = activeTabKey == tabKey,
+                        onClick = { activeTabKey = tabKey },
+                        text = { Text(label) },
+                        modifier = Modifier.testTag(tag)
+                    )
+                }
             }
 
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.TopCenter
             ) {
-                when (selectedTab) {
-                    0 -> AdminOrdersTab(
+                when (activeTabKey) {
+                    AdminTabKey.ORDERS -> AdminOrdersTab(
                         orders = orders,
                         usersById = usersById,
                         bettingConfig = bettingConfig,
+                        canEditGameConfig = isOwnerAdmin || permissions.canEditGameConfig,
                         busy = busy,
                         onSaveBettingConfig = onSaveBettingConfig,
                         onAutoSettleNow = onAutoSettleNow,
@@ -347,7 +418,7 @@ fun AdminDashboardScreen(
                         onDeleteOrder = onDeleteOrder,
                         onClearCompletedOrders = onClearCompletedOrders
                     )
-                    1 -> AdminSettlementTab(
+                    AdminTabKey.SETTLEMENT -> AdminSettlementTab(
                         orders = orders,
                         usersById = usersById,
                         busy = busy,
@@ -361,16 +432,20 @@ fun AdminDashboardScreen(
                         onRejectOrder = { onRejectOrder(it, "ပယ်ဖျက်ပြီး - ငွေပြန်အမ်းပြီး") },
                         onDeleteOrder = onDeleteOrder
                     )
-                    2 -> AdminWalletRequestsTab(
+                    AdminTabKey.WALLET -> AdminWalletRequestsTab(
                         requests = walletReqs,
                         walletConfig = walletConfig,
+                        systemGameConfig = systemGameConfig,
+                        isOwnerAdmin = isOwnerAdmin,
+                        canApproveWallet = isOwnerAdmin || permissions.canApproveWallet,
+                        canEditWalletRates = isOwnerAdmin || permissions.canEditWalletRates,
                         busy = busy,
                         onProcess = onProcessWalletRequest,
                         onDeleteRequest = onDeleteWalletRequest,
                         onClearProcessed = onClearProcessedWalletRequests,
                         onSaveWalletConfig = onSaveWalletConfig
                     )
-                    3 -> AdminBoardTab(
+                    AdminTabKey.BOARD -> AdminBoardTab(
                         matches = matches,
                         draws = draws,
                         boardConfig = boardConfig,
@@ -387,29 +462,71 @@ fun AdminDashboardScreen(
                         onToggleAutoDailyMatches = onToggleAutoDailyMatches,
                         onToggleAutoLiveResults = onToggleAutoLiveResults
                     )
-                    4 -> AdminCustomersTab(
+                    AdminTabKey.CUSTOMERS -> AdminCustomersTab(
                         users = users,
                         orders = orders,
                         busy = busy,
+                        canAdjustBalance = isOwnerAdmin || permissions.canAdjustBalance,
+                        canLockUsers = isOwnerAdmin || permissions.canLockUsers,
+                        canChat = isOwnerAdmin || permissions.canChat,
+                        canManageOrders = isOwnerAdmin || permissions.canManageOrders,
                         onAutoSettleCustomer = onAutoSettleCustomer,
                         onInspectCustomer = { u -> inspectingUserId = u.userId },
                         onOpenAdjustBalance = { u -> adjustingUser = u },
                         onOpenGiftPoints = { u -> giftingUser = u },
+                        onToggleLockUser = { u ->
+                            onToggleLockUser(u.userId, u.displayName.ifBlank { "Member" }, !u.isLocked)
+                        },
+                        onForceLogoutUser = { u ->
+                            onForceLogoutUser(u.userId, u.displayName.ifBlank { "Member" })
+                        },
                         onOpenChatWithCustomer = { u ->
                             chatCustomerUid = u.userId
-                            selectedTab = 6
+                            if (visibleTabs.contains(AdminTabKey.CHAT)) {
+                                activeTabKey = AdminTabKey.CHAT
+                            }
                         },
                         onCallCustomer = onCallCustomer
                     )
-                    5 -> AdminTeamTab(
+                    AdminTabKey.FINANCE -> AdminFinancialOverviewTab(
+                        users = users,
+                        orders = orders,
+                        walletRequests = walletReqs,
+                        paymentAccounts = paymentAccounts,
+                        busy = busy,
+                        onSavePaymentAccount = onSavePaymentAccount,
+                        onDeletePaymentAccount = onDeletePaymentAccount
+                    )
+                    AdminTabKey.SUB_ADMINS -> AdminSubAdminsTab(
                         currentUserId = currentUserId,
                         admins = admins,
                         invites = invites,
                         onCreateInvite = onCreateAdminInvite,
                         onToggleInvite = onToggleAdminInvite,
+                        onUpdateAdminPermissions = onUpdateAdminPermissions,
+                        onSetAdminStatus = onSetAdminStatus,
+                        onResetAdminPin = onResetAdminPin,
+                        onForceLogoutAdmin = onForceLogoutAdmin,
                         onRemoveAdmin = onRemoveAdminMember
                     )
-                    6 -> AdminChatTab(
+                    AdminTabKey.SYSTEM_SETTINGS -> AdminSystemSettingsTab(
+                        config = systemGameConfig,
+                        busy = busy,
+                        onSaveSystemGameConfig = onSaveSystemGameConfig
+                    )
+                    AdminTabKey.SECURITY -> AdminSecurityControlsTab(
+                        securityConfig = securityConfig,
+                        currentPublicIp = currentPublicIp,
+                        busy = busy,
+                        onRefreshIp = onRefreshPublicIp,
+                        onSaveSecurityConfig = onSaveSecurityConfig,
+                        onTriggerGlobalForceLogout = onTriggerGlobalForceLogout
+                    )
+                    AdminTabKey.AUDIT_LOGS -> AdminAuditLogsTab(
+                        logs = auditLogs,
+                        isOwnerOrCanViewAll = isOwnerAdmin || permissions.canViewAllLogs
+                    )
+                    AdminTabKey.CHAT -> AdminChatTab(
                         currentUserId = currentUserId,
                         users = users,
                         allDirectMessages = directMsgs,
@@ -422,7 +539,7 @@ fun AdminDashboardScreen(
                         onDeleteGroupMessage = onDeleteGroupMessage,
                         onCallCustomer = onCallCustomer
                     )
-                    7 -> AdminUpdateAndQualityTab(
+                    AdminTabKey.UPDATE_QUALITY -> AdminUpdateAndQualityTab(
                         currentUserId = currentUserId,
                         appUpdateConfig = appUpdateConfig,
                         reviews = reviews,
@@ -447,6 +564,9 @@ fun AdminDashboardScreen(
             customerOrders = custOrders,
             customerWalletReqs = custReqs,
             busy = busy,
+            canAdjustBalance = isOwnerAdmin || permissions.canAdjustBalance,
+            canLockUsers = isOwnerAdmin || permissions.canLockUsers,
+            isOwnerAdmin = isOwnerAdmin,
             onDismiss = { inspectingUserId = null },
             onRefresh = onRefreshAll,
             onAutoSettleCustomer = {
@@ -455,6 +575,12 @@ fun AdminDashboardScreen(
             onAutoSettleOrder = onAutoSettleOrder,
             onOpenAdjustBalance = { adjustingUser = inspectedUser },
             onOpenGiftPoints = { giftingUser = inspectedUser },
+            onToggleLockUser = {
+                onToggleLockUser(uid, inspectedUser.displayName.ifBlank { "Member" }, !inspectedUser.isLocked)
+            },
+            onForceLogoutUser = {
+                onForceLogoutUser(uid, inspectedUser.displayName.ifBlank { "Member" })
+            },
             onAcceptOrder = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
             onRequestSettleWin = { order -> settlingWinOrder = order },
             onSettleLoss = { onSettleLoss(it, "စာရင်းပိတ်ပြီး") },
@@ -465,7 +591,9 @@ fun AdminDashboardScreen(
             onOpenChat = {
                 inspectingUserId = null
                 chatCustomerUid = uid
-                selectedTab = 6
+                if (visibleTabs.contains(AdminTabKey.CHAT)) {
+                    activeTabKey = AdminTabKey.CHAT
+                }
             },
             onStartVoiceCall = {
                 inspectingUserId = null
@@ -519,6 +647,7 @@ private fun AdminOrdersTab(
     orders: List<BetOrder>,
     usersById: Map<String, UserAccount>,
     bettingConfig: BettingConfig,
+    canEditGameConfig: Boolean,
     busy: Boolean,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
@@ -574,14 +703,15 @@ private fun AdminOrdersTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
-                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (canEditGameConfig) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -701,6 +831,18 @@ private fun AdminOrdersTab(
                             }
                         }
                     }
+                }
+            }
+        }
+        } else {
+            item {
+                Button(
+                    onClick = onAutoSettleNow,
+                    enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                    modifier = Modifier.fillMaxWidth().testTag("auto_settle_now_button")
+                ) {
+                    Text("ပွဲပြီး / ထီထွက် အော်ဒါများ Auto ရှင်းမည်")
                 }
             }
         }
@@ -914,6 +1056,10 @@ private fun AdminOrdersTab(
 private fun AdminWalletRequestsTab(
     requests: List<WalletRequest>,
     walletConfig: WalletConfig,
+    systemGameConfig: SystemGameConfig,
+    isOwnerAdmin: Boolean,
+    canApproveWallet: Boolean,
+    canEditWalletRates: Boolean,
     busy: Boolean,
     onProcess: (WalletRequest, Boolean, String) -> Unit,
     onDeleteRequest: (String) -> Unit,
@@ -953,127 +1099,147 @@ private fun AdminWalletRequestsTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
-                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showWalletConfig = !showWalletConfig }
-                            .testTag("toggle_wallet_config_card"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.Percent, contentDescription = null, tint = ChampionshipGold)
-                            Spacer(Modifier.width(8.dp))
-                            Column {
+        if (canEditWalletRates) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showWalletConfig = !showWalletConfig }
+                                .testTag("toggle_wallet_config_card"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Percent, contentDescription = null, tint = ChampionshipGold)
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        "ငွေသွင်း / ငွေထုတ် ရာခိုင်နှုန်း သတ်မှတ်ချက်",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    val dSign = when (depositMode) { "bonus" -> "+"; "fee" -> "-"; else -> "" }
+                                    val wSign = when (withdrawMode) { "bonus" -> "+"; "fee" -> "-"; else -> "" }
+                                    Text(
+                                        "သွင်း: $dSign${depositPctText.ifBlank { "0" }}% • ထုတ်: $wSign${withdrawPctText.ifBlank { "0" }}%",
+                                        color = Color(0xFFB4C8BE),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    "ငွေသွင်း / ငွေထုတ် ရာခိုင်နှုန်း သတ်မှတ်ချက်",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    text = if (showWalletConfig) "ဝှက်မည်" else "ပြမည်",
+                                    color = ChampionshipGold,
+                                    style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold
                                 )
-                                val dSign = when (depositMode) { "bonus" -> "+"; "fee" -> "-"; else -> "" }
-                                val wSign = when (withdrawMode) { "bonus" -> "+"; "fee" -> "-"; else -> "" }
-                                Text(
-                                    "သွင်း: $dSign${depositPctText.ifBlank { "0" }}% • ထုတ်: $wSign${withdrawPctText.ifBlank { "0" }}%",
-                                    color = Color(0xFFB4C8BE),
-                                    style = MaterialTheme.typography.bodySmall
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    imageVector = if (showWalletConfig) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = "Toggle wallet config",
+                                    tint = ChampionshipGold
                                 )
                             }
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+
+                        if (showWalletConfig) {
                             Text(
-                                text = if (showWalletConfig) "ဝှက်မည်" else "ပြမည်",
-                                color = ChampionshipGold,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
+                                "ငွေသွင်းလျှင် အပိုဆု (+) သို့မဟုတ် ဝန်ဆောင်ခ (-)၊ ငွေထုတ်လျှင် ဝန်ဆောင်ခ (-) သို့မဟုတ် အပိုဆု (+) ကို စိတ်ကြိုက်သတ်မှတ်နိုင်ပါသည်။",
+                                color = Color(0xFFB4C8BE),
+                                style = MaterialTheme.typography.bodySmall
                             )
-                            Spacer(Modifier.width(2.dp))
-                            Icon(
-                                imageVector = if (showWalletConfig) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = "Toggle wallet config",
-                                tint = ChampionshipGold
-                            )
-                        }
-                    }
 
-                    if (showWalletConfig) {
-                        Text(
-                            "ငွေသွင်းလျှင် အပိုဆု (+) သို့မဟုတ် ဝန်ဆောင်ခ (-)၊ ငွေထုတ်လျှင် ဝန်ဆောင်ခ (-) သို့မဟုတ် အပိုဆု (+) ကို စိတ်ကြိုက်သတ်မှတ်နိုင်ပါသည်။",
-                            color = Color(0xFFB4C8BE),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-
-                        Text("ငွေသွင်း (Deposit %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = depositPctText,
-                                onValueChange = { depositPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
-                                label = { Text("% နှုန်း") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                ),
-                                modifier = Modifier.width(100.dp).testTag("deposit_percent_input")
-                            )
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf("bonus" to "+ အပိုဆု", "fee" to "- ဝန်ဆောင်ခ", "none" to "0% မယူ").forEach { (m, lbl) ->
-                                    FilterChip(
-                                        selected = depositMode == m,
-                                        onClick = { depositMode = m },
-                                        label = { Text(lbl) }
-                                    )
+                            Text("ငွေသွင်း (Deposit %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = depositPctText,
+                                    onValueChange = { depositPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
+                                    label = { Text("% နှုန်း") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    modifier = Modifier.width(100.dp).testTag("deposit_percent_input")
+                                )
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("bonus" to "+ အပိုဆု", "fee" to "- ဝန်ဆောင်ခ", "none" to "0% မယူ").forEach { (m, lbl) ->
+                                        FilterChip(
+                                            selected = depositMode == m,
+                                            onClick = { depositMode = m },
+                                            label = { Text(lbl) }
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        Text("ငွေထုတ် (Withdraw %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = withdrawPctText,
-                                onValueChange = { withdrawPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
-                                label = { Text("% နှုန်း") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                ),
-                                modifier = Modifier.width(100.dp).testTag("withdraw_percent_input")
-                            )
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf("fee" to "- ဝန်ဆောင်ခ", "bonus" to "+ အပိုဆု", "none" to "0% မယူ").forEach { (m, lbl) ->
-                                    FilterChip(
-                                        selected = withdrawMode == m,
-                                        onClick = { withdrawMode = m },
-                                        label = { Text(lbl) }
-                                    )
+                            Text("ငွေထုတ် (Withdraw %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = withdrawPctText,
+                                    onValueChange = { withdrawPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
+                                    label = { Text("% နှုန်း") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    modifier = Modifier.width(100.dp).testTag("withdraw_percent_input")
+                                )
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("fee" to "- ဝန်ဆောင်ခ", "bonus" to "+ အပိုဆု", "none" to "0% မယူ").forEach { (m, lbl) ->
+                                        FilterChip(
+                                            selected = withdrawMode == m,
+                                            onClick = { withdrawMode = m },
+                                            label = { Text(lbl) }
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        Button(
-                            onClick = {
-                                val dPct = (depositPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
-                                val wPct = (withdrawPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
-                                onSaveWalletConfig(dPct, depositMode, wPct, withdrawMode)
-                            },
-                            enabled = !busy,
-                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                            modifier = Modifier.fillMaxWidth().testTag("save_wallet_config_button")
-                        ) {
-                            Text("ရာခိုင်နှုန်း သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
+                            Button(
+                                onClick = {
+                                    val dPct = (depositPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
+                                    val wPct = (withdrawPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
+                                    onSaveWalletConfig(dPct, depositMode, wPct, withdrawMode)
+                                },
+                                enabled = !busy,
+                                colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                                modifier = Modifier.fillMaxWidth().testTag("save_wallet_config_button")
+                            ) {
+                                Text("ရာခိုင်နှုန်း သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
+                }
+            }
+        }
+
+        if (systemGameConfig.dualApprovalThresholdKs > 0L) {
+            item {
+                Surface(
+                    color = DeepPitchElevated,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Dual Approval စည်းမျဉ်း: ${formatKs(systemGameConfig.dualApprovalThresholdKs)} နှင့်အထက် ငွေထုတ်မှုများကို Main Admin မှ ထပ်ဆင့်အတည်ပြုပေးရပါမည်။",
+                        color = ChampionshipGold,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
             }
         }
@@ -1123,7 +1289,7 @@ private fun AdminWalletRequestsTab(
                             )
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 StatusBadge(req.status)
-                                if (req.status != "pending") {
+                                if (req.status in listOf("approved", "rejected")) {
                                     IconButton(
                                         onClick = { deletingRequest = req },
                                         modifier = Modifier.testTag("delete_wallet_request_${req.id}")
@@ -1152,20 +1318,38 @@ private fun AdminWalletRequestsTab(
                         Text("Ref: ${req.referenceNote}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                         Text(formatTimestamp(req.createdAt), color = InkMuted, style = MaterialTheme.typography.labelMedium)
 
-                        if (req.status == "pending") {
+                        if (req.status == "awaiting_main_approval" && !isOwnerAdmin) {
+                            Spacer(Modifier.height(8.dp))
+                            Surface(color = Color(0xFFFEF3C7), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = "Main Admin အတည်ပြုချက် စောင့်ဆိုင်းနေသည် (${req.adminNote})",
+                                    color = Color(0xFF92400E),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+
+                        val canActOnReq = canApproveWallet && (
+                            req.status == "pending" || (isOwnerAdmin && req.status == "awaiting_main_approval")
+                        )
+                        if (canActOnReq) {
                             Spacer(Modifier.height(10.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     onClick = { onProcess(req, true, "အတည်ပြုပြီး") },
+                                    enabled = !busy,
                                     colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("အတည်ပြု")
+                                    Text(if (req.status == "awaiting_main_approval") "Main Admin အတည်ပြု" else "အတည်ပြု")
                                 }
                                 OutlinedButton(
                                     onClick = { onProcess(req, false, "ပယ်ဖျက်ပြီး") },
+                                    enabled = !busy,
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(Icons.Default.Close, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(16.dp))
@@ -1215,7 +1399,7 @@ private fun AdminBoardTab(
     onSaveNewMatch: (String, String, String, String, String, String, Double, Double) -> Unit,
     onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long) -> Unit,
     onDeleteMatch: (String) -> Unit,
-    onSaveNewDraw: (String, String, Double) -> Unit,
+    onSaveNewDraw: (roundTitle: String, closeTimeLabel: String, payoutMultiplier: Double, drawType: String) -> Unit,
     onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
     onDeleteLotteryDraw: (String) -> Unit,
     onSeedSampleBoard: () -> Unit,
@@ -1377,7 +1561,7 @@ private fun AdminBoardTab(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("၃လုံးထီသစ်")
+                    Text("2D / 3D ထီသစ်")
                 }
             }
         }
@@ -1392,7 +1576,7 @@ private fun AdminBoardTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "၃လုံးထီ အကြိမ်များ (${draws.size})",
+                    "၂လုံး / ၃လုံးထီ အကြိမ်များ (${draws.size})",
                     color = ChampionshipGold,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
@@ -1423,7 +1607,21 @@ private fun AdminBoardTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    color = if (draw.drawType == "2d") Color(0xFFCCFBF1) else Color(0xFFFEF3C7),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = draw.drawType.uppercase(),
+                                        color = InkDark,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
+                            }
                             Text("${draw.closeTimeLabel} • ${draw.payoutMultiplier.toInt()}x", color = InkMuted)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1483,8 +1681,19 @@ private fun AdminBoardTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("${match.homeTeam} vs ${match.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                TeamLogoAvatar(logoUrl = match.homeLogoUrl, teamName = match.homeTeam, size = 22.dp)
+                                Text(
+                                    text = "${match.homeTeam} vs ${match.awayTeam}",
+                                    color = InkDark,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                TeamLogoAvatar(logoUrl = match.awayLogoUrl, teamName = match.awayTeam, size = 22.dp)
+                            }
                             Text("${match.league} • ${match.kickoffLabel}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                             Text("${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                         }
@@ -1552,9 +1761,9 @@ private fun AdminBoardTab(
     if (showAddDraw) {
         AddLotteryDrawDialog(
             onDismiss = { showAddDraw = false },
-            onSave = { t, c, mult ->
+            onSave = { t, c, mult, drawType ->
                 showAddDraw = false
-                onSaveNewDraw(t, c, mult)
+                onSaveNewDraw(t, c, mult, drawType)
             }
         )
     }
@@ -1592,10 +1801,16 @@ private fun AdminCustomersTab(
     users: List<UserAccount>,
     orders: List<BetOrder>,
     busy: Boolean,
+    canAdjustBalance: Boolean,
+    canLockUsers: Boolean,
+    canChat: Boolean,
+    canManageOrders: Boolean,
     onAutoSettleCustomer: (String, String) -> Unit,
     onInspectCustomer: (UserAccount) -> Unit,
     onOpenAdjustBalance: (UserAccount) -> Unit,
     onOpenGiftPoints: (UserAccount) -> Unit,
+    onToggleLockUser: (UserAccount) -> Unit,
+    onForceLogoutUser: (UserAccount) -> Unit,
     onOpenChatWithCustomer: (UserAccount) -> Unit,
     onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit
 ) {
@@ -1632,8 +1847,9 @@ private fun AdminCustomersTab(
             )
         }
         item {
+            val onlineCount = remember(users) { users.count { it.isOnline } }
             Text(
-                "APK ဝင်ရောက်ထားသော Customer များ (${filteredUsers.size})",
+                "APK ဝင်ရောက်ထားသော Customer များ (${filteredUsers.size}) • Online: $onlineCount",
                 color = ChampionshipGold,
                 style = MaterialTheme.typography.titleMedium
             )
@@ -1667,13 +1883,26 @@ private fun AdminCustomersTab(
                                 Icon(Icons.Default.Person, contentDescription = null, tint = PitchEmeraldDark)
                                 Spacer(Modifier.width(8.dp))
                                 Column {
-                                    Text(
-                                        user.displayName.ifBlank { "Member" },
-                                        color = InkDark,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            user.displayName.ifBlank { "Member" },
+                                            color = InkDark,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        OnlineStatusDot(isOnline = user.isOnline, lastSeenTs = user.lastSeenAt)
+                                        if (user.isLocked) {
+                                            Surface(color = AdminCrimson, shape = RoundedCornerShape(4.dp)) {
+                                                Text(
+                                                    "LOCKED",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             Icons.Default.Email,
@@ -1737,30 +1966,34 @@ private fun AdminCustomersTab(
                             ) {
                                 Text("လောင်းကြေး / အသေးစိတ်", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            Button(
-                                onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
-                                enabled = activeCount > 0 && !busy,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("customer_card_auto_settle_${user.userId}")
-                            ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Auto ရှင်း ($activeCount)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (canManageOrders) {
+                                Button(
+                                    onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
+                                    enabled = activeCount > 0 && !busy,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("customer_card_auto_settle_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Auto ရှင်း ($activeCount)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            OutlinedButton(
-                                onClick = { onOpenAdjustBalance(user) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("adjust_balance_${user.userId}")
-                            ) {
-                                Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                            if (canAdjustBalance) {
+                                OutlinedButton(
+                                    onClick = { onOpenAdjustBalance(user) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("adjust_balance_${user.userId}")
+                                ) {
+                                    Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                                }
                             }
                             Button(
                                 onClick = { onOpenGiftPoints(user) },
@@ -1773,210 +2006,73 @@ private fun AdminCustomersTab(
                                 Spacer(Modifier.width(4.dp))
                                 Text("ပွိုင့်", fontWeight = FontWeight.Bold, maxLines = 1)
                             }
-                            Button(
-                                onClick = { onOpenChatWithCustomer(user) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("chat_customer_${user.userId}")
-                            ) {
-                                Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                        }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "voice")
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("customer_voice_call_${user.userId}")
-                            ) {
-                                Icon(Icons.Default.Call, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Voice Call", color = PitchEmeraldDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "video")
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("customer_video_call_${user.userId}")
-                            ) {
-                                Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF0369A1), modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Video Call", color = Color(0xFF0369A1), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdminTeamTab(
-    currentUserId: String,
-    admins: List<AdminMember>,
-    invites: List<AdminInvite>,
-    onCreateInvite: (String) -> Unit,
-    onToggleInvite: (String, Boolean) -> Unit,
-    onRemoveAdmin: (String) -> Unit
-) {
-    val context = LocalContext.current
-    var inviteLabel by remember { mutableStateOf("") }
-    var showShareCard by remember { mutableStateOf(true) }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
-                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showShareCard = !showShareCard },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.GroupAdd, contentDescription = null, tint = ChampionshipGold)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "သူငယ်ချင်းများကို Admin အဖြစ် မျှဝေရန်",
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                if (showShareCard) "ဝှက်မည်" else "ပြမည်",
-                                color = ChampionshipGold,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Icon(
-                                imageVector = if (showShareCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = "Toggle admin invite card",
-                                tint = ChampionshipGold
-                            )
-                        }
-                    }
-                    if (showShareCard) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "Invite Code တစ်ခု ဖန်တီးပြီး သူငယ်ချင်းထံ Share ပို့ပါ။ သူငယ်ချင်းသည် App ထဲရှိ 'Admin Key' မှတစ်ဆင့် Code ရိုက်ထည့်ပြီး အော်ဒါများကို အတူတကွ စီမံခန့်ခွဲနိုင်ပါမည်။",
-                            color = Color(0xFFB4C8BE),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = inviteLabel,
-                                onValueChange = { inviteLabel = it },
-                                label = { Text("သူငယ်ချင်းအမည် / မှတ်စု") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                ),
-                                modifier = Modifier.weight(1f).testTag("invite_label_input")
-                            )
-                            Button(
-                                onClick = {
-                                    onCreateInvite(inviteLabel.ifBlank { "Co-Admin Friend" })
-                                    inviteLabel = ""
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                                modifier = Modifier.testTag("create_invite_button")
-                            ) {
-                                Text("Code ထုတ်မည်")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (invites.isNotEmpty()) {
-            item {
-                Text("မျှဝေထားသော Invite Codes", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
-            }
-            items(invites, key = { it.code }) { inv ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = PearlCard),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(inv.code, color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                            Text(inv.label, color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = {
-                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(
-                                            Intent.EXTRA_TEXT,
-                                            "Htet Thu Ya Admin Invite Code: ${inv.code}\nApp ထဲတွင် Login ဝင်ပြီး 'Admin Key' ခလုတ်ကိုနှိပ်၍ ဤ Code ကို ထည့်သွင်းပါ။"
-                                        )
-                                    }
-                                    context.startActivity(Intent.createChooser(shareIntent, "Share Admin Invite"))
+                            if (canChat) {
+                                Button(
+                                    onClick = { onOpenChatWithCustomer(user) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("chat_customer_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
                                 }
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = "Share Invite Code", tint = PitchEmeraldDark)
                             }
-                            Switch(
-                                checked = inv.active,
-                                onCheckedChange = { onToggleInvite(inv.code, it) }
-                            )
                         }
-                    }
-                }
-            }
-        }
-
-        item {
-            Text("Admin အဖွဲ့ဝင်များ (${admins.size})", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
-        }
-        items(admins, key = { it.userId }) { member ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = PearlCard),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(member.displayName, color = InkDark, fontWeight = FontWeight.Bold)
-                        Text("Role: ${member.role} • Code: ${member.inviteCodeUsed}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    if (member.role != "owner" && member.userId != currentUserId) {
-                        IconButton(onClick = { onRemoveAdmin(member.userId) }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Remove Admin", tint = AdminCrimson)
+                        if (canLockUsers) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onToggleLockUser(user) },
+                                    modifier = Modifier.weight(1f).testTag("toggle_lock_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.Lock, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(if (user.isLocked) "Lock ပြန်ဖွင့်" else "Account ပိတ်", color = AdminCrimson, maxLines = 1)
+                                }
+                                OutlinedButton(
+                                    onClick = { onForceLogoutUser(user) },
+                                    modifier = Modifier.weight(1f).testTag("force_logout_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.Logout, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Force Out", color = AdminCrimson, maxLines = 1)
+                                }
+                            }
+                        }
+                        if (canChat) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "voice")
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("customer_voice_call_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.Call, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Voice Call", color = PitchEmeraldDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "video")
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("customer_video_call_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF0369A1), modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Video Call", color = Color(0xFF0369A1), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                     }
                 }
@@ -1984,3 +2080,4 @@ private fun AdminTeamTab(
         }
     }
 }
+

@@ -3,6 +3,7 @@ package com.example.data.network
 import android.util.Log
 import com.example.data.betting.KyayFormatter
 import com.example.data.model.GitHubReleaseInfo
+import com.example.data.model.Live2DStatus
 import com.example.data.model.LiveFootballFixture
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -60,7 +61,6 @@ class FootballFeedService(
                     allFixtures[fix.externalId] = fix
                 }
 
-                // Fallback or supplement from TheSportsDB if ESPN had few matches on that date
                 if (espnResults.isEmpty()) {
                     val tsdbResults = fetchTheSportsDbDay(isoDate)
                     tsdbResults.forEach { fix ->
@@ -97,6 +97,8 @@ class FootballFeedService(
 
             var homeName = ""
             var awayName = ""
+            var homeLogoUrl = ""
+            var awayLogoUrl = ""
             var homeScore = 0L
             var awayScore = 0L
             for (j in 0 until competitors.length()) {
@@ -107,12 +109,15 @@ class FootballFeedService(
                     ?.ifBlank { teamObj.optString("displayName") }
                     ?.ifBlank { teamObj.optString("name") }
                     .orEmpty()
+                val logo = teamObj?.optString("logo").orEmpty().trim()
                 val score = c.optString("score").toLongOrNull() ?: 0L
                 if (ha == "home") {
                     homeName = name
+                    homeLogoUrl = logo
                     homeScore = score
                 } else if (ha == "away") {
                     awayName = name
+                    awayLogoUrl = logo
                     awayScore = score
                 }
             }
@@ -161,7 +166,6 @@ class FootballFeedService(
                 if (ha == "home") homeAbbr = abbr else if (ha == "away") awayAbbr = abbr
             }
 
-            // Extract optional odds and convert American/spread strings into clear Myanmar/Asian handicap lines
             var goalLine = "2.5"
             var handicapLine = "Home -0.5"
             val oddsArr = comp.optJSONArray("odds")
@@ -189,6 +193,8 @@ class FootballFeedService(
                     league = leagueName.take(60),
                     homeTeam = homeName.take(60),
                     awayTeam = awayName.take(60),
+                    homeLogoUrl = homeLogoUrl.take(300),
+                    awayLogoUrl = awayLogoUrl.take(300),
                     kickoffLabel = kickoffLabel.take(40),
                     matchDate = isoDate,
                     handicapLine = handicapLine.take(40),
@@ -217,6 +223,8 @@ class FootballFeedService(
             val eventId = ev.optString("idEvent").trim()
             val home = ev.optString("strHomeTeam").trim()
             val away = ev.optString("strAwayTeam").trim()
+            val homeBadge = ev.optString("strHomeTeamBadge").trim()
+            val awayBadge = ev.optString("strAwayTeamBadge").trim()
             val league = ev.optString("strLeague").trim().ifBlank { "Football" }
             if (eventId.isBlank() || home.isBlank() || away.isBlank()) continue
             if (ev.optString("strPostponed").equals("yes", ignoreCase = true)) continue
@@ -244,6 +252,8 @@ class FootballFeedService(
                     league = league.take(60),
                     homeTeam = home.take(60),
                     awayTeam = away.take(60),
+                    homeLogoUrl = homeBadge.take(300),
+                    awayLogoUrl = awayBadge.take(300),
                     kickoffLabel = kickoff.take(40),
                     matchDate = dateStr.take(20),
                     handicapLine = "Home -0.5",
@@ -260,13 +270,60 @@ class FootballFeedService(
         return list
     }
 
+    suspend fun fetchLive2DResult(): Live2DStatus? = withContext(Dispatchers.IO) {
+        try {
+            val body = httpGet("https://api.thaistock2d.com/live") ?: return@withContext null
+            val root = JSONObject(body)
+            val live = root.optJSONObject("live") ?: return@withContext null
+            val twod = live.optString("twod").ifBlank { "--" }
+            val setStr = live.optString("set").ifBlank { "--" }
+            val valStr = live.optString("value").ifBlank { "--" }
+            val timeStr = live.optString("time").ifBlank { "" }
+
+            var m1201 = "--"
+            var e1630 = "--"
+            val resultArr = root.optJSONArray("result")
+            if (resultArr != null) {
+                for (i in 0 until resultArr.length()) {
+                    val item = resultArr.optJSONObject(i) ?: continue
+                    val openTime = item.optString("open_time")
+                    val r2d = item.optString("twod")
+                    if (openTime.contains("12:01") && r2d.isNotBlank()) m1201 = r2d
+                    if (openTime.contains("16:30") && r2d.isNotBlank()) e1630 = r2d
+                }
+            }
+
+            Live2DStatus(
+                twod = twod,
+                setText = setStr,
+                valueText = valStr,
+                liveTime = timeStr,
+                morning1201 = m1201,
+                evening430 = e1630
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "2D live fetch skipped: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun fetchPublicIpAddress(): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = httpGet("https://api.ipify.org?format=json") ?: return@withContext null
+            JSONObject(body).optString("ip").trim().takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.d(TAG, "Public IP fetch failed: ${e.message}")
+            null
+        }
+    }
+
     suspend fun fetchLatestGitHubApkRelease(): GitHubReleaseInfo? = withContext(Dispatchers.IO) {
         try {
             val url = "https://api.github.com/repos/Htet-Thu-Ya/Htet-Thu-Ya/releases/tags/latest"
             val req = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "HtetThuYa-Android/2.0")
+                .header("User-Agent", "LoTaYa-Android/4.0")
                 .build()
             val body = client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) resp.body?.string() else null
@@ -276,7 +333,7 @@ class FootballFeedService(
             val tagName = root.optString("tag_name", "latest")
             val notes = root.optString("body", "").take(350)
             val assets = root.optJSONArray("assets")
-            var apkDownloadUrl = "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/HtetThuYa.apk"
+            var apkDownloadUrl = "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/LoTaYa.apk"
             var updatedIso = root.optString("published_at", "")
             if (assets != null) {
                 for (i in 0 until assets.length()) {
@@ -321,7 +378,7 @@ class FootballFeedService(
         return try {
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "HtetThuYa-Android/2.0")
+                .header("User-Agent", "LoTaYa-Android/4.0")
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) resp.body?.string() else null

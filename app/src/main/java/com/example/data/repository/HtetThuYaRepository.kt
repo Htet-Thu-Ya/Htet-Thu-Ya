@@ -9,8 +9,10 @@ import com.example.data.betting.AutoSettleEngine
 import com.example.data.betting.AutoSettleSummary
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
+import com.example.data.model.AdminPermissions
 import com.example.data.model.AppQualityReview
 import com.example.data.model.AppUpdateConfig
+import com.example.data.model.AuditLogEntry
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
@@ -22,7 +24,11 @@ import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
+import com.example.data.model.MiniGameRound
+import com.example.data.model.PaymentAccount
+import com.example.data.model.SecurityConfig
 import com.example.data.model.SportMatch
+import com.example.data.model.SystemGameConfig
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
@@ -106,6 +112,11 @@ class HtetThuYaRepository(
                         "rewardPoints" to 0L,
                         "activeStakeKs" to 0L,
                         "totalWonKs" to 0L,
+                        "isOnline" to true,
+                        "lastSeenAt" to FieldValue.serverTimestamp(),
+                        "isLocked" to false,
+                        "forceLogoutAtMs" to 0L,
+                        "securityPinHash" to "",
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -124,14 +135,16 @@ class HtetThuYaRepository(
                 batch.commit().await()
             } else {
                 val existingEmail = userSnap.getString("email").orEmpty()
+                val updateMap = mutableMapOf<String, Any>(
+                    "isOnline" to true,
+                    "lastSeenAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
                 if (safeEmail.isNotBlank() && existingEmail != safeEmail) {
-                    userRef.update(
-                        mapOf(
-                            "email" to safeEmail,
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
+                    updateMap["email"] = safeEmail
                 }
+                userRef.update(updateMap).await()
+
                 val lbSnap = lbRef.get().await()
                 if (!lbSnap.exists()) {
                     val pts = userSnap.getLong("rewardPoints") ?: 0L
@@ -159,9 +172,14 @@ class HtetThuYaRepository(
                         mapOf(
                             "userId" to uid,
                             "displayName" to safeName,
+                            "email" to safeEmail,
                             "role" to "owner",
+                            "status" to "active",
                             "addedBy" to uid,
                             "inviteCodeUsed" to "OWNER",
+                            "pinHash" to "",
+                            "forceLogoutAtMs" to 0L,
+                            "permissions" to AdminPermissions.ALL_GRANTED.toMap(),
                             "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
@@ -474,6 +492,84 @@ class HtetThuYaRepository(
         )
     }
 
+    fun observePaymentAccounts(userId: String, isAdminViewer: Boolean): Flow<List<PaymentAccount>> = flow {
+        val query = if (isAdminViewer) {
+            db.collection("payment_accounts")
+        } else {
+            db.collection("payment_accounts").whereEqualTo("active", true)
+        }
+        emitAll(
+            query.snapshots()
+                .map { snap ->
+                    snap.toObjects(PaymentAccount::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.providerName }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, "payment_accounts", userId)
+        )
+    }
+
+    fun observeAuditLogs(userId: String, canViewAll: Boolean): Flow<List<AuditLogEntry>> = flow {
+        val uid = requireUserId()
+        val query = if (canViewAll) {
+            db.collection("audit_logs")
+        } else {
+            db.collection("audit_logs").whereEqualTo("actorId", uid)
+        }
+        emitAll(
+            query.snapshots()
+                .map { snap ->
+                    snap.toObjects(AuditLogEntry::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, "audit_logs", userId)
+        )
+    }
+
+    fun observeSystemGameConfig(userId: String): Flow<SystemGameConfig> = flow {
+        val path = "app_settings/system_config"
+        emitAll(
+            db.collection("app_settings").document("system_config")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(SystemGameConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                            ?: SystemGameConfig()
+                    } else SystemGameConfig()
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeSecurityConfig(userId: String): Flow<SecurityConfig> = flow {
+        val path = "app_settings/security_config"
+        emitAll(
+            db.collection("app_settings").document("security_config")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(SecurityConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                            ?: SecurityConfig()
+                    } else SecurityConfig()
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeUserMiniGameRounds(userId: String): Flow<List<MiniGameRound>> = flow {
+        val uid = requireUserId()
+        check(uid == userId)
+        emitAll(
+            db.collection("mini_game_rounds")
+                .whereEqualTo("userId", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(MiniGameRound::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, "mini_game_rounds", uid)
+        )
+    }
+
     // --- CUSTOMER MUTATIONS ---
 
     suspend fun placeOrder(
@@ -490,8 +586,8 @@ class HtetThuYaRepository(
         val orderPath = "orders/$orderId"
         return try {
             val uid = requireUserId()
-            require(orderType in listOf("parlay", "body_goal", "three_d")) { "Invalid order type" }
-            require(selections.isNotEmpty() && selections.size <= 15) { "Select 1 to 15 picks" }
+            require(orderType in listOf("parlay", "body_goal", "three_d", "two_d")) { "Invalid order type" }
+            require(selections.isNotEmpty() && selections.size <= 30) { "Select 1 to 30 picks" }
             require(stakeKs in 100L..10_000_000L) { "Stake must be between 100 and 10,000,000 Ks" }
             require(multiplier in 1.0..1000.0) { "Invalid multiplier" }
 
@@ -758,6 +854,155 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun updateOnlinePresence(isOnline: Boolean): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: return Result.success(Unit)
+        val path = "users/$uid"
+        return try {
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "isOnline" to isOnline,
+                    "lastSeenAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateCustomerSecurityPin(pinHash: String): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: "unauthenticated"
+        val path = "users/$uid"
+        return try {
+            val verifiedUid = requireUserId()
+            db.collection("users").document(verifiedUid).update(
+                mapOf(
+                    "securityPinHash" to pinHash.take(128),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun playMiniGameRound(
+        customerName: String,
+        gameType: String,
+        betLabel: String,
+        outcomeLabel: String,
+        stakeKs: Long,
+        payoutKs: Long
+    ): Result<MiniGameRound> {
+        val roundId = "rnd_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val path = "mini_game_rounds/$roundId"
+        return try {
+            val uid = requireUserId()
+            require(gameType in listOf("dice", "six_animals")) { "Invalid game type" }
+            require(stakeKs in 100L..1_000_000L) { "လောင်းကြေးသည် 100 Ks မှ 1,000,000 Ks အတွင်း ဖြစ်ရပါမည်" }
+            require(payoutKs in 0L..(stakeKs * 36L)) { "Invalid payout" }
+
+            val userRef = db.collection("users").document(uid)
+            val roundRef = db.collection("mini_game_rounds").document(roundId)
+            val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
+
+            val userSnap = userRef.get().await()
+            val curBalance = userSnap.getLong("balanceKs") ?: 0L
+            val curWon = userSnap.getLong("totalWonKs") ?: 0L
+            val locked = userSnap.getBoolean("isLocked") == true
+            if (locked) throw IllegalStateException("သင့်အကောင့် ယာယီပိတ်ထားပါသည်")
+            if (curBalance < stakeKs) {
+                throw IllegalStateException("လက်ကျန်ငွေ မလုံလောက်ပါ (လိုအပ်ငွေ: $stakeKs Ks)")
+            }
+
+            val newBalance = (curBalance - stakeKs + payoutKs).coerceAtLeast(0L)
+            val newWon = curWon + payoutKs
+            val safeName = customerName.trim().ifBlank { "Member" }.take(60)
+            val safeBet = betLabel.trim().ifBlank { gameType }.take(120)
+            val safeOutcome = outcomeLabel.trim().ifBlank { "-" }.take(120)
+
+            val batch = db.batch()
+            batch.set(
+                roundRef,
+                mapOf(
+                    "userId" to uid,
+                    "customerName" to safeName,
+                    "gameType" to gameType,
+                    "betLabel" to safeBet,
+                    "outcomeLabel" to safeOutcome,
+                    "stakeKs" to stakeKs,
+                    "payoutKs" to payoutKs,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.update(
+                userRef,
+                mapOf(
+                    "balanceKs" to newBalance,
+                    "totalWonKs" to newWon,
+                    "lastRoundId" to roundId,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            val gameLabel = if (gameType == "dice") "အံစာတုံး" else "၆ကောင်ဂျင်"
+            if (payoutKs > 0L) {
+                batch.set(
+                    txRef,
+                    mapOf(
+                        "userId" to uid,
+                        "txType" to "mini_game_win",
+                        "direction" to "credit",
+                        "amountKs" to payoutKs,
+                        "title" to "$gameLabel အနိုင် ($safeBet • $safeOutcome)".take(120),
+                        "balanceAfterKs" to newBalance,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            } else {
+                batch.set(
+                    txRef,
+                    mapOf(
+                        "userId" to uid,
+                        "txType" to "mini_game_stake",
+                        "direction" to "debit",
+                        "amountKs" to stakeKs,
+                        "title" to "$gameLabel ($safeBet • $safeOutcome)".take(120),
+                        "balanceAfterKs" to newBalance,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.commit().await()
+
+            Result.success(
+                MiniGameRound(
+                    id = roundId,
+                    userId = uid,
+                    customerName = safeName,
+                    gameType = gameType,
+                    betLabel = safeBet,
+                    outcomeLabel = safeOutcome,
+                    stakeKs = stakeKs,
+                    payoutKs = payoutKs
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun redeemAdminInvite(displayName: String, rawCode: String): Result<Unit> {
         val code = rawCode.trim().uppercase()
         val invitePath = "admin_invites/$code"
@@ -769,19 +1014,34 @@ class HtetThuYaRepository(
             if (!inviteSnap.exists() || inviteSnap.getBoolean("active") != true) {
                 throw IllegalArgumentException("Invite Code မရှိပါ သို့မဟုတ် ပိတ်ထားပါသည်")
             }
+            val assignedEmail = inviteSnap.getString("assignedEmail").orEmpty().trim()
+            val curEmail = auth.currentUser?.email.orEmpty().trim()
+            if (assignedEmail.isNotBlank() && !curEmail.equals(assignedEmail, ignoreCase = true)) {
+                throw IllegalArgumentException("ဤ Invite Code သည် $assignedEmail အတွက်သာ ဖြစ်ပါသည်")
+            }
+
             val addedBy = inviteSnap.getString("createdBy") ?: uid
-            val safeName = displayName.trim().ifBlank { "Co-Admin" }.take(60)
-            db.collection("admins").document(uid).set(
-                mapOf(
-                    "userId" to uid,
-                    "displayName" to safeName,
-                    "role" to "admin",
-                    "addedBy" to addedBy,
-                    "inviteCodeUsed" to code,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val safeName = displayName.trim().ifBlank { "Second Admin" }.take(60)
+            val initialPinHash = inviteSnap.getString("initialPinHash").orEmpty()
+            @Suppress("UNCHECKED_CAST")
+            val defaultPerms = (inviteSnap.get("defaultPermissions") as? Map<String, Boolean>)
+                ?: AdminPermissions.PRESET_WALLET_CASHIER.toMap()
+
+            val payload = mutableMapOf<String, Any>(
+                "userId" to uid,
+                "displayName" to safeName,
+                "email" to curEmail.take(120),
+                "role" to "admin",
+                "status" to "active",
+                "addedBy" to addedBy,
+                "inviteCodeUsed" to code,
+                "pinHash" to initialPinHash.take(128),
+                "forceLogoutAtMs" to 0L,
+                "permissions" to defaultPerms,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("admins").document(uid).set(payload).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -1086,7 +1346,9 @@ class HtetThuYaRepository(
         req: WalletRequest,
         approve: Boolean,
         adminNote: String,
-        walletConfig: WalletConfig = WalletConfig()
+        walletConfig: WalletConfig = WalletConfig(),
+        isOwner: Boolean = true,
+        dualApprovalThresholdKs: Long = 300_000L
     ): Result<Unit> {
         val path = "wallet_requests/${req.id}"
         return try {
@@ -1095,7 +1357,19 @@ class HtetThuYaRepository(
             val reqRef = db.collection("wallet_requests").document(req.id)
             val userRef = db.collection("users").document(req.userId)
             val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
-            val nextStatus = if (approve) "approved" else "rejected"
+
+            val needsDualApproval = approve &&
+                !isOwner &&
+                req.status == "pending" &&
+                req.requestType == "withdraw" &&
+                dualApprovalThresholdKs > 0L &&
+                req.amountKs >= dualApprovalThresholdKs
+
+            val nextStatus = when {
+                needsDualApproval -> "awaiting_main_approval"
+                approve -> "approved"
+                else -> "rejected"
+            }
 
             val authoritativeNetKs = if (req.requestType == "topup") {
                 walletConfig.computeNetTopup(req.amountKs)
@@ -1104,21 +1378,36 @@ class HtetThuYaRepository(
             }
 
             db.runTransaction { tx ->
+                val reqSnap = tx.get(reqRef)
+                val curReqStatus = reqSnap.getString("status") ?: req.status
+                if (curReqStatus !in listOf("pending", "awaiting_main_approval")) {
+                    throw IllegalStateException("ဤတောင်းဆိုမှုကို စာရင်းရှင်းပြီးသား ဖြစ်ပါသည်")
+                }
+                if (curReqStatus == "awaiting_main_approval" && !isOwner) {
+                    throw IllegalStateException("Main Admin ၏ အတည်ပြုချက်သာ လိုအပ်ပါသည်")
+                }
+
                 val userSnap = tx.get(userRef)
                 val curBalance = userSnap.getLong("balanceKs") ?: 0L
+
+                val noteText = when {
+                    needsDualApproval -> adminNote.trim().ifBlank { "ပမာဏကြီးသဖြင့် Main Admin အတည်ပြုချက် တင်ပြထားသည်" }
+                    approve -> adminNote.trim().ifBlank { "အတည်ပြုပြီး" }
+                    else -> adminNote.trim().ifBlank { "ပယ်ဖျက်ပြီး" }
+                }.take(200)
 
                 tx.update(
                     reqRef,
                     mapOf(
                         "status" to nextStatus,
                         "netAmountKs" to authoritativeNetKs.coerceIn(0L, 100_000_000L),
-                        "adminNote" to adminNote.trim().ifBlank { if (approve) "အတည်ပြုပြီး" else "ပယ်ဖျက်ပြီး" }.take(200),
+                        "adminNote" to noteText,
                         "processedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
 
-                if (req.requestType == "topup" && approve) {
+                if (nextStatus == "approved" && req.requestType == "topup") {
                     val creditKs = authoritativeNetKs
                     val newBalance = curBalance + creditKs
                     val rateText = if (walletConfig.depositPercent > 0.0 && walletConfig.depositMode != "none") {
@@ -1145,7 +1434,7 @@ class HtetThuYaRepository(
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
                     )
-                } else if (req.requestType == "withdraw" && !approve) {
+                } else if (nextStatus == "rejected" && req.requestType == "withdraw") {
                     val newBalance = curBalance + req.amountKs
                     tx.update(
                         userRef,
@@ -1284,15 +1573,18 @@ class HtetThuYaRepository(
     suspend fun saveNewLotteryDraw(
         roundTitle: String,
         closeTimeLabel: String,
-        payoutMultiplier: Double
+        payoutMultiplier: Double,
+        drawType: String = "3d"
     ): Result<Unit> {
         val drawId = "d_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val path = "lottery_draws/$drawId"
         return try {
             val adminUid = requireUserId()
             require(roundTitle.isNotBlank()) { "ထီအကြိမ်အမည် ဖြည့်စွက်ပါ" }
+            require(drawType in listOf("2d", "3d"))
             db.collection("lottery_draws").document(drawId).set(
                 mapOf(
+                    "drawType" to drawType,
                     "roundTitle" to roundTitle.trim().take(80),
                     "closeTimeLabel" to closeTimeLabel.trim().ifBlank { "3:30 PM" }.take(40),
                     "winningNumber" to "",
@@ -1399,23 +1691,30 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun createAdminInvite(label: String): Result<String> {
+    suspend fun createAdminInvite(
+        label: String,
+        assignedEmail: String = "",
+        initialPinHash: String = "",
+        permissions: AdminPermissions = AdminPermissions.PRESET_WALLET_CASHIER
+    ): Result<String> {
         val suffix = UUID.randomUUID().toString().replace("-", "").take(6).uppercase()
-        val code = "HTY-$suffix"
+        val code = "LTR-$suffix"
         val path = "admin_invites/$code"
         return try {
             val adminUid = requireUserId()
-            val safeLabel = label.trim().ifBlank { "Co-Admin Friend" }.take(60)
-            db.collection("admin_invites").document(code).set(
-                mapOf(
-                    "code" to code,
-                    "label" to safeLabel,
-                    "active" to true,
-                    "createdBy" to adminUid,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val safeLabel = label.trim().ifBlank { "Second Admin" }.take(60)
+            val payload = mutableMapOf<String, Any>(
+                "code" to code,
+                "label" to safeLabel,
+                "active" to true,
+                "assignedEmail" to assignedEmail.trim().take(120),
+                "initialPinHash" to initialPinHash.take(128),
+                "defaultPermissions" to permissions.toMap(),
+                "createdBy" to adminUid,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("admin_invites").document(code).set(payload).await()
             Result.success(code)
         } catch (e: CancellationException) {
             throw e
@@ -1444,6 +1743,121 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun updateAdminMemberPermissions(adminUid: String, permissions: AdminPermissions): Result<Unit> {
+        val path = "admins/$adminUid"
+        return try {
+            requireUserId()
+            db.collection("admins").document(adminUid).update(
+                mapOf(
+                    "permissions" to permissions.toMap(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setAdminMemberStatus(adminUid: String, status: String): Result<Unit> {
+        val path = "admins/$adminUid"
+        return try {
+            requireUserId()
+            require(status in listOf("active", "suspended"))
+            db.collection("admins").document(adminUid).update(
+                mapOf(
+                    "status" to status,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun resetAdminMemberPin(adminUid: String, pinHash: String): Result<Unit> {
+        val path = "admins/$adminUid"
+        return try {
+            requireUserId()
+            db.collection("admins").document(adminUid).update(
+                mapOf(
+                    "pinHash" to pinHash.take(128),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun triggerForceLogoutAdmin(adminUid: String): Result<Unit> {
+        val path = "admins/$adminUid"
+        return try {
+            requireUserId()
+            db.collection("admins").document(adminUid).update(
+                mapOf(
+                    "forceLogoutAtMs" to System.currentTimeMillis(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun triggerForceLogoutUser(userUid: String): Result<Unit> {
+        val path = "users/$userUid"
+        return try {
+            requireUserId()
+            db.collection("users").document(userUid).update(
+                mapOf(
+                    "forceLogoutAtMs" to System.currentTimeMillis(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setCustomerLocked(userUid: String, locked: Boolean): Result<Unit> {
+        val path = "users/$userUid"
+        return try {
+            requireUserId()
+            db.collection("users").document(userUid).update(
+                mapOf(
+                    "isLocked" to locked,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun removeAdminMember(adminUid: String): Result<Unit> {
         val path = "admins/$adminUid"
         return try {
@@ -1455,6 +1869,156 @@ class HtetThuYaRepository(
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
+        }
+    }
+
+    suspend fun savePaymentAccount(
+        accountId: String?,
+        providerName: String,
+        accountName: String,
+        accountNumber: String,
+        note: String,
+        active: Boolean
+    ): Result<Unit> {
+        val id = accountId?.takeIf { it.isNotBlank() && ID_REGEX.matches(it) }
+            ?: "pay_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+        val path = "payment_accounts/$id"
+        return try {
+            val adminUid = requireUserId()
+            require(providerName.isNotBlank() && accountName.isNotBlank() && accountNumber.isNotBlank()) {
+                "ဘဏ်/Pay အမည်၊ အကောင့်အမည် နှင့် နံပါတ် ဖြည့်စွက်ပါ"
+            }
+            val ref = db.collection("payment_accounts").document(id)
+            val snap = ref.get().await()
+            if (snap.exists()) {
+                ref.update(
+                    mapOf(
+                        "providerName" to providerName.trim().take(40),
+                        "accountName" to accountName.trim().take(80),
+                        "accountNumber" to accountNumber.trim().take(60),
+                        "note" to note.trim().take(120),
+                        "active" to active,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                ref.set(
+                    mapOf(
+                        "providerName" to providerName.trim().take(40),
+                        "accountName" to accountName.trim().take(80),
+                        "accountNumber" to accountNumber.trim().take(60),
+                        "note" to note.trim().take(120),
+                        "active" to active,
+                        "createdBy" to adminUid,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deletePaymentAccount(accountId: String): Result<Unit> {
+        val path = "payment_accounts/$accountId"
+        return try {
+            requireUserId()
+            require(accountId.isNotBlank() && ID_REGEX.matches(accountId))
+            db.collection("payment_accounts").document(accountId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveSystemGameConfig(config: SystemGameConfig): Result<Unit> {
+        val path = "app_settings/system_config"
+        return try {
+            val adminUid = requireUserId()
+            val minStake = config.minStakeKs.coerceIn(100L, 1_000_000L)
+            val maxStake = config.maxStakeKs.coerceIn(minStake, 50_000_000L)
+            db.collection("app_settings").document("system_config").set(
+                mapOf(
+                    "enabledGames" to config.enabledGames.take(12),
+                    "dualApprovalThresholdKs" to config.dualApprovalThresholdKs.coerceIn(0L, 100_000_000L),
+                    "minStakeKs" to minStake,
+                    "maxStakeKs" to maxStake,
+                    "twoDPayoutMultiplier" to config.twoDPayoutMultiplier.coerceIn(1.0, 200.0),
+                    "threeDPayoutMultiplier" to config.threeDPayoutMultiplier.coerceIn(1.0, 1000.0),
+                    "dicePayoutMultiplier" to config.dicePayoutMultiplier.coerceIn(1.0, 100.0),
+                    "sixAnimalsPayoutMultiplier" to config.sixAnimalsPayoutMultiplier.coerceIn(1.0, 100.0),
+                    "bonusPromoText" to config.bonusPromoText.trim().take(200),
+                    "maintenanceMode" to config.maintenanceMode,
+                    "maintenanceMessage" to config.maintenanceMessage.trim().take(300),
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveSecurityConfig(config: SecurityConfig): Result<Unit> {
+        val path = "app_settings/security_config"
+        return try {
+            val adminUid = requireUserId()
+            db.collection("app_settings").document("security_config").set(
+                mapOf(
+                    "requireAdminPin" to config.requireAdminPin,
+                    "ipWhitelistEnabled" to config.ipWhitelistEnabled,
+                    "allowedIps" to config.allowedIps.map { it.trim() }.filter { it.isNotBlank() }.take(50),
+                    "globalForceLogoutAtMs" to config.globalForceLogoutAtMs.coerceAtLeast(0L),
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun recordAuditLog(
+        actorName: String,
+        actorRole: String,
+        action: String,
+        category: String,
+        targetId: String = "",
+        targetName: String = "",
+        details: String = ""
+    ) {
+        val logId = "log_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        runCatching {
+            val uid = auth.currentUser?.uid ?: return
+            db.collection("audit_logs").document(logId).set(
+                mapOf(
+                    "actorId" to uid,
+                    "actorName" to actorName.trim().ifBlank { "Admin" }.take(60),
+                    "actorRole" to if (actorRole == "owner") "owner" else "admin",
+                    "action" to action.trim().ifBlank { "Action" }.take(80),
+                    "category" to if (category in listOf("wallet", "order", "user", "admin", "board", "settings", "security")) category else "order",
+                    "targetId" to targetId.trim().take(128),
+                    "targetName" to targetName.trim().take(80),
+                    "details" to details.trim().take(300),
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
         }
     }
 
@@ -1835,6 +2399,8 @@ class HtetThuYaRepository(
                                 "league" to fix.league,
                                 "homeTeam" to fix.homeTeam,
                                 "awayTeam" to fix.awayTeam,
+                                "homeLogoUrl" to fix.homeLogoUrl,
+                                "awayLogoUrl" to fix.awayLogoUrl,
                                 "kickoffLabel" to fix.kickoffLabel,
                                 "handicapLine" to fix.handicapLine,
                                 "goalLine" to fix.goalLine,
@@ -1857,6 +2423,8 @@ class HtetThuYaRepository(
                         batch.update(
                             docRef,
                             mapOf(
+                                "homeLogoUrl" to fix.homeLogoUrl,
+                                "awayLogoUrl" to fix.awayLogoUrl,
                                 "kickoffLabel" to fix.kickoffLabel,
                                 "status" to fix.status,
                                 "homeScore" to fix.homeScore,
@@ -1916,7 +2484,9 @@ class HtetThuYaRepository(
                         m.awayScore != matched.awayScore ||
                         m.status != matched.status ||
                         m.liveClock != matched.liveClock ||
-                        m.kickoffLabel != matched.kickoffLabel
+                        m.kickoffLabel != matched.kickoffLabel ||
+                        (matched.homeLogoUrl.isNotBlank() && m.homeLogoUrl != matched.homeLogoUrl) ||
+                        (matched.awayLogoUrl.isNotBlank() && m.awayLogoUrl != matched.awayLogoUrl)
                     if (changed) {
                         updates.add(m.id to matched)
                     }
@@ -1929,6 +2499,8 @@ class HtetThuYaRepository(
                     batch.update(
                         db.collection("matches").document(docId),
                         mapOf(
+                            "homeLogoUrl" to fix.homeLogoUrl,
+                            "awayLogoUrl" to fix.awayLogoUrl,
                             "status" to fix.status,
                             "homeScore" to fix.homeScore,
                             "awayScore" to fix.awayScore,
@@ -2440,6 +3012,7 @@ class HtetThuYaRepository(
     private fun orderTypeLabel(orderType: String): String = when (orderType) {
         "parlay" -> "မောင်း"
         "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
+        "two_d" -> "၂လုံးထီ"
         "three_d" -> "သုံးလုံးထီ"
         else -> orderType
     }

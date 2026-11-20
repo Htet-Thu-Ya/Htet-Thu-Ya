@@ -25,9 +25,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Casino
@@ -37,11 +37,16 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Stadium
 import androidx.compose.material.icons.filled.StarRate
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -62,6 +67,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -70,14 +76,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.model.AppLanguage
 import com.example.data.model.AvailableApkUpdate
+import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.ui.components.AdminInviteRedeemDialog
-import com.example.ui.components.HtetThuYaBrandLogo
+import com.example.ui.components.LoTaYaBrandLogo
 import com.example.ui.components.formatKs
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.ChampionshipGold
+import com.example.ui.theme.ChampionshipGoldBright
 import com.example.ui.theme.DeepPitchBg
 import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.DeepPitchSurface
@@ -92,13 +101,17 @@ import com.example.ui.theme.PitchEmeraldDark
 enum class CustomerRoute {
     PARLAY,
     BODY_GOAL,
+    TWO_D,
+    THREE_D,
+    DICE_GAME,
+    SIX_ANIMALS,
     ACTIVE_ORDERS,
     PAST_ORDERS,
     LEDGER,
     RESULTS,
-    THREE_D,
     LEADERBOARD,
     POINT_EXCHANGE,
+    SETTINGS,
     CHAT,
     QUALITY
 }
@@ -109,7 +122,8 @@ private data class MenuTile(
     val icon: ImageVector,
     val iconTint: Color,
     val badgeColor: Color,
-    val testTag: String
+    val testTag: String,
+    val gameKey: String? = null
 )
 
 @Composable
@@ -118,6 +132,8 @@ fun CustomerHomeScreen(
     displayName: String,
     isAdmin: Boolean,
     pendingAdminCount: Int,
+    systemGameConfig: SystemGameConfig = SystemGameConfig(),
+    appLanguage: AppLanguage = AppLanguage.MY,
     availableApkUpdate: AvailableApkUpdate? = null,
     onOpenUpdateDialog: () -> Unit = {},
     onNavigate: (CustomerRoute) -> Unit,
@@ -130,21 +146,27 @@ fun CustomerHomeScreen(
 ) {
     var showInviteDialog by remember { mutableStateOf(false) }
 
-    val menuTiles = remember {
+    val account = (accountState as? UiState.Success)?.data
+    val isLocked = account?.isLocked == true
+    val isMaintenance = systemGameConfig.maintenanceMode
+    val isEnglish = appLanguage == AppLanguage.EN
+
+    val menuTiles = remember(isEnglish) {
         listOf(
-            MenuTile(CustomerRoute.PARLAY, "မောင်း", Icons.Default.Stadium, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_parlay"),
-            MenuTile(CustomerRoute.BODY_GOAL, "ဘော်ဒီ/ဂိုးပေါင်း", Icons.Default.SportsSoccer, Color(0xFF1E293B), Color(0xFFE2E8F0), "menu_body_goal"),
-            MenuTile(CustomerRoute.ACTIVE_ORDERS, "လောင်းထားသောပွဲစဉ်များ", Icons.Default.History, Color(0xFF334155), Color(0xFFE2E8F0), "menu_active_orders"),
-            MenuTile(CustomerRoute.PAST_ORDERS, "ပွဲစဉ်ဟောင်းများ", Icons.Default.CalendarMonth, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_past_orders"),
-            MenuTile(CustomerRoute.LEDGER, "ငွေစာရင်း", Icons.Default.MonetizationOn, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_ledger"),
-            MenuTile(CustomerRoute.RESULTS, "ပွဲပြီး ရလဒ်များ", Icons.Default.LiveTv, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_results"),
-            MenuTile(CustomerRoute.THREE_D, "သုံးလုံးထီ", Icons.Default.Casino, Color(0xFF059669), Color(0xFFD1FAE5), "menu_three_d"),
-            MenuTile(CustomerRoute.LEADERBOARD, "အဆင့်ဇယား", Icons.Default.EmojiEvents, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_leaderboard"),
-            MenuTile(CustomerRoute.POINT_EXCHANGE, "ပွိုင့်လဲလှယ်", Icons.Default.CurrencyExchange, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_point_exchange")
+            MenuTile(CustomerRoute.PARLAY, if (isEnglish) "Parlay" else "မောင်း", Icons.Default.Stadium, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_parlay", "parlay"),
+            MenuTile(CustomerRoute.BODY_GOAL, if (isEnglish) "Body / O-U" else "ဘော်ဒီ/ဂိုးပေါင်း", Icons.Default.SportsSoccer, Color(0xFF1E293B), Color(0xFFE2E8F0), "menu_body_goal", "body_goal"),
+            MenuTile(CustomerRoute.TWO_D, if (isEnglish) "2D Lottery" else "၂လုံးထီ (2D)", Icons.Default.TrendingUp, Color(0xFF0F766E), Color(0xFFCCFBF1), "menu_two_d", "two_d"),
+            MenuTile(CustomerRoute.THREE_D, if (isEnglish) "3D Lottery" else "၃လုံးထီ (3D)", Icons.Default.Casino, Color(0xFF059669), Color(0xFFD1FAE5), "menu_three_d", "three_d"),
+            MenuTile(CustomerRoute.DICE_GAME, if (isEnglish) "Dice Roll" else "အံစာတုံး", Icons.Default.Casino, Color(0xFF7C3AED), Color(0xFFEDE9FE), "menu_dice", "dice"),
+            MenuTile(CustomerRoute.SIX_ANIMALS, if (isEnglish) "6 Animals" else "၆ကောင်ဂျင်", Icons.Default.Pets, Color(0xFFB45309), Color(0xFFFEF3C7), "menu_six_animals", "six_animals"),
+            MenuTile(CustomerRoute.ACTIVE_ORDERS, if (isEnglish) "Active Slips" else "လောင်းထားသောပွဲစဉ်များ", Icons.Default.History, Color(0xFF334155), Color(0xFFE2E8F0), "menu_active_orders"),
+            MenuTile(CustomerRoute.PAST_ORDERS, if (isEnglish) "Past Slips" else "ပွဲစဉ်ဟောင်းများ", Icons.Default.CalendarMonth, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_past_orders"),
+            MenuTile(CustomerRoute.LEDGER, if (isEnglish) "Wallet" else "ငွေစာရင်း", Icons.Default.MonetizationOn, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_ledger"),
+            MenuTile(CustomerRoute.RESULTS, if (isEnglish) "Results" else "ပွဲပြီး ရလဒ်များ", Icons.Default.LiveTv, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_results"),
+            MenuTile(CustomerRoute.LEADERBOARD, if (isEnglish) "Leaderboard" else "အဆင့်ဇယား", Icons.Default.EmojiEvents, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_leaderboard"),
+            MenuTile(CustomerRoute.POINT_EXCHANGE, if (isEnglish) "Point Shop" else "ပွိုင့်လဲလှယ်", Icons.Default.CurrencyExchange, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_point_exchange")
         )
     }
-
-    val account = (accountState as? UiState.Success)?.data
 
     Box(
         modifier = Modifier
@@ -177,13 +199,13 @@ fun CustomerHomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
-                        HtetThuYaBrandLogo(size = 46.dp)
+                        LoTaYaBrandLogo(size = 46.dp)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Htet Thu Ya",
+                                text = "လိုတရ",
                                 style = MaterialTheme.typography.titleLarge,
-                                color = ChampionshipGold,
+                                color = ChampionshipGoldBright,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
@@ -285,6 +307,79 @@ fun CustomerHomeScreen(
                 }
             }
 
+            if (isLocked) {
+                item(span = { GridItemSpan(2) }) {
+                    Surface(
+                        color = AdminCrimson,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("account_locked_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color.White)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = "သင့်အကောင့်ကို Admin မှ ယာယီပိတ်ထားပါသည် (Locked) — Chat မှတစ်ဆင့် ဆက်သွယ်ပါ။",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isMaintenance) {
+                item(span = { GridItemSpan(2) }) {
+                    Surface(
+                        color = Color(0xFFB45309),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("maintenance_mode_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Build, contentDescription = null, tint = Color.White)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်ထိန်းသိမ်းမှု ပြုလုပ်နေပါသည်။" },
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (systemGameConfig.bonusPromoText.isNotBlank()) {
+                item(span = { GridItemSpan(2) }) {
+                    Surface(
+                        color = DeepPitchElevated,
+                        border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.65f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.LocalOffer, contentDescription = null, tint = ChampionshipGoldBright, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = systemGameConfig.bonusPromoText,
+                                color = ChampionshipGoldBright,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
             if (availableApkUpdate != null) {
                 item(span = { GridItemSpan(2) }) {
                     ApkUpdateBanner(
@@ -294,7 +389,7 @@ fun CustomerHomeScreen(
                 }
             }
 
-            // 555-style Summary Wallet Card
+            // Summary Wallet Card
             item(span = { GridItemSpan(2) }) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -311,7 +406,7 @@ fun CustomerHomeScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "လက်ကျန်ငွေ",
+                                    text = if (isEnglish) "Balance" else "လက်ကျန်ငွေ",
                                     color = InkMuted,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
@@ -331,7 +426,7 @@ fun CustomerHomeScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "လက်ဆောင် ပွိုင့်များ",
+                                        text = if (isEnglish) "Reward Points" else "လက်ဆောင် ပွိုင့်များ",
                                         color = InkMuted,
                                         style = MaterialTheme.typography.bodyLarge
                                     )
@@ -367,7 +462,7 @@ fun CustomerHomeScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "လောင်းထားသောငွေ",
+                                    text = if (isEnglish) "Active Stake" else "လောင်းထားသောငွေ",
                                     color = InkMuted,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
@@ -399,7 +494,7 @@ fun CustomerHomeScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "ငွေသွင်း / ထုတ်",
+                                        text = if (isEnglish) "Deposit / Withdraw" else "ငွေသွင်း / ထုတ်",
                                         color = Color.White,
                                         style = MaterialTheme.typography.labelLarge
                                     )
@@ -410,13 +505,17 @@ fun CustomerHomeScreen(
                 }
             }
 
-            // 9-Tile 555 Grid Menu
+            // Menu Tiles (Sports, 2D, 3D, Mini Games, History, Wallet, Results, Settings)
             items(menuTiles, key = { it.route.name }) { tile ->
+                val isGameTile = tile.gameKey != null
+                val gameEnabled = tile.gameKey == null || systemGameConfig.isGameEnabled(tile.gameKey)
+                val tileEnabled = (!isGameTile || (!isLocked && !isMaintenance && gameEnabled))
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(114.dp)
-                        .clickable { onNavigate(tile.route) }
+                        .alpha(if (tileEnabled) 1f else 0.45f)
+                        .clickable(enabled = tileEnabled) { onNavigate(tile.route) }
                         .testTag(tile.testTag),
                     colors = CardDefaults.cardColors(containerColor = PearlCard),
                     border = BorderStroke(1.dp, PearlCardBorder),
@@ -443,11 +542,11 @@ fun CustomerHomeScreen(
                                 modifier = Modifier.size(26.dp)
                             )
                         }
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            text = tile.title,
+                            text = if (isGameTile && !gameEnabled) "${tile.title} (ပိတ်)" else tile.title,
                             color = InkDark,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             textAlign = TextAlign.Center,
                             maxLines = 2,
@@ -457,20 +556,22 @@ fun CustomerHomeScreen(
                 }
             }
 
+            // Support, Quality & Settings row
             item(span = { GridItemSpan(2) }) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     val supportTiles = listOf(
-                        MenuTile(CustomerRoute.CHAT, "Chatbox (1:1 / Group)", Icons.Default.Forum, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_chat"),
-                        MenuTile(CustomerRoute.QUALITY, "အရည်အသွေး အဆင့်", Icons.Default.StarRate, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_quality")
+                        MenuTile(CustomerRoute.CHAT, "Chatbox", Icons.Default.Forum, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_chat"),
+                        MenuTile(CustomerRoute.QUALITY, "အရည်အသွေး", Icons.Default.StarRate, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_quality"),
+                        MenuTile(CustomerRoute.SETTINGS, if (isEnglish) "Settings" else "ဆက်တင် / စည်းကမ်း", Icons.Default.Settings, Color(0xFF047857), Color(0xFFD1FAE5), "menu_settings")
                     )
                     supportTiles.forEach { tile ->
                         Card(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(114.dp)
+                                .height(106.dp)
                                 .clickable { onNavigate(tile.route) }
                                 .testTag(tile.testTag),
                             colors = CardDefaults.cardColors(containerColor = PearlCard),
@@ -481,13 +582,13 @@ fun CustomerHomeScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(12.dp),
+                                    .padding(10.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(44.dp)
+                                        .size(40.dp)
                                         .background(tile.badgeColor, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -495,14 +596,14 @@ fun CustomerHomeScreen(
                                         imageVector = tile.icon,
                                         contentDescription = tile.title,
                                         tint = tile.iconTint,
-                                        modifier = Modifier.size(26.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
-                                Spacer(Modifier.height(10.dp))
+                                Spacer(Modifier.height(8.dp))
                                 Text(
                                     text = tile.title,
                                     color = InkDark,
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     textAlign = TextAlign.Center,
                                     maxLines = 2,

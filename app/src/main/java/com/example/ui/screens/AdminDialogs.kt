@@ -77,6 +77,9 @@ import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletRequest
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
+import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.formatKs
@@ -304,23 +307,44 @@ fun EditMatchResultDialog(
 @Composable
 fun AddLotteryDrawDialog(
     onDismiss: () -> Unit,
-    onSave: (roundTitle: String, closeTimeLabel: String, multiplier: Double) -> Unit
+    onSave: (roundTitle: String, closeTimeLabel: String, multiplier: Double, drawType: String) -> Unit
 ) {
+    var drawType by remember { mutableStateOf("3d") }
     var title by remember { mutableStateOf("3D Round") }
     var closeLabel by remember { mutableStateOf("3:30 PM Close") }
     var mult by remember { mutableStateOf("550") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("၃လုံးထီ အကြိမ်သစ် ဖွင့်ရန်") },
+        title = { Text("၂လုံး / ၃လုံးထီ အကြိမ်သစ် ဖွင့်ရန်") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = drawType == "2d",
+                        onClick = {
+                            drawType = "2d"
+                            if (title == "3D Round") title = "2D Round"
+                            if (mult == "550") mult = "80"
+                        },
+                        label = { Text("၂လုံးထီ (2D)") }
+                    )
+                    FilterChip(
+                        selected = drawType == "3d",
+                        onClick = {
+                            drawType = "3d"
+                            if (title == "2D Round") title = "3D Round"
+                            if (mult == "80") mult = "550"
+                        },
+                        label = { Text("၃လုံးထီ (3D)") }
+                    )
+                }
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("အကြိမ်အမည်") }, singleLine = true)
                 OutlinedTextField(value = closeLabel, onValueChange = { closeLabel = it }, label = { Text("ပိတ်ချိန်") }, singleLine = true)
                 OutlinedTextField(
                     value = mult,
                     onValueChange = { mult = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("အဆ (ဥပမာ 550)") },
+                    label = { Text(if (drawType == "2d") "အဆ (ဥပမာ 80)" else "အဆ (ဥပမာ 550)") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
@@ -328,7 +352,7 @@ fun AddLotteryDrawDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(title, closeLabel, mult.toDoubleOrNull() ?: 550.0) },
+                onClick = { onSave(title, closeLabel, mult.toDoubleOrNull() ?: if (drawType == "2d") 80.0 else 550.0, drawType) },
                 enabled = title.isNotBlank()
             ) {
                 Text("ဖွင့်လှစ်မည်")
@@ -353,6 +377,7 @@ fun PublishLotteryResultDialog(
     ) -> Unit,
     onRequestDelete: () -> Unit
 ) {
+    val maxDigits = if (draw.drawType == "2d") 2 else 3
     var roundTitle by remember(draw.id) { mutableStateOf(draw.roundTitle) }
     var closeTimeLabel by remember(draw.id) { mutableStateOf(draw.closeTimeLabel) }
     var mult by remember(draw.id) { mutableStateOf(draw.payoutMultiplier.toInt().toString()) }
@@ -361,7 +386,7 @@ fun PublishLotteryResultDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("၃လုံးထီ ပြင်ဆင်ရန်") },
+        title = { Text(if (draw.drawType == "2d") "၂လုံးထီ (2D) ပြင်ဆင်ရန်" else "၃လုံးထီ (3D) ပြင်ဆင်ရန်") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -383,8 +408,8 @@ fun PublishLotteryResultDialog(
                 )
                 OutlinedTextField(
                     value = winNum,
-                    onValueChange = { winNum = it.filter { c -> c.isDigit() }.take(3) },
-                    label = { Text("ထွက်ဂဏန်း (၃ လုံး)") },
+                    onValueChange = { winNum = it.filter { c -> c.isDigit() }.take(maxDigits) },
+                    label = { Text("ထွက်ဂဏန်း ($maxDigits လုံး)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -393,7 +418,7 @@ fun PublishLotteryResultDialog(
                     onClick = onRequestDelete,
                     modifier = Modifier.testTag("dialog_delete_draw_button")
                 ) {
-                    Text("ဤ ၃လုံးထီအကြိမ်ကို ဖျက်မည်", color = AdminCrimson)
+                    Text("ဤထီအကြိမ်ကို ဖျက်မည်", color = AdminCrimson)
                 }
             }
         },
@@ -711,12 +736,17 @@ fun AdminCustomerDetailDialog(
     customerOrders: List<BetOrder>,
     customerWalletReqs: List<WalletRequest>,
     busy: Boolean = false,
+    canAdjustBalance: Boolean = true,
+    canLockUsers: Boolean = true,
+    isOwnerAdmin: Boolean = true,
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
     onAutoSettleCustomer: () -> Unit = {},
     onAutoSettleOrder: (BetOrder) -> Unit = {},
     onOpenAdjustBalance: () -> Unit,
     onOpenGiftPoints: () -> Unit,
+    onToggleLockUser: () -> Unit = {},
+    onForceLogoutUser: () -> Unit = {},
     onAcceptOrder: (BetOrder) -> Unit,
     onRequestSettleWin: (BetOrder) -> Unit,
     onSettleLoss: (BetOrder) -> Unit,
@@ -765,14 +795,17 @@ fun AdminCustomerDetailDialog(
                             Icon(Icons.Default.Person, contentDescription = null, tint = ChampionshipGold)
                             Spacer(Modifier.width(8.dp))
                             Column {
-                                Text(
-                                    text = user.displayName.ifBlank { "Member" },
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = user.displayName.ifBlank { "Member" },
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    OnlineStatusDot(isOnline = user.isOnline, lastSeenTs = user.lastSeenAt)
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Email, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(13.dp))
                                     Spacer(Modifier.width(4.dp))
@@ -879,8 +912,10 @@ fun AdminCustomerDetailDialog(
                             }
                             Text("UID: ${user.userId}", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontFamily = JetBrainsMonoFontFamily)
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                OutlinedButton(onClick = onOpenAdjustBalance, modifier = Modifier.weight(1f)) {
-                                    Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                                if (canAdjustBalance) {
+                                    OutlinedButton(onClick = onOpenAdjustBalance, modifier = Modifier.weight(1f)) {
+                                        Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                                    }
                                 }
                                 Button(
                                     onClick = onOpenGiftPoints,
@@ -899,6 +934,26 @@ fun AdminCustomerDetailDialog(
                                     Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
                                     Spacer(Modifier.width(4.dp))
                                     Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+                            }
+                            if (canLockUsers) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = onToggleLockUser,
+                                        modifier = Modifier.weight(1f).testTag("detail_toggle_lock_user")
+                                    ) {
+                                        Icon(Icons.Default.Lock, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(if (user.isLocked) "Lock ပြန်ဖွင့်" else "Account ပိတ်", color = AdminCrimson, maxLines = 1)
+                                    }
+                                    OutlinedButton(
+                                        onClick = onForceLogoutUser,
+                                        modifier = Modifier.weight(1f).testTag("detail_force_logout_user")
+                                    ) {
+                                        Icon(Icons.Default.Logout, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Force Logout", color = AdminCrimson, maxLines = 1)
+                                    }
                                 }
                             }
                             Button(
@@ -1023,7 +1078,8 @@ fun AdminCustomerDetailDialog(
                                                 fontWeight = FontWeight.Bold
                                             )
                                             Text("Ref: ${req.referenceNote} • ${formatTimestamp(req.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
-                                            if (req.status == "pending") {
+                                            val canActOnReq = req.status == "pending" || (isOwnerAdmin && req.status == "awaiting_main_approval")
+                                            if (canActOnReq) {
                                                 Spacer(Modifier.height(4.dp))
                                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                     Button(
@@ -1033,7 +1089,7 @@ fun AdminCustomerDetailDialog(
                                                     ) {
                                                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                                                         Spacer(Modifier.width(4.dp))
-                                                        Text("အတည်ပြု")
+                                                        Text(if (req.status == "awaiting_main_approval") "Main Admin အတည်ပြု" else "အတည်ပြု")
                                                     }
                                                     OutlinedButton(
                                                         onClick = { onProcessWalletRequest(req, false, "ပယ်ဖျက်ပြီး") },

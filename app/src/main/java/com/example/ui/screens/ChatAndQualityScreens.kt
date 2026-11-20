@@ -171,7 +171,7 @@ fun ApkUpdatePromptDialog(
         },
         title = {
             Text(
-                text = "Htet Thu Ya Update အသစ် (${update.versionLabel})",
+                text = "လိုတရ Update အသစ် (${update.versionLabel})",
                 fontWeight = FontWeight.Bold
             )
         },

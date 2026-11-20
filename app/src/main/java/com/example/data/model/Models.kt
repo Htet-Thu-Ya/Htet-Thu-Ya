@@ -4,6 +4,7 @@ import androidx.annotation.Keep
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
+import com.google.firebase.firestore.PropertyName
 import com.google.firebase.firestore.ServerTimestamp
 import kotlin.math.roundToLong
 
@@ -11,6 +12,11 @@ sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
     data class Error(val message: String) : UiState<Nothing>
+}
+
+enum class AppLanguage(val code: String, val label: String) {
+    MY("my", "မြန်မာ"),
+    EN("en", "English")
 }
 
 @Keep
@@ -24,6 +30,14 @@ data class UserAccount(
     val rewardPoints: Long = 0L,
     val activeStakeKs: Long = 0L,
     val totalWonKs: Long = 0L,
+    @get:PropertyName("isOnline") @PropertyName("isOnline")
+    val isOnline: Boolean = false,
+    val lastSeenAt: Timestamp? = null,
+    @get:PropertyName("isLocked") @PropertyName("isLocked")
+    val isLocked: Boolean = false,
+    val forceLogoutAtMs: Long = 0L,
+    val securityPinHash: String = "",
+    val lastRoundId: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -40,18 +54,106 @@ data class LeaderboardEntry(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+data class AdminPermissions(
+    val canApproveWallet: Boolean = false,
+    val canManageOrders: Boolean = false,
+    val canViewUsers: Boolean = true,
+    val canLockUsers: Boolean = false,
+    val canManageBoard: Boolean = false,
+    val canChat: Boolean = true,
+    val canEditWalletRates: Boolean = false,
+    val canEditGameConfig: Boolean = false,
+    val canViewAllLogs: Boolean = false,
+    val canAdjustBalance: Boolean = false
+) {
+    fun toMap(): Map<String, Boolean> = mapOf(
+        "canApproveWallet" to canApproveWallet,
+        "canManageOrders" to canManageOrders,
+        "canViewUsers" to canViewUsers,
+        "canLockUsers" to canLockUsers,
+        "canManageBoard" to canManageBoard,
+        "canChat" to canChat,
+        "canEditWalletRates" to canEditWalletRates,
+        "canEditGameConfig" to canEditGameConfig,
+        "canViewAllLogs" to canViewAllLogs,
+        "canAdjustBalance" to canAdjustBalance
+    )
+
+    companion object {
+        val ALL_GRANTED = AdminPermissions(
+            canApproveWallet = true,
+            canManageOrders = true,
+            canViewUsers = true,
+            canLockUsers = true,
+            canManageBoard = true,
+            canChat = true,
+            canEditWalletRates = true,
+            canEditGameConfig = true,
+            canViewAllLogs = true,
+            canAdjustBalance = true
+        )
+
+        val PRESET_WALLET_CASHIER = AdminPermissions(
+            canApproveWallet = true,
+            canViewUsers = true,
+            canChat = true
+        )
+
+        val PRESET_ORDER_OPERATOR = AdminPermissions(
+            canManageOrders = true,
+            canManageBoard = true,
+            canViewUsers = true,
+            canChat = true
+        )
+
+        val PRESET_SUPPORT_ONLY = AdminPermissions(
+            canViewUsers = true,
+            canLockUsers = true,
+            canChat = true
+        )
+
+        fun fromMap(map: Map<String, Boolean>?): AdminPermissions {
+            if (map == null) return AdminPermissions()
+            return AdminPermissions(
+                canApproveWallet = map["canApproveWallet"] == true,
+                canManageOrders = map["canManageOrders"] == true,
+                canViewUsers = map["canViewUsers"] == true,
+                canLockUsers = map["canLockUsers"] == true,
+                canManageBoard = map["canManageBoard"] == true,
+                canChat = map["canChat"] == true,
+                canEditWalletRates = map["canEditWalletRates"] == true,
+                canEditGameConfig = map["canEditGameConfig"] == true,
+                canViewAllLogs = map["canViewAllLogs"] == true,
+                canAdjustBalance = map["canAdjustBalance"] == true
+            )
+        }
+    }
+}
+
 @Keep
 @IgnoreExtraProperties
 data class AdminMember(
     @DocumentId val id: String = "",
     val userId: String = "",
     val displayName: String = "",
-    val role: String = "admin",
+    val email: String = "",
+    val role: String = "admin", // "owner" or "admin"
+    val status: String = "active", // "active" or "suspended"
     val addedBy: String = "",
     val inviteCodeUsed: String = "",
+    val pinHash: String = "",
+    val forceLogoutAtMs: Long = 0L,
+    val permissions: Map<String, Boolean> = emptyMap(),
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    fun resolvedPermissions(isOwner: Boolean): AdminPermissions {
+        return if (isOwner || role == "owner") AdminPermissions.ALL_GRANTED
+        else AdminPermissions.fromMap(permissions)
+    }
+
+    fun isActiveMember(): Boolean = status != "suspended"
+}
 
 @Keep
 @IgnoreExtraProperties
@@ -60,6 +162,9 @@ data class AdminInvite(
     val code: String = "",
     val label: String = "",
     val active: Boolean = true,
+    val assignedEmail: String = "",
+    val initialPinHash: String = "",
+    val defaultPermissions: Map<String, Boolean> = emptyMap(),
     val createdBy: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -72,6 +177,8 @@ data class SportMatch(
     val league: String = "",
     val homeTeam: String = "",
     val awayTeam: String = "",
+    val homeLogoUrl: String = "",
+    val awayLogoUrl: String = "",
     val kickoffLabel: String = "",
     val handicapLine: String = "",
     val goalLine: String = "",
@@ -93,6 +200,7 @@ data class SportMatch(
 @IgnoreExtraProperties
 data class LotteryDraw(
     @DocumentId val id: String = "",
+    val drawType: String = "3d", // "2d" or "3d"
     val roundTitle: String = "",
     val closeTimeLabel: String = "",
     val winningNumber: String = "",
@@ -110,7 +218,7 @@ data class BetOrder(
     @DocumentId val id: String = "",
     val userId: String = "",
     val customerName: String = "",
-    val orderType: String = "body_goal",
+    val orderType: String = "body_goal", // "parlay", "body_goal", "three_d", "two_d"
     val selections: List<String> = emptyList(),
     val matchIds: List<String> = emptyList(),
     val pickKeys: List<String> = emptyList(),
@@ -130,6 +238,20 @@ data class BetOrder(
 
 @Keep
 @IgnoreExtraProperties
+data class MiniGameRound(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val customerName: String = "",
+    val gameType: String = "dice", // "dice" or "six_animals"
+    val betLabel: String = "",
+    val outcomeLabel: String = "",
+    val stakeKs: Long = 0L,
+    val payoutKs: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
 data class WalletRequest(
     @DocumentId val id: String = "",
     val userId: String = "",
@@ -138,7 +260,7 @@ data class WalletRequest(
     val amountKs: Long = 0L,
     val channel: String = "",
     val referenceNote: String = "",
-    val status: String = "pending",
+    val status: String = "pending", // "pending", "awaiting_main_approval", "approved", "rejected"
     val adminNote: String = "",
     val processedBy: String = "",
     val ratePercent: Double = 0.0,
@@ -146,6 +268,35 @@ data class WalletRequest(
     val netAmountKs: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class PaymentAccount(
+    @DocumentId val id: String = "",
+    val providerName: String = "",
+    val accountName: String = "",
+    val accountNumber: String = "",
+    val note: String = "",
+    val active: Boolean = true,
+    val createdBy: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class AuditLogEntry(
+    @DocumentId val id: String = "",
+    val actorId: String = "",
+    val actorName: String = "",
+    val actorRole: String = "admin",
+    val action: String = "",
+    val category: String = "order",
+    val targetId: String = "",
+    val targetName: String = "",
+    val details: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
 )
 
 @Keep
@@ -207,7 +358,7 @@ data class BoardConfig(
 @IgnoreExtraProperties
 data class BettingConfig(
     val winCommissionPercent: Double = 0.0,
-    val winCommissionBasis: String = "payout", // "payout" or "profit"
+    val winCommissionBasis: String = "payout",
     val autoSettleOrders: Boolean = false,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -230,28 +381,70 @@ data class BettingConfig(
     }
 }
 
+@Keep
+@IgnoreExtraProperties
+data class SystemGameConfig(
+    val enabledGames: List<String> = listOf("parlay", "body_goal", "two_d", "three_d", "dice", "six_animals"),
+    val dualApprovalThresholdKs: Long = 300_000L,
+    val minStakeKs: Long = 500L,
+    val maxStakeKs: Long = 5_000_000L,
+    val twoDPayoutMultiplier: Double = 80.0,
+    val threeDPayoutMultiplier: Double = 550.0,
+    val dicePayoutMultiplier: Double = 1.95,
+    val sixAnimalsPayoutMultiplier: Double = 2.0,
+    val bonusPromoText: String = "",
+    val maintenanceMode: Boolean = false,
+    val maintenanceMessage: String = "စနစ်ပြုပြင်ထိန်းသိမ်းမှု ပြုလုပ်နေပါသည် — ခေတ္တစောင့်ဆိုင်းပေးပါ။",
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun isGameEnabled(gameKey: String): Boolean = enabledGames.isEmpty() || enabledGames.contains(gameKey)
+}
+
+@Keep
+@IgnoreExtraProperties
+data class SecurityConfig(
+    val requireAdminPin: Boolean = false,
+    val ipWhitelistEnabled: Boolean = false,
+    val allowedIps: List<String> = emptyList(),
+    val globalForceLogoutAtMs: Long = 0L,
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 data class LiveFootballFixture(
     val externalId: String,
     val league: String,
     val homeTeam: String,
     val awayTeam: String,
+    val homeLogoUrl: String = "",
+    val awayLogoUrl: String = "",
     val kickoffLabel: String,
     val matchDate: String,
     val handicapLine: String,
     val goalLine: String,
     val bodyOdds: Double,
     val goalOdds: Double,
-    val status: String, // open, closed, finished
+    val status: String,
     val liveClock: String,
     val homeScore: Long,
     val awayScore: Long
 )
 
+data class Live2DStatus(
+    val twod: String = "--",
+    val setText: String = "--",
+    val valueText: String = "--",
+    val liveTime: String = "",
+    val morning1201: String = "--",
+    val evening430: String = "--"
+)
+
 @Keep
 @IgnoreExtraProperties
 data class AppUpdateConfig(
-    val latestVersionCode: Int = 2,
-    val latestVersionName: String = "2.0",
+    val latestVersionCode: Int = 4,
+    val latestVersionName: String = "4.0",
     val downloadUrl: String = DEFAULT_APK_DOWNLOAD_URL,
     val releaseNotes: String = "",
     val forceUpdate: Boolean = false,
@@ -260,7 +453,7 @@ data class AppUpdateConfig(
 ) {
     companion object {
         const val DEFAULT_APK_DOWNLOAD_URL =
-            "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/HtetThuYa.apk"
+            "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/LoTaYa.apk"
     }
 }
 
@@ -351,7 +544,7 @@ data class ActiveCallUiState(
     val peerName: String,
     val peerRole: String,
     val isOutgoing: Boolean,
-    val status: String, // "calling", "connecting", "connected", "ended"
+    val status: String,
     val isMuted: Boolean = false,
     val isSpeakerOn: Boolean = false,
     val isCameraEnabled: Boolean = true,
@@ -359,5 +552,3 @@ data class ActiveCallUiState(
     val connectedAtEpochMs: Long? = null,
     val hasRemoteVideo: Boolean = false
 )
-
-

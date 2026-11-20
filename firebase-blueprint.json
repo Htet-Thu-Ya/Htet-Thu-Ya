@@ -2,7 +2,7 @@
   "entities": {
     "UserAccount": {
       "title": "UserAccount",
-      "description": "Customer wallet and account summary.",
+      "description": "Customer wallet, online presence, lock state, and security metadata.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID" },
@@ -12,6 +12,12 @@
         "rewardPoints": { "type": "integer", "description": "Reward points" },
         "activeStakeKs": { "type": "integer", "description": "Active pending/accepted order stake in Ks" },
         "totalWonKs": { "type": "integer", "description": "Lifetime settled winnings in Ks" },
+        "isOnline": { "type": "boolean", "description": "Real-time customer online presence flag" },
+        "lastSeenAt": { "type": "string", "format": "date-time", "description": "Last seen timestamp" },
+        "isLocked": { "type": "boolean", "description": "Admin lock status preventing new orders/withdrawals" },
+        "forceLogoutAtMs": { "type": "integer", "description": "Force logout threshold epoch ms" },
+        "securityPinHash": { "type": "string", "description": "Optional customer wallet/account PIN hash" },
+        "lastRoundId": { "type": "string", "description": "Last settled mini-game round ID for atomic verification" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
@@ -33,14 +39,19 @@
     },
     "AdminMember": {
       "title": "AdminMember",
-      "description": "Authorized admin or co-admin friend account.",
+      "description": "Authorized Main Admin or Second Admin with granular permissions, suspension state, and 2FA PIN.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
         "displayName": { "type": "string" },
+        "email": { "type": "string" },
         "role": { "type": "string", "enum": ["owner", "admin"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
         "addedBy": { "type": "string" },
         "inviteCodeUsed": { "type": "string" },
+        "pinHash": { "type": "string" },
+        "forceLogoutAtMs": { "type": "integer" },
+        "permissions": { "type": "object" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -48,12 +59,15 @@
     },
     "AdminInvite": {
       "title": "AdminInvite",
-      "description": "Shareable invite code allowing friends to join as co-admins.",
+      "description": "Shareable invite code created by Main Admin with preset Second Admin permissions and optional PIN.",
       "type": "object",
       "properties": {
         "code": { "type": "string" },
         "label": { "type": "string" },
         "active": { "type": "boolean" },
+        "assignedEmail": { "type": "string" },
+        "initialPinHash": { "type": "string" },
+        "defaultPermissions": { "type": "object" },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -62,12 +76,14 @@
     },
     "SportMatch": {
       "title": "SportMatch",
-      "description": "Football match board for Parlay and Body/Goal Total picks.",
+      "description": "Football match board for Parlay and Body/Goal Total picks with team logos.",
       "type": "object",
       "properties": {
         "league": { "type": "string" },
         "homeTeam": { "type": "string" },
         "awayTeam": { "type": "string" },
+        "homeLogoUrl": { "type": "string" },
+        "awayLogoUrl": { "type": "string" },
         "kickoffLabel": { "type": "string" },
         "handicapLine": { "type": "string" },
         "goalLine": { "type": "string" },
@@ -88,9 +104,10 @@
     },
     "LotteryDraw": {
       "title": "LotteryDraw",
-      "description": "3D lucky number draw round and published result.",
+      "description": "2D or 3D lucky number draw round and published result.",
       "type": "object",
       "properties": {
+        "drawType": { "type": "string", "enum": ["2d", "3d"] },
         "roundTitle": { "type": "string" },
         "closeTimeLabel": { "type": "string" },
         "winningNumber": { "type": "string" },
@@ -105,12 +122,12 @@
     },
     "BetOrder": {
       "title": "BetOrder",
-      "description": "Customer order slip for Parlay, Body/Goal, or 3D.",
+      "description": "Customer order slip for Parlay, Body/Goal, 2D, or 3D.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
         "customerName": { "type": "string" },
-        "orderType": { "type": "string", "enum": ["parlay", "body_goal", "three_d"] },
+        "orderType": { "type": "string", "enum": ["parlay", "body_goal", "three_d", "two_d"] },
         "selections": { "type": "array" },
         "matchIds": { "type": "array" },
         "pickKeys": { "type": "array" },
@@ -129,9 +146,25 @@
       },
       "required": ["userId", "customerName", "orderType", "selections", "matchIds", "drawRound", "stakeKs", "multiplier", "potentialPayoutKs", "actualPayoutKs", "status", "adminNote", "settledBy", "createdAt", "updatedAt"]
     },
+    "MiniGameRound": {
+      "title": "MiniGameRound",
+      "description": "Immutable round record for Dice (အံစာတုံး) and 6-Animal Dice (၆ကောင်ဂျင်).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "gameType": { "type": "string", "enum": ["dice", "six_animals"] },
+        "betLabel": { "type": "string" },
+        "outcomeLabel": { "type": "string" },
+        "stakeKs": { "type": "integer" },
+        "payoutKs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "customerName", "gameType", "betLabel", "outcomeLabel", "stakeKs", "payoutKs", "createdAt"]
+    },
     "WalletRequest": {
       "title": "WalletRequest",
-      "description": "Customer top-up or cash-out request managed by Admin.",
+      "description": "Customer top-up or cash-out request managed by Admin (supports dual approval).",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -140,7 +173,7 @@
         "amountKs": { "type": "integer" },
         "channel": { "type": "string" },
         "referenceNote": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "status": { "type": "string", "enum": ["pending", "awaiting_main_approval", "approved", "rejected"] },
         "adminNote": { "type": "string" },
         "processedBy": { "type": "string" },
         "ratePercent": { "type": "number" },
@@ -151,13 +184,46 @@
       },
       "required": ["userId", "customerName", "requestType", "amountKs", "channel", "referenceNote", "status", "adminNote", "processedBy", "createdAt", "updatedAt"]
     },
+    "PaymentAccount": {
+      "title": "PaymentAccount",
+      "description": "Payment gateway / wallet accounts managed exclusively by Main Admin.",
+      "type": "object",
+      "properties": {
+        "providerName": { "type": "string" },
+        "accountName": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "note": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["providerName", "accountName", "accountNumber", "note", "active", "createdBy", "createdAt", "updatedAt"]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Append-only immutable audit history for Main Admin and Second Admin actions.",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "actorName": { "type": "string" },
+        "actorRole": { "type": "string", "enum": ["owner", "admin"] },
+        "action": { "type": "string" },
+        "category": { "type": "string", "enum": ["wallet", "order", "user", "admin", "board", "settings", "security"] },
+        "targetId": { "type": "string" },
+        "targetName": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorId", "actorName", "actorRole", "action", "category", "targetId", "targetName", "details", "createdAt"]
+    },
     "LedgerTransaction": {
       "title": "LedgerTransaction",
       "description": "Immutable financial ledger record for customer wallet.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
-        "txType": { "type": "string", "enum": ["topup", "withdraw", "order_stake", "order_win", "order_refund", "point_exchange", "admin_adjust", "point_gift"] },
+        "txType": { "type": "string", "enum": ["topup", "withdraw", "order_stake", "order_win", "order_refund", "point_exchange", "admin_adjust", "point_gift", "mini_game_stake", "mini_game_win"] },
         "direction": { "type": "string", "enum": ["credit", "debit"] },
         "amountKs": { "type": "integer" },
         "title": { "type": "string" },
@@ -221,6 +287,41 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["latestVersionCode", "latestVersionName", "downloadUrl", "releaseNotes", "forceUpdate", "updatedBy", "updatedAt"]
+    },
+    "SystemGameConfig": {
+      "title": "SystemGameConfig",
+      "description": "Main Admin game toggles, payout rates, stake limits, dual approval threshold, bonus rules, and maintenance mode.",
+      "type": "object",
+      "properties": {
+        "enabledGames": { "type": "array" },
+        "dualApprovalThresholdKs": { "type": "integer" },
+        "minStakeKs": { "type": "integer" },
+        "maxStakeKs": { "type": "integer" },
+        "twoDPayoutMultiplier": { "type": "number" },
+        "threeDPayoutMultiplier": { "type": "number" },
+        "dicePayoutMultiplier": { "type": "number" },
+        "sixAnimalsPayoutMultiplier": { "type": "number" },
+        "bonusPromoText": { "type": "string" },
+        "maintenanceMode": { "type": "boolean" },
+        "maintenanceMessage": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["enabledGames", "dualApprovalThresholdKs", "minStakeKs", "maxStakeKs", "twoDPayoutMultiplier", "threeDPayoutMultiplier", "dicePayoutMultiplier", "sixAnimalsPayoutMultiplier", "bonusPromoText", "maintenanceMode", "maintenanceMessage", "updatedBy", "updatedAt"]
+    },
+    "SecurityConfig": {
+      "title": "SecurityConfig",
+      "description": "Main Admin security controls: 2FA Admin PIN policy, IP whitelist, and global force logout.",
+      "type": "object",
+      "properties": {
+        "requireAdminPin": { "type": "boolean" },
+        "ipWhitelistEnabled": { "type": "boolean" },
+        "allowedIps": { "type": "array" },
+        "globalForceLogoutAtMs": { "type": "integer" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["requireAdminPin", "ipWhitelistEnabled", "allowedIps", "globalForceLogoutAtMs", "updatedBy", "updatedAt"]
     },
     "DirectChatMessage": {
       "title": "DirectChatMessage",
@@ -301,7 +402,7 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserAccount" },
-      "description": "Private user account balances, points, and email."
+      "description": "Private user account balances, online presence, lock state, and email."
     },
     "/leaderboard/{userId}": {
       "schema": { "$ref": "#/entities/LeaderboardEntry" },
@@ -309,27 +410,39 @@
     },
     "/admins/{adminUid}": {
       "schema": { "$ref": "#/entities/AdminMember" },
-      "description": "Authorized admin and co-admin members."
+      "description": "Authorized Main Admin and Second Admin members with permissions and status."
     },
     "/admin_invites/{inviteCode}": {
       "schema": { "$ref": "#/entities/AdminInvite" },
-      "description": "Shareable admin invite codes."
+      "description": "Shareable admin invite codes with preset Second Admin permissions."
     },
     "/matches/{matchId}": {
       "schema": { "$ref": "#/entities/SportMatch" },
-      "description": "Football matches for Parlay and Body/Goal orders."
+      "description": "Football matches for Parlay and Body/Goal orders with team logos."
     },
     "/lottery_draws/{drawId}": {
       "schema": { "$ref": "#/entities/LotteryDraw" },
-      "description": "3D lottery draw rounds and results."
+      "description": "2D & 3D lottery draw rounds and results."
     },
     "/orders/{orderId}": {
       "schema": { "$ref": "#/entities/BetOrder" },
       "description": "Customer order slips monitored by Admins."
     },
+    "/mini_game_rounds/{roundId}": {
+      "schema": { "$ref": "#/entities/MiniGameRound" },
+      "description": "Immutable Dice and 6-Animal Dice game round history."
+    },
     "/wallet_requests/{requestId}": {
       "schema": { "$ref": "#/entities/WalletRequest" },
-      "description": "Customer top-up and cash-out requests."
+      "description": "Customer top-up and cash-out requests including dual-approval queue."
+    },
+    "/payment_accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/PaymentAccount" },
+      "description": "Payment wallets and bank gateways managed by Main Admin."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogEntry" },
+      "description": "Immutable audit log for all Main Admin and Second Admin actions."
     },
     "/transactions/{txId}": {
       "schema": { "$ref": "#/entities/LedgerTransaction" },
@@ -350,6 +463,14 @@
     "/app_settings/app_update": {
       "schema": { "$ref": "#/entities/AppUpdateConfig" },
       "description": "APK release notification settings."
+    },
+    "/app_settings/system_config": {
+      "schema": { "$ref": "#/entities/SystemGameConfig" },
+      "description": "Game toggles, payout multipliers, limits, bonus rules, dual-approval threshold, and maintenance mode."
+    },
+    "/app_settings/security_config": {
+      "schema": { "$ref": "#/entities/SecurityConfig" },
+      "description": "2FA PIN enforcement, IP whitelist, and global force logout settings."
     },
     "/direct_messages/{msgId}": {
       "schema": { "$ref": "#/entities/DirectChatMessage" },

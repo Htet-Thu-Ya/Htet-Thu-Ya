@@ -971,6 +971,398 @@ test("Voice & Video call signaling: participant isolation, admin call, SDP answe
   );
 });
 
+test("Main Admin vs Second Admin RBAC permissions, suspension, and invite defaultPermissions enforcement", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const secondDb = testEnv.authenticatedContext("sub_admin_1", {
+    email: "subadmin@gmail.com",
+    email_verified: true,
+  }).firestore();
+
+  const walletOnlyPerms = {
+    canApproveWallet: true,
+    canManageOrders: false,
+    canViewUsers: true,
+    canLockUsers: false,
+    canManageBoard: false,
+    canChat: true,
+    canEditWalletRates: false,
+    canEditGameConfig: false,
+    canViewAllLogs: false,
+    canAdjustBalance: false,
+  };
+
+  // Owner creates scoped invite with defaultPermissions
+  await assertSucceeds(
+    ownerDb.collection("admin_invites").doc("SUB-WALLET1").set({
+      code: "SUB-WALLET1",
+      label: "Wallet Cashier",
+      active: true,
+      assignedEmail: "subadmin@gmail.com",
+      defaultPermissions: walletOnlyPerms,
+      createdBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  // Sub-admin CANNOT escalate permissions on self-create beyond defaultPermissions
+  await assertFails(
+    secondDb.collection("admins").doc("sub_admin_1").set({
+      userId: "sub_admin_1",
+      displayName: "Cashier",
+      email: "subadmin@gmail.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "SUB-WALLET1",
+      permissions: { ...walletOnlyPerms, canManageOrders: true },
+      createdAt: pastDate(4000),
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // Sub-admin succeeds when permissions match defaultPermissions
+  await assertSucceeds(
+    secondDb.collection("admins").doc("sub_admin_1").set({
+      userId: "sub_admin_1",
+      displayName: "Cashier",
+      email: "subadmin@gmail.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "SUB-WALLET1",
+      permissions: walletOnlyPerms,
+      createdAt: pastDate(4000),
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // Sub-admin CANNOT read or modify security_config or create payment_accounts or update orders
+  await assertFails(
+    secondDb.collection("app_settings").doc("security_config").set({
+      requireAdminPin: false,
+      ipWhitelistEnabled: false,
+      allowedIps: [],
+      globalForceLogoutAtMs: 0,
+      updatedBy: "sub_admin_1",
+      updatedAt: pastDate(3000),
+    })
+  );
+  await assertFails(
+    secondDb.collection("payment_accounts").doc("kpay_1").set({
+      providerName: "KBZPay",
+      accountName: "Cashier",
+      accountNumber: "099999999",
+      note: "",
+      active: true,
+      createdBy: "sub_admin_1",
+      createdAt: pastDate(3000),
+      updatedAt: pastDate(3000),
+    })
+  );
+
+  // Owner creates a pending order & a match
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("orders").doc("ord_rbac_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "two_d",
+      selections: ["45"],
+      matchIds: [],
+      drawRound: "2D Morning",
+      stakeKs: 1000,
+      multiplier: 80.0,
+      potentialPayoutKs: 80000,
+      actualPayoutKs: 0,
+      status: "pending",
+      adminNote: "",
+      settledBy: "",
+      createdAt: pastDate(4000),
+      updatedAt: pastDate(4000),
+    });
+  });
+
+  // Sub-admin without canManageOrders CANNOT update order
+  await assertFails(
+    secondDb.collection("orders").doc("ord_rbac_1").update({
+      status: "accepted",
+      adminNote: "OK",
+      settledBy: "sub_admin_1",
+      updatedAt: pastDate(2000),
+    })
+  );
+
+  // Owner suspends sub_admin_1 -> all admin actions denied immediately
+  await assertSucceeds(
+    ownerDb.collection("admins").doc("sub_admin_1").update({
+      status: "suspended",
+      updatedAt: pastDate(1500),
+    })
+  );
+  await assertFails(secondDb.collection("orders").get());
+});
+
+test("Dual approval wallet flow, payment accounts, immutable audit logs, and system/security configs", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const secondDb = testEnv.authenticatedContext("sub_admin_2", {
+    email: "sub2@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  // Seed active Second Admin with canApproveWallet=true and a large pending withdrawal
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.collection("admins").doc("sub_admin_2").set({
+      userId: "sub_admin_2",
+      displayName: "Sub Wallet",
+      email: "sub2@gmail.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "CODE-1",
+      permissions: { canApproveWallet: true, canChat: true, canViewUsers: true },
+      createdAt: pastDate(9000),
+      updatedAt: pastDate(9000),
+    });
+    await db.collection("wallet_requests").doc("wr_big_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      requestType: "withdraw",
+      amountKs: 500000,
+      channel: "KBZPay",
+      referenceNote: "091234567",
+      status: "pending",
+      adminNote: "",
+      processedBy: "",
+      createdAt: pastDate(8000),
+      updatedAt: pastDate(8000),
+    });
+  });
+
+  // Second admin moves large withdraw from pending -> awaiting_main_approval
+  await assertSucceeds(
+    secondDb.collection("wallet_requests").doc("wr_big_1").update({
+      status: "awaiting_main_approval",
+      adminNote: "Needs Owner review",
+      processedBy: "sub_admin_2",
+      updatedAt: pastDate(7000),
+    })
+  );
+
+  // Second admin CANNOT finalize awaiting_main_approval -> approved
+  await assertFails(
+    secondDb.collection("wallet_requests").doc("wr_big_1").update({
+      status: "approved",
+      adminNote: "Self override",
+      processedBy: "sub_admin_2",
+      updatedAt: pastDate(6000),
+    })
+  );
+
+  // Owner CAN finalize awaiting_main_approval -> approved
+  await assertSucceeds(
+    ownerDb.collection("wallet_requests").doc("wr_big_1").update({
+      status: "approved",
+      adminNote: "Owner Approved",
+      processedBy: OWNER_UID,
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  // Payment accounts: Owner creates, customer reads active only, second admin cannot edit
+  await assertSucceeds(
+    ownerDb.collection("payment_accounts").doc("pay_kpay").set({
+      providerName: "KBZPay",
+      accountName: "LoTaYa Official",
+      accountNumber: "09777888999",
+      note: "Main KPay",
+      active: true,
+      createdBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("payment_accounts").where("active", "==", true).get());
+  await assertFails(aliceDb.collection("payment_accounts").get());
+  await assertFails(secondDb.collection("payment_accounts").doc("pay_kpay").delete());
+
+  // Audit logs: sub_admin_2 writes own log, cannot view Owner logs or edit/delete logs
+  await assertSucceeds(
+    ownerDb.collection("audit_logs").doc("log_owner_1").set({
+      actorId: OWNER_UID,
+      actorName: "Main Admin",
+      actorRole: "owner",
+      action: "Approved big withdrawal",
+      category: "wallet",
+      targetId: "wr_big_1",
+      targetName: "Alice",
+      details: "500,000 Ks",
+      createdAt: pastDate(4000),
+    })
+  );
+  await assertSucceeds(
+    secondDb.collection("audit_logs").doc("log_sub_1").set({
+      actorId: "sub_admin_2",
+      actorName: "Sub Wallet",
+      actorRole: "admin",
+      action: "Escalated withdrawal",
+      category: "wallet",
+      targetId: "wr_big_1",
+      targetName: "Alice",
+      details: "500,000 Ks",
+      createdAt: pastDate(3500),
+    })
+  );
+  await assertFails(secondDb.collection("audit_logs").doc("log_owner_1").get());
+  await assertSucceeds(secondDb.collection("audit_logs").where("actorId", "==", "sub_admin_2").get());
+  await assertSucceeds(ownerDb.collection("audit_logs").get());
+  await assertFails(ownerDb.collection("audit_logs").doc("log_sub_1").delete());
+
+  // System & Security Configs
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("system_config").set({
+      enabledGames: ["parlay", "body_goal", "two_d", "three_d", "dice", "six_animals"],
+      dualApprovalThresholdKs: 300000,
+      minStakeKs: 500,
+      maxStakeKs: 5000000,
+      twoDPayoutMultiplier: 80.0,
+      threeDPayoutMultiplier: 550.0,
+      dicePayoutMultiplier: 1.95,
+      sixAnimalsPayoutMultiplier: 2.0,
+      bonusPromoText: "Welcome Bonus",
+      maintenanceMode: false,
+      maintenanceMessage: "",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(3000),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("security_config").set({
+      requireAdminPin: true,
+      ipWhitelistEnabled: false,
+      allowedIps: [],
+      globalForceLogoutAtMs: 0,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(3000),
+    })
+  );
+});
+
+test("Locked user blocked from betting/wallet, online presence update allowed, atomic mini-game round batch", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const created = pastDate(10000);
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      balanceKs: 0,
+      rewardPoints: 0,
+      activeStakeKs: 0,
+      totalWonKs: 0,
+      isOnline: true,
+      lastSeenAt: created,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Presence & PIN self-update succeeds
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      isOnline: false,
+      lastSeenAt: pastDate(2000),
+      securityPinHash: "abcd1234",
+      updatedAt: pastDate(2000),
+    })
+  );
+
+  // Credit Alice 5000 Ks then test atomic mini-game batch (stake 1000, payout 1950 -> balance +950, totalWon +1950)
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(ALICE_UID).update({
+      balanceKs: 5000,
+      updatedAt: pastDate(1500),
+    });
+  });
+
+  const roundRef = aliceDb.collection("mini_game_rounds").doc("rnd_1");
+  const userRef = aliceDb.collection("users").doc(ALICE_UID);
+  const batch = aliceDb.batch();
+  batch.set(roundRef, {
+    userId: ALICE_UID,
+    customerName: "Alice",
+    gameType: "dice",
+    betLabel: "ကြီး (Big)",
+    outcomeLabel: "4 + 5 + 3 = 12",
+    stakeKs: 1000,
+    payoutKs: 1950,
+    createdAt: pastDate(1000),
+  });
+  batch.update(userRef, {
+    balanceKs: 5950,
+    totalWonKs: 1950,
+    lastRoundId: "rnd_1",
+    updatedAt: pastDate(1000),
+  });
+  await assertSucceeds(batch.commit());
+
+  // Fake balance win mismatch on mini-game batch MUST fail
+  const fakeBatch = aliceDb.batch();
+  fakeBatch.set(aliceDb.collection("mini_game_rounds").doc("rnd_fake"), {
+    userId: ALICE_UID,
+    customerName: "Alice",
+    gameType: "dice",
+    betLabel: "ကြီး (Big)",
+    outcomeLabel: "1 + 1 + 1 = 3",
+    stakeKs: 1000,
+    payoutKs: 0,
+    createdAt: pastDate(800),
+  });
+  fakeBatch.update(userRef, {
+    balanceKs: 99999,
+    totalWonKs: 1950,
+    lastRoundId: "rnd_fake",
+    updatedAt: pastDate(800),
+  });
+  await assertFails(fakeBatch.commit());
+
+  // Lock Alice -> cannot place orders or mini-game bets
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(ALICE_UID).update({
+      isLocked: true,
+      updatedAt: pastDate(500),
+    });
+  });
+
+  await assertFails(
+    aliceDb.collection("orders").doc("ord_locked").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "two_d",
+      selections: ["88"],
+      matchIds: [],
+      drawRound: "2D Evening",
+      stakeKs: 500,
+      multiplier: 80.0,
+      potentialPayoutKs: 40000,
+      actualPayoutKs: 0,
+      status: "pending",
+      adminNote: "",
+      settledBy: "",
+      createdAt: pastDate(200),
+      updatedAt: pastDate(200),
+    })
+  );
+});
+
+
 
 
 

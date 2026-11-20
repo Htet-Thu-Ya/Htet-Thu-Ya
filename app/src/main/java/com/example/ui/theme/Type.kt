@@ -14,6 +14,19 @@ val OutfitFontFamily = FontFamily(
     Font(R.font.outfit, FontWeight.Bold)
 )
 
+val CinzelFontFamily = FontFamily(
+    Font(R.font.cinzel, FontWeight.Normal),
+    Font(R.font.cinzel, FontWeight.SemiBold),
+    Font(R.font.cinzel, FontWeight.Bold)
+)
+
+val PadaukFontFamily = FontFamily(
+    Font(R.font.padauk, FontWeight.Normal),
+    Font(R.font.padauk, FontWeight.Medium),
+    Font(R.font.padauk, FontWeight.SemiBold),
+    Font(R.font.padauk, FontWeight.Bold)
+)
+
 val PlusJakartaFontFamily = FontFamily(
     Font(R.font.plus_jakarta_sans, FontWeight.Normal),
     Font(R.font.plus_jakarta_sans, FontWeight.Medium),
@@ -28,10 +41,10 @@ val JetBrainsMonoFontFamily = FontFamily(
 
 val AppTypography = Typography(
     displaySmall = TextStyle(
-        fontFamily = OutfitFontFamily,
+        fontFamily = PadaukFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 30.sp,
-        lineHeight = 36.sp
+        fontSize = 32.sp,
+        lineHeight = 40.sp
     ),
     headlineMedium = TextStyle(
         fontFamily = OutfitFontFamily,
@@ -40,34 +53,34 @@ val AppTypography = Typography(
         lineHeight = 30.sp
     ),
     titleLarge = TextStyle(
-        fontFamily = OutfitFontFamily,
+        fontFamily = PadaukFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp
+        fontSize = 21.sp,
+        lineHeight = 28.sp
     ),
     titleMedium = TextStyle(
-        fontFamily = PlusJakartaFontFamily,
+        fontFamily = PadaukFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
-        lineHeight = 22.sp
+        lineHeight = 23.sp
     ),
     bodyLarge = TextStyle(
-        fontFamily = PlusJakartaFontFamily,
+        fontFamily = PadaukFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 15.sp,
         lineHeight = 22.sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = PlusJakartaFontFamily,
+        fontFamily = PadaukFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
         lineHeight = 19.sp
     ),
     labelLarge = TextStyle(
-        fontFamily = PlusJakartaFontFamily,
+        fontFamily = PadaukFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
-        lineHeight = 18.sp
+        lineHeight = 19.sp
     ),
     labelMedium = TextStyle(
         fontFamily = JetBrainsMonoFontFamily,
