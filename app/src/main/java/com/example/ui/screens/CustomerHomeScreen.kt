@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LiveTv
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Stadium
+import androidx.compose.material.icons.filled.StarRate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
@@ -64,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.model.AvailableApkUpdate
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.ui.components.AdminInviteRedeemDialog
@@ -91,7 +94,9 @@ enum class CustomerRoute {
     RESULTS,
     THREE_D,
     LEADERBOARD,
-    POINT_EXCHANGE
+    POINT_EXCHANGE,
+    CHAT,
+    QUALITY
 }
 
 private data class MenuTile(
@@ -109,6 +114,8 @@ fun CustomerHomeScreen(
     displayName: String,
     isAdmin: Boolean,
     pendingAdminCount: Int,
+    availableApkUpdate: AvailableApkUpdate? = null,
+    onOpenUpdateDialog: () -> Unit = {},
     onNavigate: (CustomerRoute) -> Unit,
     onSwitchToAdmin: () -> Unit,
     onRedeemInviteCode: (String) -> Unit,
@@ -272,6 +279,15 @@ fun CustomerHomeScreen(
                 }
             }
 
+            if (availableApkUpdate != null) {
+                item(span = { GridItemSpan(2) }) {
+                    ApkUpdateBanner(
+                        update = availableApkUpdate,
+                        onOpenDialog = onOpenUpdateDialog
+                    )
+                }
+            }
+
             // 555-style Summary Wallet Card
             item(span = { GridItemSpan(2) }) {
                 Card(
@@ -431,6 +447,63 @@ fun CustomerHomeScreen(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+                    }
+                }
+            }
+
+            item(span = { GridItemSpan(2) }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val supportTiles = listOf(
+                        MenuTile(CustomerRoute.CHAT, "Chatbox (1:1 / Group)", Icons.Default.Forum, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_chat"),
+                        MenuTile(CustomerRoute.QUALITY, "အရည်အသွေး အဆင့်", Icons.Default.StarRate, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_quality")
+                    )
+                    supportTiles.forEach { tile ->
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(114.dp)
+                                .clickable { onNavigate(tile.route) }
+                                .testTag(tile.testTag),
+                            colors = CardDefaults.cardColors(containerColor = PearlCard),
+                            border = BorderStroke(1.dp, PearlCardBorder),
+                            shape = RoundedCornerShape(16.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .background(tile.badgeColor, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = tile.icon,
+                                        contentDescription = tile.title,
+                                        tint = tile.iconTint,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    text = tile.title,
+                                    color = InkDark,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     }
                 }
             }

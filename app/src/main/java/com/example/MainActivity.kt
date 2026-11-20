@@ -15,8 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.CredentialManager
@@ -33,12 +35,15 @@ import com.example.data.model.UiState
 import com.example.data.repository.HtetThuYaRepository
 import com.example.ui.MainViewModel
 import com.example.ui.screens.AdminDashboardScreen
+import com.example.ui.screens.ApkUpdatePromptDialog
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.ChatHubScreen
 import com.example.ui.screens.CustomerHomeScreen
 import com.example.ui.screens.CustomerRoute
 import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.OrdersHistoryScreen
 import com.example.ui.screens.PointExchangeScreen
+import com.example.ui.screens.QualityRatingScreen
 import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SportsOrderScreen
 import com.example.ui.screens.ThreeDLotteryScreen
@@ -143,6 +148,15 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val bettingConfig by vm.bettingConfig.collectAsStateWithLifecycle()
     val liveFeedState by vm.liveFeed.collectAsStateWithLifecycle()
 
+    val appUpdateConfig by vm.appUpdateConfig.collectAsStateWithLifecycle()
+    val availableApkUpdate by vm.availableApkUpdate.collectAsStateWithLifecycle()
+    val updateDismissed by vm.updateDismissed.collectAsStateWithLifecycle()
+    val userDirectMessagesState by vm.userDirectMessages.collectAsStateWithLifecycle()
+    val allDirectMessagesState by vm.allDirectMessages.collectAsStateWithLifecycle()
+    val groupMessagesState by vm.groupMessages.collectAsStateWithLifecycle()
+    val appReviewsState by vm.appReviews.collectAsStateWithLifecycle()
+    var manualOpenUpdateDialog by remember { mutableStateOf(false) }
+
     val balanceKs = (accountState as? UiState.Success)?.data?.balanceKs ?: 0L
     val navController = rememberNavController()
 
@@ -168,6 +182,10 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     allUsersState = allUsersState,
                     adminMembersState = adminMembersState,
                     adminInvitesState = adminInvitesState,
+                    allDirectMessagesState = allDirectMessagesState,
+                    groupMessagesState = groupMessagesState,
+                    appReviewsState = appReviewsState,
+                    appUpdateConfig = appUpdateConfig,
                     walletConfig = walletConfig,
                     boardConfig = boardConfig,
                     bettingConfig = bettingConfig,
@@ -205,7 +223,13 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onToggleAdminInvite = vm::toggleAdminInvite,
                     onRemoveAdminMember = vm::removeAdminMember,
                     onAdjustUserBalance = vm::adjustUserBalance,
-                    onGiftRewardPoints = vm::giftRewardPoints
+                    onGiftRewardPoints = vm::giftRewardPoints,
+                    onSendAdminDirectMessage = vm::sendAdminDirectMessage,
+                    onDeleteDirectMessage = vm::deleteDirectMessage,
+                    onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = true) },
+                    onDeleteGroupMessage = vm::deleteGroupMessage,
+                    onSaveAppUpdateConfig = vm::saveAppUpdateConfig,
+                    onDeleteQualityReview = vm::deleteQualityReview
                 )
             } else {
                 NavHost(
@@ -218,6 +242,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             displayName = vm.displayName,
                             isAdmin = isAdmin,
                             pendingAdminCount = pendingAdminBadge,
+                            availableApkUpdate = availableApkUpdate,
+                            onOpenUpdateDialog = { manualOpenUpdateDialog = true },
                             onNavigate = { route -> navController.navigate(route.name) },
                             onSwitchToAdmin = { vm.setAdminMode(true) },
                             onRedeemInviteCode = { code -> vm.redeemAdminInvite(code) },
@@ -327,7 +353,42 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onExchange = { pts -> vm.exchangePoints(pts) }
                         )
                     }
+                    composable(CustomerRoute.CHAT.name) {
+                        ChatHubScreen(
+                            currentUserId = user.uid,
+                            isAdmin = isAdmin,
+                            directMessagesState = userDirectMessagesState,
+                            groupMessagesState = groupMessagesState,
+                            onSendDirectMessage = vm::sendCustomerDirectMessage,
+                            onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = false) },
+                            onDeleteDirectMessage = vm::deleteDirectMessage,
+                            onDeleteGroupMessage = vm::deleteGroupMessage,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(CustomerRoute.QUALITY.name) {
+                        QualityRatingScreen(
+                            currentUserId = user.uid,
+                            isAdmin = isAdmin,
+                            reviewsState = appReviewsState,
+                            busy = busy,
+                            onSubmitReview = vm::submitQualityReview,
+                            onDeleteReview = vm::deleteQualityReview,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
+            }
+
+            val updateToShow = availableApkUpdate
+            if (!(isAdmin && isAdminMode) && updateToShow != null && (!updateDismissed || manualOpenUpdateDialog)) {
+                ApkUpdatePromptDialog(
+                    update = updateToShow,
+                    onDismiss = {
+                        manualOpenUpdateDialog = false
+                        vm.dismissUpdateDialog()
+                    }
+                )
             }
         }
     }

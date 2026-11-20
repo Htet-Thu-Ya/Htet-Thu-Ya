@@ -1,6 +1,8 @@
 package com.example.data.network
 
 import android.util.Log
+import com.example.data.betting.KyayFormatter
+import com.example.data.model.GitHubReleaseInfo
 import com.example.data.model.LiveFootballFixture
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -150,7 +152,16 @@ class FootballFeedService(
                 liveClock.ifBlank { formatUtcToLocalLabel(isoUtc) }
             }
 
-            // Extract optional odds if ESPN includes them
+            var homeAbbr = ""
+            var awayAbbr = ""
+            for (j in 0 until competitors.length()) {
+                val c = competitors.optJSONObject(j) ?: continue
+                val ha = c.optString("homeAway")
+                val abbr = c.optJSONObject("team")?.optString("abbreviation").orEmpty()
+                if (ha == "home") homeAbbr = abbr else if (ha == "away") awayAbbr = abbr
+            }
+
+            // Extract optional odds and convert American/spread strings into clear Myanmar/Asian handicap lines
             var goalLine = "2.5"
             var handicapLine = "Home -0.5"
             val oddsArr = comp.optJSONArray("odds")
@@ -161,9 +172,15 @@ class FootballFeedService(
                     goalLine = overUnder.toString().removeSuffix(".0")
                 }
                 val details = firstOdds?.optString("details").orEmpty()
-                if (details.isNotBlank() && details.length <= 35) {
-                    handicapLine = details
-                }
+                val spreadVal = firstOdds?.optDouble("spread", Double.NaN) ?: Double.NaN
+                handicapLine = KyayFormatter.convertEspnOddsToHandicap(
+                    details = details,
+                    spreadVal = spreadVal,
+                    homeTeam = homeName,
+                    awayTeam = awayName,
+                    homeAbbr = homeAbbr,
+                    awayAbbr = awayAbbr
+                )
             }
 
             list.add(
@@ -243,11 +260,68 @@ class FootballFeedService(
         return list
     }
 
+    suspend fun fetchLatestGitHubApkRelease(): GitHubReleaseInfo? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://api.github.com/repos/Htet-Thu-Ya/Htet-Thu-Ya/releases/tags/latest"
+            val req = Request.Builder()
+                .url(url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "HtetThuYa-Android/2.0")
+                .build()
+            val body = client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.string() else null
+            } ?: return@withContext null
+
+            val root = JSONObject(body)
+            val tagName = root.optString("tag_name", "latest")
+            val notes = root.optString("body", "").take(350)
+            val assets = root.optJSONArray("assets")
+            var apkDownloadUrl = "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/HtetThuYa.apk"
+            var updatedIso = root.optString("published_at", "")
+            if (assets != null) {
+                for (i in 0 until assets.length()) {
+                    val asset = assets.optJSONObject(i) ?: continue
+                    val name = asset.optString("name", "")
+                    if (name.endsWith(".apk", ignoreCase = true)) {
+                        apkDownloadUrl = asset.optString("browser_download_url", apkDownloadUrl)
+                        updatedIso = asset.optString("updated_at").ifBlank { updatedIso }
+                        break
+                    }
+                }
+            }
+            val updatedMs = parseIsoTimestampMs(updatedIso) ?: return@withContext null
+            GitHubReleaseInfo(
+                tagName = tagName,
+                updatedAtEpochMs = updatedMs,
+                downloadUrl = apkDownloadUrl,
+                releaseNotes = notes
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "GitHub release check skipped: ${e.message}")
+            null
+        }
+    }
+
+    private fun parseIsoTimestampMs(iso: String): Long? {
+        if (iso.isBlank()) return null
+        val patterns = listOf("yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm'Z'")
+        for (p in patterns) {
+            try {
+                val fmt = SimpleDateFormat(p, Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                return fmt.parse(iso)?.time
+            } catch (_: Exception) {
+            }
+        }
+        return null
+    }
+
     private fun httpGet(url: String): String? {
         return try {
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "HtetThuYa-Android/1.0")
+                .header("User-Agent", "HtetThuYa-Android/2.0")
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) resp.body?.string() else null

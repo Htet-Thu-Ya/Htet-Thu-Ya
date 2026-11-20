@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Percent
@@ -81,9 +82,13 @@ import androidx.compose.ui.unit.dp
 import com.example.data.betting.SettlementCalculator
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
+import com.example.data.model.AppQualityReview
+import com.example.data.model.AppUpdateConfig
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.DirectChatMessage
+import com.example.data.model.GroupChatMessage
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UiState
@@ -116,6 +121,10 @@ fun AdminDashboardScreen(
     allUsersState: UiState<List<UserAccount>>,
     adminMembersState: UiState<List<AdminMember>>,
     adminInvitesState: UiState<List<AdminInvite>>,
+    allDirectMessagesState: UiState<List<DirectChatMessage>>,
+    groupMessagesState: UiState<List<GroupChatMessage>>,
+    appReviewsState: UiState<List<AppQualityReview>>,
+    appUpdateConfig: AppUpdateConfig?,
     walletConfig: WalletConfig,
     boardConfig: BoardConfig,
     bettingConfig: BettingConfig,
@@ -151,9 +160,16 @@ fun AdminDashboardScreen(
     onToggleAdminInvite: (String, Boolean) -> Unit,
     onRemoveAdminMember: (String) -> Unit,
     onAdjustUserBalance: (String, Long, String) -> Unit,
-    onGiftRewardPoints: (String, String, Long, String) -> Unit
+    onGiftRewardPoints: (String, String, Long, String) -> Unit,
+    onSendAdminDirectMessage: (String, String) -> Unit,
+    onDeleteDirectMessage: (String) -> Unit,
+    onSendGroupMessage: (String) -> Unit,
+    onDeleteGroupMessage: (String) -> Unit,
+    onSaveAppUpdateConfig: (Int, String, String, String, Boolean) -> Unit,
+    onDeleteQualityReview: (String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    var chatCustomerUid by remember { mutableStateOf<String?>(null) }
     var inspectingUserId by remember { mutableStateOf<String?>(null) }
     var settlingWinOrder by remember { mutableStateOf<BetOrder?>(null) }
     var adjustingUser by remember { mutableStateOf<UserAccount?>(null) }
@@ -166,6 +182,9 @@ fun AdminDashboardScreen(
     val users = (allUsersState as? UiState.Success)?.data ?: emptyList()
     val admins = (adminMembersState as? UiState.Success)?.data ?: emptyList()
     val invites = (adminInvitesState as? UiState.Success)?.data ?: emptyList()
+    val directMsgs = (allDirectMessagesState as? UiState.Success)?.data ?: emptyList()
+    val groupMsgs = (groupMessagesState as? UiState.Success)?.data ?: emptyList()
+    val reviews = (appReviewsState as? UiState.Success)?.data ?: emptyList()
     val usersById = remember(users) { users.associateBy { it.userId } }
 
     val pendingOrderCount = orders.count { it.status == "pending" }
@@ -289,6 +308,18 @@ fun AdminDashboardScreen(
                     text = { Text("သူငယ်ချင်း Admin") },
                     modifier = Modifier.testTag("admin_tab_team")
                 )
+                Tab(
+                    selected = selectedTab == 6,
+                    onClick = { selectedTab = 6 },
+                    text = { Text("Chat (${directMsgs.size + groupMsgs.size})") },
+                    modifier = Modifier.testTag("admin_tab_chat")
+                )
+                Tab(
+                    selected = selectedTab == 7,
+                    onClick = { selectedTab = 7 },
+                    text = { Text("Update / အဆင့် (${reviews.size})") },
+                    modifier = Modifier.testTag("admin_tab_update_quality")
+                )
             }
 
             Box(
@@ -360,7 +391,11 @@ fun AdminDashboardScreen(
                         onAutoSettleCustomer = onAutoSettleCustomer,
                         onInspectCustomer = { u -> inspectingUserId = u.userId },
                         onOpenAdjustBalance = { u -> adjustingUser = u },
-                        onOpenGiftPoints = { u -> giftingUser = u }
+                        onOpenGiftPoints = { u -> giftingUser = u },
+                        onOpenChatWithCustomer = { u ->
+                            chatCustomerUid = u.userId
+                            selectedTab = 6
+                        }
                     )
                     5 -> AdminTeamTab(
                         currentUserId = currentUserId,
@@ -369,6 +404,26 @@ fun AdminDashboardScreen(
                         onCreateInvite = onCreateAdminInvite,
                         onToggleInvite = onToggleAdminInvite,
                         onRemoveAdmin = onRemoveAdminMember
+                    )
+                    6 -> AdminChatTab(
+                        currentUserId = currentUserId,
+                        users = users,
+                        allDirectMessages = directMsgs,
+                        groupMessages = groupMsgs,
+                        initialCustomerUid = chatCustomerUid,
+                        onClearInitialCustomer = { chatCustomerUid = null },
+                        onSendAdminDirectMessage = onSendAdminDirectMessage,
+                        onDeleteDirectMessage = onDeleteDirectMessage,
+                        onSendGroupMessage = onSendGroupMessage,
+                        onDeleteGroupMessage = onDeleteGroupMessage
+                    )
+                    7 -> AdminUpdateAndQualityTab(
+                        currentUserId = currentUserId,
+                        appUpdateConfig = appUpdateConfig,
+                        reviews = reviews,
+                        busy = busy,
+                        onSaveAppUpdateConfig = onSaveAppUpdateConfig,
+                        onDeleteReview = onDeleteQualityReview
                     )
                 }
             }
@@ -401,7 +456,12 @@ fun AdminDashboardScreen(
             onRejectOrder = { onRejectOrder(it, "ပယ်ဖျက်ပြီး - ငွေပြန်အမ်းပြီး") },
             onDeleteOrder = onDeleteOrder,
             onProcessWalletRequest = onProcessWalletRequest,
-            onDeleteWalletRequest = onDeleteWalletRequest
+            onDeleteWalletRequest = onDeleteWalletRequest,
+            onOpenChat = {
+                inspectingUserId = null
+                chatCustomerUid = uid
+                selectedTab = 6
+            }
         )
     }
 
@@ -461,7 +521,7 @@ private fun AdminOrdersTab(
 ) {
     var filter by remember { mutableStateOf("pending") }
     var groupByCustomer by remember { mutableStateOf(true) }
-    var showCommissionSettings by remember { mutableStateOf(true) }
+    var showCommissionSettings by remember { mutableStateOf(false) }
     var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
 
@@ -534,11 +594,20 @@ private fun AdminOrdersTab(
                                 )
                             }
                         }
-                        Icon(
-                            imageVector = if (showCommissionSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = "Toggle commission settings",
-                            tint = ChampionshipGold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (showCommissionSettings) "ဝှက်မည်" else "ပြမည်",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = if (showCommissionSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle commission settings",
+                                tint = ChampionshipGold
+                            )
+                        }
                     }
 
                     if (showCommissionSettings) {
@@ -840,6 +909,7 @@ private fun AdminWalletRequestsTab(
 ) {
     var deletingRequest by remember { mutableStateOf<WalletRequest?>(null) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
+    var showWalletConfig by remember { mutableStateOf(false) }
 
     var depositPctText by remember { mutableStateOf(walletConfig.depositPercent.toString()) }
     var depositMode by remember { mutableStateOf(walletConfig.depositMode) }
@@ -878,83 +948,118 @@ private fun AdminWalletRequestsTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Percent, contentDescription = null, tint = ChampionshipGold)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "ငွေသွင်း / ငွေထုတ် ရာခိုင်နှုန်း သတ်မှတ်ချက်",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Text(
-                        "ငွေသွင်းလျှင် အပိုဆု (+) သို့မဟုတ် ဝန်ဆောင်ခ (-)၊ ငွေထုတ်လျှင် ဝန်ဆောင်ခ (-) သို့မဟုတ် အပိုဆု (+) ကို စိတ်ကြိုက်သတ်မှတ်နိုင်ပါသည်။",
-                        color = Color(0xFFB4C8BE),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    Text("ငွေသွင်း (Deposit %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = depositPctText,
-                            onValueChange = { depositPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
-                            label = { Text("% နှုန်း") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            modifier = Modifier.width(100.dp).testTag("deposit_percent_input")
-                        )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bonus" to "+ အပိုဆု", "fee" to "- ဝန်ဆောင်ခ", "none" to "0% မယူ").forEach { (m, lbl) ->
-                                FilterChip(
-                                    selected = depositMode == m,
-                                    onClick = { depositMode = m },
-                                    label = { Text(lbl) }
-                                )
-                            }
-                        }
-                    }
-
-                    Text("ငွေထုတ် (Withdraw %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = withdrawPctText,
-                            onValueChange = { withdrawPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
-                            label = { Text("% နှုန်း") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            modifier = Modifier.width(100.dp).testTag("withdraw_percent_input")
-                        )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("fee" to "- ဝန်ဆောင်ခ", "bonus" to "+ အပိုဆု", "none" to "0% မယူ").forEach { (m, lbl) ->
-                                FilterChip(
-                                    selected = withdrawMode == m,
-                                    onClick = { withdrawMode = m },
-                                    label = { Text(lbl) }
-                                )
-                            }
-                        }
-                    }
-
-                    Button(
-                        onClick = {
-                            val dPct = (depositPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
-                            val wPct = (withdrawPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
-                            onSaveWalletConfig(dPct, depositMode, wPct, withdrawMode)
-                        },
-                        enabled = !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                        modifier = Modifier.fillMaxWidth().testTag("save_wallet_config_button")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showWalletConfig = !showWalletConfig }
+                            .testTag("toggle_wallet_config_card"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("ရာခိုင်နှုန်း သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Percent, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    "ငွေသွင်း / ငွေထုတ် ရာခိုင်နှုန်း သတ်မှတ်ချက်",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                val dSign = when (depositMode) { "bonus" -> "+"; "fee" -> "-"; else -> "" }
+                                val wSign = when (withdrawMode) { "bonus" -> "+"; "fee" -> "-"; else -> "" }
+                                Text(
+                                    "သွင်း: $dSign${depositPctText.ifBlank { "0" }}% • ထုတ်: $wSign${withdrawPctText.ifBlank { "0" }}%",
+                                    color = Color(0xFFB4C8BE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (showWalletConfig) "ဝှက်မည်" else "ပြမည်",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = if (showWalletConfig) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle wallet config",
+                                tint = ChampionshipGold
+                            )
+                        }
+                    }
+
+                    if (showWalletConfig) {
+                        Text(
+                            "ငွေသွင်းလျှင် အပိုဆု (+) သို့မဟုတ် ဝန်ဆောင်ခ (-)၊ ငွေထုတ်လျှင် ဝန်ဆောင်ခ (-) သို့မဟုတ် အပိုဆု (+) ကို စိတ်ကြိုက်သတ်မှတ်နိုင်ပါသည်။",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Text("ငွေသွင်း (Deposit %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = depositPctText,
+                                onValueChange = { depositPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
+                                label = { Text("% နှုန်း") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.width(100.dp).testTag("deposit_percent_input")
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("bonus" to "+ အပိုဆု", "fee" to "- ဝန်ဆောင်ခ", "none" to "0% မယူ").forEach { (m, lbl) ->
+                                    FilterChip(
+                                        selected = depositMode == m,
+                                        onClick = { depositMode = m },
+                                        label = { Text(lbl) }
+                                    )
+                                }
+                            }
+                        }
+
+                        Text("ငွေထုတ် (Withdraw %)", color = ChampionshipGold, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = withdrawPctText,
+                                onValueChange = { withdrawPctText = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
+                                label = { Text("% နှုန်း") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.width(100.dp).testTag("withdraw_percent_input")
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("fee" to "- ဝန်ဆောင်ခ", "bonus" to "+ အပိုဆု", "none" to "0% မယူ").forEach { (m, lbl) ->
+                                    FilterChip(
+                                        selected = withdrawMode == m,
+                                        onClick = { withdrawMode = m },
+                                        label = { Text(lbl) }
+                                    )
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                val dPct = (depositPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
+                                val wPct = (withdrawPctText.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 50.0)
+                                onSaveWalletConfig(dPct, depositMode, wPct, withdrawMode)
+                            },
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                            modifier = Modifier.fillMaxWidth().testTag("save_wallet_config_button")
+                        ) {
+                            Text("ရာခိုင်နှုန်း သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1112,6 +1217,9 @@ private fun AdminBoardTab(
     var showAddDraw by remember { mutableStateOf(false) }
     var editingDraw by remember { mutableStateOf<LotteryDraw?>(null) }
     var deletingDraw by remember { mutableStateOf<LotteryDraw?>(null) }
+    var showAutoSyncCard by remember { mutableStateOf(false) }
+    var showDrawsSection by remember { mutableStateOf(true) }
+    var showMatchesSection by remember { mutableStateOf(true) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
@@ -1126,72 +1234,113 @@ private fun AdminBoardTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.LiveTv, contentDescription = null, tint = ChampionshipGold)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "နေ့စဉ်ပွဲစဉ် & တိုက်ရိုက်ရလဒ် အလိုအလျောက်စနစ်",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Button(
-                        onClick = onSyncDailyMatchesNow,
-                        enabled = !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
-                        modifier = Modifier.fillMaxWidth().testTag("sync_daily_matches_button")
-                    ) {
-                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("ယနေ့ ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်")
-                    }
-                    Button(
-                        onClick = onSyncLiveResultsNow,
-                        enabled = !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                        modifier = Modifier.fillMaxWidth().testTag("sync_live_results_button")
-                    ) {
-                        Icon(Icons.Default.LiveTv, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("တိုက်ရိုက်ရလဒ်များ ချိတ်ဆက်မည်", fontWeight = FontWeight.Bold)
-                    }
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAutoSyncCard = !showAutoSyncCard }
+                            .testTag("toggle_auto_sync_board_card"),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text("ပွဲရှိသည့်နေ့တိုင်း အလိုအလျောက်ထည့်မည်", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            if (boardConfig.lastSyncedDate.isNotBlank()) {
-                                Text("နောက်ဆုံးထည့်ပြီးရက်: ${boardConfig.lastSyncedDate}", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.LiveTv, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    "နေ့စဉ်ပွဲစဉ် & တိုက်ရိုက်ရလဒ် အလိုအလျောက်စနစ်",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "Auto ပွဲ: ${if (boardConfig.autoSyncDailyMatches) "ON" else "OFF"} • Live ရလဒ်: ${if (boardConfig.autoSyncLiveResults) "ON" else "OFF"}",
+                                    color = Color(0xFFB4C8BE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
-                        Switch(
-                            checked = boardConfig.autoSyncDailyMatches,
-                            onCheckedChange = onToggleAutoDailyMatches,
-                            modifier = Modifier.testTag("auto_daily_matches_switch")
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (showAutoSyncCard) "ဝှက်မည်" else "ပြမည်",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = if (showAutoSyncCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle auto sync card",
+                                tint = ChampionshipGold
+                            )
+                        }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "တိုက်ရိုက်ရလဒ် အလိုအလျောက်ချိတ်ဆက်မည်",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f).padding(end = 8.dp)
-                        )
-                        Switch(
-                            checked = boardConfig.autoSyncLiveResults,
-                            onCheckedChange = onToggleAutoLiveResults,
-                            modifier = Modifier.testTag("auto_live_results_switch")
-                        )
+
+                    if (showAutoSyncCard) {
+                        Button(
+                            onClick = onSyncDailyMatchesNow,
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
+                            modifier = Modifier.fillMaxWidth().testTag("sync_daily_matches_button")
+                        ) {
+                            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("ယနေ့ ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်")
+                        }
+                        Button(
+                            onClick = onSyncLiveResultsNow,
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                            modifier = Modifier.fillMaxWidth().testTag("sync_live_results_button")
+                        ) {
+                            Icon(Icons.Default.LiveTv, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("တိုက်ရိုက်ရလဒ်များ ချိတ်ဆက်မည်", fontWeight = FontWeight.Bold)
+                        }
+
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text("ပွဲရှိသည့်နေ့တိုင်း အလိုအလျောက်ထည့်မည်", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                if (boardConfig.lastSyncedDate.isNotBlank()) {
+                                    Text("နောက်ဆုံးထည့်ပြီးရက်: ${boardConfig.lastSyncedDate}", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            Switch(
+                                checked = boardConfig.autoSyncDailyMatches,
+                                onCheckedChange = onToggleAutoDailyMatches,
+                                modifier = Modifier.testTag("auto_daily_matches_switch")
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "တိုက်ရိုက်ရလဒ် အလိုအလျောက်ချိတ်ဆက်မည်",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            )
+                            Switch(
+                                checked = boardConfig.autoSyncLiveResults,
+                                onCheckedChange = onToggleAutoLiveResults,
+                                modifier = Modifier.testTag("auto_live_results_switch")
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = onSeedSampleBoard,
+                            modifier = Modifier.fillMaxWidth().testTag("seed_sample_board_button")
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(6.dp))
+                            Text("နမူနာ ဘောလုံးပွဲစဉ်နှင့် ၃လုံးထီ အလိုအလျောက်ထည့်မည်", color = ChampionshipGold)
+                        }
                     }
                 }
             }
@@ -1218,44 +1367,63 @@ private fun AdminBoardTab(
                     Text("၃လုံးထီသစ်")
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onSeedSampleBoard,
-                modifier = Modifier.fillMaxWidth().testTag("seed_sample_board_button")
-            ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold)
-                Spacer(Modifier.width(6.dp))
-                Text("နမူနာ ဘောလုံးပွဲစဉ်နှင့် ၃လုံးထီ အလိုအလျောက်ထည့်မည်", color = ChampionshipGold)
-            }
         }
 
         item {
-            Text("၃လုံးထီ အကြိမ်များ (နှိပ်ပြီး ပြင်ဆင် / ဖျက်ပါ)", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
-        }
-        items(draws, key = { it.id }) { draw ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = PearlCard),
-                modifier = Modifier.fillMaxWidth().clickable { editingDraw = draw }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDrawsSection = !showDrawsSection }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Text(
+                    "၃လုံးထီ အကြိမ်များ (${draws.size})",
+                    color = ChampionshipGold,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (showDrawsSection) "ဝှက်မည်" else "ပြမည်",
+                        color = ChampionshipGold,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Icon(
+                        imageVector = if (showDrawsSection) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = "Toggle draws",
+                        tint = ChampionshipGold
+                    )
+                }
+            }
+        }
+        if (showDrawsSection) {
+            items(draws, key = { it.id }) { draw ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = PearlCard),
+                    modifier = Modifier.fillMaxWidth().clickable { editingDraw = draw }
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
-                        Text("${draw.closeTimeLabel} • ${draw.payoutMultiplier.toInt()}x", color = InkMuted)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (draw.winningNumber.isNotBlank()) {
-                            Text(draw.winningNumber, color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(draw.roundTitle, color = InkDark, fontWeight = FontWeight.Bold)
+                            Text("${draw.closeTimeLabel} • ${draw.payoutMultiplier.toInt()}x", color = InkMuted)
                         }
-                        StatusBadge(draw.status)
-                        IconButton(
-                            onClick = { deletingDraw = draw },
-                            modifier = Modifier.testTag("delete_draw_${draw.id}")
-                        ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete Draw", tint = AdminCrimson)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (draw.winningNumber.isNotBlank()) {
+                                Text(draw.winningNumber, color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                            StatusBadge(draw.status)
+                            IconButton(
+                                onClick = { deletingDraw = draw },
+                                modifier = Modifier.testTag("delete_draw_${draw.id}")
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Draw", tint = AdminCrimson)
+                            }
                         }
                     }
                 }
@@ -1263,41 +1431,69 @@ private fun AdminBoardTab(
         }
 
         item {
-            Text("ဘောလုံးပွဲစဉ်များ (${matches.size}) - နှိပ်ပြီး ပြင်ဆင် / ဖျက်ပါ", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium)
-        }
-        items(matches, key = { it.id }) { match ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = PearlCard),
-                modifier = Modifier.fillMaxWidth().clickable { editingMatch = match }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showMatchesSection = !showMatchesSection }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Text(
+                    "ဘောလုံးပွဲစဉ်များ (${matches.size})",
+                    color = ChampionshipGold,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (showMatchesSection) "ဝှက်မည်" else "ပြမည်",
+                        color = ChampionshipGold,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Icon(
+                        imageVector = if (showMatchesSection) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = "Toggle matches",
+                        tint = ChampionshipGold
+                    )
+                }
+            }
+        }
+        if (showMatchesSection) {
+            items(matches, key = { it.id }) { match ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = PearlCard),
+                    modifier = Modifier.fillMaxWidth().clickable { editingMatch = match }
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("${match.homeTeam} vs ${match.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold)
-                        Text("${match.league} • ${match.kickoffLabel}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-                        Text("${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Column(horizontalAlignment = Alignment.End) {
-                            StatusBadge(match.status)
-                            if (match.status == "finished" || match.liveClock.isNotBlank()) {
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = "${match.homeScore} - ${match.awayScore} ${match.liveClock}".trim(),
-                                    color = if (match.status == "closed") AdminCrimson else InkDark,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${match.homeTeam} vs ${match.awayTeam}", color = InkDark, fontWeight = FontWeight.Bold)
+                            Text("${match.league} • ${match.kickoffLabel}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
+                            Text("${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
                         }
-                        IconButton(
-                            onClick = { deletingMatch = match },
-                            modifier = Modifier.testTag("delete_match_${match.id}")
-                        ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = AdminCrimson)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                StatusBadge(match.status)
+                                if (match.status == "finished" || match.liveClock.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "${match.homeScore} - ${match.awayScore} ${match.liveClock}".trim(),
+                                        color = if (match.status == "closed") AdminCrimson else InkDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { deletingMatch = match },
+                                modifier = Modifier.testTag("delete_match_${match.id}")
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = AdminCrimson)
+                            }
                         }
                     }
                 }
@@ -1386,7 +1582,8 @@ private fun AdminCustomersTab(
     onAutoSettleCustomer: (String, String) -> Unit,
     onInspectCustomer: (UserAccount) -> Unit,
     onOpenAdjustBalance: (UserAccount) -> Unit,
-    onOpenGiftPoints: (UserAccount) -> Unit
+    onOpenGiftPoints: (UserAccount) -> Unit,
+    onOpenChatWithCustomer: (UserAccount) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
@@ -1540,7 +1737,7 @@ private fun AdminCustomersTab(
                             }
                         }
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             OutlinedButton(
@@ -1549,7 +1746,7 @@ private fun AdminCustomersTab(
                                     .weight(1f)
                                     .testTag("adjust_balance_${user.userId}")
                             ) {
-                                Text("ငွေပြင်မည်", color = InkDark)
+                                Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
                             }
                             Button(
                                 onClick = { onOpenGiftPoints(user) },
@@ -1558,9 +1755,20 @@ private fun AdminCustomersTab(
                                     .weight(1f)
                                     .testTag("gift_points_${user.userId}")
                             ) {
-                                Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("ပွိုင့် +/-", fontWeight = FontWeight.Bold)
+                                Text("ပွိုင့်", fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            Button(
+                                onClick = { onOpenChatWithCustomer(user) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("chat_customer_${user.userId}")
+                            ) {
+                                Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                         }
                     }
@@ -1581,6 +1789,7 @@ private fun AdminTeamTab(
 ) {
     val context = LocalContext.current
     var inviteLabel by remember { mutableStateOf("") }
+    var showShareCard by remember { mutableStateOf(true) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
@@ -1595,44 +1804,67 @@ private fun AdminTeamTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.GroupAdd, contentDescription = null, tint = ChampionshipGold)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "သူငယ်ချင်းများကို Admin အဖြစ် မျှဝေရန်",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showShareCard = !showShareCard },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.GroupAdd, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "သူငယ်ချင်းများကို Admin အဖြစ် မျှဝေရန်",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (showShareCard) "ဝှက်မည်" else "ပြမည်",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Icon(
+                                imageVector = if (showShareCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle admin invite card",
+                                tint = ChampionshipGold
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Invite Code တစ်ခု ဖန်တီးပြီး သူငယ်ချင်းထံ Share ပို့ပါ။ သူငယ်ချင်းသည် App ထဲရှိ 'Admin Key' မှတစ်ဆင့် Code ရိုက်ထည့်ပြီး အော်ဒါများကို အတူတကွ စီမံခန့်ခွဲနိုင်ပါမည်။",
-                        color = Color(0xFFB4C8BE),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = inviteLabel,
-                            onValueChange = { inviteLabel = it },
-                            label = { Text("သူငယ်ချင်းအမည် / မှတ်စု") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            modifier = Modifier.weight(1f).testTag("invite_label_input")
+                    if (showShareCard) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Invite Code တစ်ခု ဖန်တီးပြီး သူငယ်ချင်းထံ Share ပို့ပါ။ သူငယ်ချင်းသည် App ထဲရှိ 'Admin Key' မှတစ်ဆင့် Code ရိုက်ထည့်ပြီး အော်ဒါများကို အတူတကွ စီမံခန့်ခွဲနိုင်ပါမည်။",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.bodyMedium
                         )
-                        Button(
-                            onClick = {
-                                onCreateInvite(inviteLabel.ifBlank { "Co-Admin Friend" })
-                                inviteLabel = ""
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                            modifier = Modifier.testTag("create_invite_button")
-                        ) {
-                            Text("Code ထုတ်မည်")
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = inviteLabel,
+                                onValueChange = { inviteLabel = it },
+                                label = { Text("သူငယ်ချင်းအမည် / မှတ်စု") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).testTag("invite_label_input")
+                            )
+                            Button(
+                                onClick = {
+                                    onCreateInvite(inviteLabel.ifBlank { "Co-Admin Friend" })
+                                    inviteLabel = ""
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                                modifier = Modifier.testTag("create_invite_button")
+                            ) {
+                                Text("Code ထုတ်မည်")
+                            }
                         }
                     }
                 }

@@ -9,9 +9,13 @@ import com.example.data.betting.AutoSettleEngine
 import com.example.data.betting.AutoSettleSummary
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
+import com.example.data.model.AppQualityReview
+import com.example.data.model.AppUpdateConfig
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.DirectChatMessage
+import com.example.data.model.GroupChatMessage
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.LiveFootballFixture
@@ -335,6 +339,75 @@ class HtetThuYaRepository(
                     } else BettingConfig()
                 }
                 .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeAppUpdateConfig(userId: String): Flow<AppUpdateConfig?> = flow {
+        val path = "app_settings/app_update"
+        emitAll(
+            db.collection("app_settings").document("app_update")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(AppUpdateConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    } else null
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeDirectMessagesForUser(userId: String): Flow<List<DirectChatMessage>> = flow {
+        val uid = requireUserId()
+        check(uid == userId)
+        val path = "direct_messages"
+        emitAll(
+            db.collection("direct_messages")
+                .whereEqualTo("threadUserId", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(DirectChatMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(Long.MAX_VALUE / 2, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, uid)
+        )
+    }
+
+    fun observeAllDirectMessages(userId: String): Flow<List<DirectChatMessage>> = flow {
+        val path = "direct_messages"
+        emitAll(
+            db.collection("direct_messages")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(DirectChatMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(Long.MAX_VALUE / 2, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, userId)
+        )
+    }
+
+    fun observeGroupMessages(userId: String): Flow<List<GroupChatMessage>> = flow {
+        val path = "group_messages"
+        emitAll(
+            db.collection("group_messages")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(GroupChatMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(Long.MAX_VALUE / 2, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, userId)
+        )
+    }
+
+    fun observeAppReviews(userId: String): Flow<List<AppQualityReview>> = flow {
+        val path = "app_reviews"
+        emitAll(
+            db.collection("app_reviews")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(AppQualityReview::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.updatedAt ?: Timestamp(0, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, userId)
         )
     }
 
@@ -1988,6 +2061,191 @@ class HtetThuYaRepository(
             handleFirestoreError(e, OperationType.WRITE, "matches/sample_board")
             Result.failure(e)
         }
+    }
+
+    suspend fun saveAppUpdateConfig(
+        latestVersionCode: Int,
+        latestVersionName: String,
+        downloadUrl: String,
+        releaseNotes: String,
+        forceUpdate: Boolean
+    ): Result<Unit> {
+        val path = "app_settings/app_update"
+        return try {
+            val adminUid = requireUserId()
+            val safeUrl = downloadUrl.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }.take(300)
+            require(safeUrl.startsWith("https://")) { "Download URL သည် https:// ဖြင့် စတင်ရပါမည်" }
+            val safeName = latestVersionName.trim().ifBlank { "2.0" }.take(30)
+            val safeCode = latestVersionCode.coerceIn(1, 1_000_000)
+            db.collection("app_settings").document("app_update").set(
+                mapOf(
+                    "latestVersionCode" to safeCode,
+                    "latestVersionName" to safeName,
+                    "downloadUrl" to safeUrl,
+                    "releaseNotes" to releaseNotes.trim().take(500),
+                    "forceUpdate" to forceUpdate,
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendDirectMessage(
+        threadUserId: String,
+        senderName: String,
+        senderRole: String,
+        text: String
+    ): Result<Unit> {
+        val msgId = "dm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val path = "direct_messages/$msgId"
+        return try {
+            val uid = requireUserId()
+            val cleanText = text.trim().take(1000)
+            require(cleanText.isNotEmpty()) { "မက်ဆေ့ချ် စာသား ထည့်သွင်းပါ" }
+            require(senderRole in listOf("customer", "admin"))
+            require(threadUserId.isNotBlank() && ID_REGEX.matches(threadUserId))
+            val safeName = senderName.trim().ifBlank { "Member" }.take(60)
+            db.collection("direct_messages").document(msgId).set(
+                mapOf(
+                    "threadUserId" to threadUserId,
+                    "senderId" to uid,
+                    "senderName" to safeName,
+                    "senderRole" to senderRole,
+                    "text" to cleanText,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteDirectMessage(msgId: String): Result<Unit> {
+        val path = "direct_messages/$msgId"
+        return try {
+            requireUserId()
+            require(msgId.isNotBlank() && ID_REGEX.matches(msgId))
+            db.collection("direct_messages").document(msgId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendGroupMessage(
+        senderName: String,
+        senderRole: String,
+        text: String
+    ): Result<Unit> {
+        val msgId = "gm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val path = "group_messages/$msgId"
+        return try {
+            val uid = requireUserId()
+            val cleanText = text.trim().take(1000)
+            require(cleanText.isNotEmpty()) { "မက်ဆေ့ချ် စာသား ထည့်သွင်းပါ" }
+            require(senderRole in listOf("customer", "admin"))
+            val safeName = senderName.trim().ifBlank { "Member" }.take(60)
+            db.collection("group_messages").document(msgId).set(
+                mapOf(
+                    "senderId" to uid,
+                    "senderName" to safeName,
+                    "senderRole" to senderRole,
+                    "text" to cleanText,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteGroupMessage(msgId: String): Result<Unit> {
+        val path = "group_messages/$msgId"
+        return try {
+            requireUserId()
+            require(msgId.isNotBlank() && ID_REGEX.matches(msgId))
+            db.collection("group_messages").document(msgId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitQualityReview(
+        displayName: String,
+        stars: Int,
+        qualityTier: String,
+        comment: String
+    ): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: "unauthenticated"
+        val path = "app_reviews/$uid"
+        return try {
+            val verifiedUid = requireUserId()
+            val clampedStars = stars.coerceIn(1, 5)
+            val safeTier = qualityTier.trim().ifBlank { qualityTierLabelForStars(clampedStars) }.take(40)
+            val safeName = displayName.trim().ifBlank { "Member" }.take(60)
+            val safeComment = comment.trim().take(300)
+            db.collection("app_reviews").document(verifiedUid).set(
+                mapOf(
+                    "userId" to verifiedUid,
+                    "displayName" to safeName,
+                    "stars" to clampedStars,
+                    "qualityTier" to safeTier,
+                    "comment" to safeComment,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteQualityReview(targetUserId: String): Result<Unit> {
+        val path = "app_reviews/$targetUserId"
+        return try {
+            requireUserId()
+            require(targetUserId.isNotBlank() && ID_REGEX.matches(targetUserId))
+            db.collection("app_reviews").document(targetUserId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    private fun qualityTierLabelForStars(stars: Int): String = when (stars) {
+        5 -> "အထူးကောင်းမွန် (5★)"
+        4 -> "ကောင်းမွန် (4★)"
+        3 -> "သင့်တင့် (3★)"
+        2 -> "တိုးတက်ရန်လို (2★)"
+        else -> "အားနည်း (1★)"
     }
 
     private fun orderTypeLabel(orderType: String): String = when (orderType) {

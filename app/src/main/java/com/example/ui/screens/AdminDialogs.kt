@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -29,6 +30,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -717,9 +721,11 @@ fun AdminCustomerDetailDialog(
     onRejectOrder: (BetOrder) -> Unit,
     onDeleteOrder: (String) -> Unit,
     onProcessWalletRequest: (WalletRequest, Boolean, String) -> Unit,
-    onDeleteWalletRequest: (String) -> Unit
+    onDeleteWalletRequest: (String) -> Unit,
+    onOpenChat: () -> Unit = {}
 ) {
     var detailTab by remember { mutableIntStateOf(0) }
+    var showAccountSummary by remember { mutableStateOf(true) }
     val activeOrders = remember(customerOrders) {
         customerOrders.filter { it.status in listOf("pending", "accepted") }
     }
@@ -787,78 +793,120 @@ fun AdminCustomerDetailDialog(
                     }
                 }
 
-                // Account Summary Card
+                // Account Summary Card (Collapsible)
                 Card(
                     colors = CardDefaults.cardColors(containerColor = PearlCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column {
-                                Text("လက်ကျန်ငွေ", color = InkMuted, style = MaterialTheme.typography.bodySmall)
-                                Text(formatKs(user.balanceKs), color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("ပွိုင့်", color = InkMuted, style = MaterialTheme.typography.bodySmall)
-                                Text("${user.rewardPoints} Pts", color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("Active လောင်းငွေ", color = InkMuted, style = MaterialTheme.typography.bodySmall)
-                                Text(formatKs(user.activeStakeKs), color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        HorizontalDivider()
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("နိုင်: ${customerSummary.wonCount} ခု (${formatKs(customerSummary.totalWonPayoutKs)})", color = PitchEmeraldDark, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                            Text("ရှုံး: ${customerSummary.lostCount} ခု (${formatKs(customerSummary.totalLostStakeKs)})", color = AdminCrimson, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        }
-                        val netLabel = when {
-                            customerSummary.customerNetKs > 0L -> "Customer အသားတင်: +${formatKs(customerSummary.customerNetKs)} (နိုင်)"
-                            customerSummary.customerNetKs < 0L -> "Customer အသားတင်: -${formatKs(kotlin.math.abs(customerSummary.customerNetKs))} (ရှုံး)"
-                            else -> "Customer အသားတင်: 0 Ks"
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(
-                                text = netLabel,
-                                color = if (customerSummary.customerNetKs >= 0L) PitchEmeraldDark else AdminCrimson,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("စာရင်းဝင်: ${formatTimestamp(user.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text("UID: ${user.userId}", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontFamily = JetBrainsMonoFontFamily)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(onClick = onOpenAdjustBalance, modifier = Modifier.weight(1f)) {
-                                Text("ငွေပြင် (+/-)", color = InkDark)
-                            }
-                            Button(
-                                onClick = onOpenGiftPoints,
-                                colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("ပွိုင့် +/-", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Button(
-                            onClick = onAutoSettleCustomer,
-                            enabled = activeOrders.isNotEmpty() && !busy,
-                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("customer_detail_auto_settle_button")
+                                .clickable { showAccountSummary = !showAccountSummary }
+                                .testTag("toggle_customer_detail_summary"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
                             Text(
-                                if (activeOrders.isNotEmpty()) "ပွဲစဉ်အားလုံး Auto ရှင်းမည် (${activeOrders.size})"
-                                else "ပွဲစဉ်အားလုံး Auto ရှင်းမည် (0)",
-                                fontWeight = FontWeight.Bold
+                                text = if (showAccountSummary) "အကောင့် & စာရင်းအကျဉ်း"
+                                else "လက်ကျန်: ${formatKs(user.balanceKs)} • ${user.rewardPoints} Pts",
+                                color = InkDark,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.weight(1f)
                             )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (showAccountSummary) "ဝှက်မည်" else "ပြမည်",
+                                    color = PitchEmeraldDark,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Icon(
+                                    imageVector = if (showAccountSummary) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = "Toggle account summary",
+                                    tint = PitchEmeraldDark
+                                )
+                            }
+                        }
+
+                        if (showAccountSummary) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column {
+                                    Text("လက်ကျန်ငွေ", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                    Text(formatKs(user.balanceKs), color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("ပွိုင့်", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                    Text("${user.rewardPoints} Pts", color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Active လောင်းငွေ", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                    Text(formatKs(user.activeStakeKs), color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            HorizontalDivider()
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("နိုင်: ${customerSummary.wonCount} ခု (${formatKs(customerSummary.totalWonPayoutKs)})", color = PitchEmeraldDark, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                Text("ရှုံး: ${customerSummary.lostCount} ခု (${formatKs(customerSummary.totalLostStakeKs)})", color = AdminCrimson, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            }
+                            val netLabel = when {
+                                customerSummary.customerNetKs > 0L -> "Customer အသားတင်: +${formatKs(customerSummary.customerNetKs)} (နိုင်)"
+                                customerSummary.customerNetKs < 0L -> "Customer အသားတင်: -${formatKs(kotlin.math.abs(customerSummary.customerNetKs))} (ရှုံး)"
+                                else -> "Customer အသားတင်: 0 Ks"
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(
+                                    text = netLabel,
+                                    color = if (customerSummary.customerNetKs >= 0L) PitchEmeraldDark else AdminCrimson,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text("စာရင်းဝင်: ${formatTimestamp(user.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text("UID: ${user.userId}", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontFamily = JetBrainsMonoFontFamily)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = onOpenAdjustBalance, modifier = Modifier.weight(1f)) {
+                                    Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                                }
+                                Button(
+                                    onClick = onOpenGiftPoints,
+                                    colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("ပွိုင့်", fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+                                Button(
+                                    onClick = onOpenChat,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                    modifier = Modifier.weight(1f).testTag("customer_detail_chat_button")
+                                ) {
+                                    Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+                            }
+                            Button(
+                                onClick = onAutoSettleCustomer,
+                                enabled = activeOrders.isNotEmpty() && !busy,
+                                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("customer_detail_auto_settle_button")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    if (activeOrders.isNotEmpty()) "ပွဲစဉ်အားလုံး Auto ရှင်းမည် (${activeOrders.size})"
+                                    else "ပွဲစဉ်အားလုံး Auto ရှင်းမည် (0)",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }

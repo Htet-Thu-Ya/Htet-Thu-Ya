@@ -1,0 +1,436 @@
+package com.example.ui.screens
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SupportAgent
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
+import com.example.data.model.AppQualityReview
+import com.example.data.model.AppUpdateConfig
+import com.example.data.model.DirectChatMessage
+import com.example.data.model.GroupChatMessage
+import com.example.data.model.UserAccount
+import com.example.ui.components.formatTimestamp
+import com.example.ui.theme.ChampionshipGold
+import com.example.ui.theme.DeepPitchElevated
+import com.example.ui.theme.DeepPitchSurface
+import com.example.ui.theme.InkDark
+import com.example.ui.theme.InkMuted
+import com.example.ui.theme.PearlCard
+import com.example.ui.theme.PitchEmeraldDark
+
+@Composable
+fun AdminChatTab(
+    currentUserId: String,
+    users: List<UserAccount>,
+    allDirectMessages: List<DirectChatMessage>,
+    groupMessages: List<GroupChatMessage>,
+    initialCustomerUid: String?,
+    onClearInitialCustomer: () -> Unit,
+    onSendAdminDirectMessage: (threadUserId: String, text: String) -> Unit,
+    onDeleteDirectMessage: (String) -> Unit,
+    onSendGroupMessage: (String) -> Unit,
+    onDeleteGroupMessage: (String) -> Unit
+) {
+    var mode by remember { mutableIntStateOf(0) } // 0 = 1:1, 1 = Group
+    var activeThreadUid by remember { mutableStateOf<String?>(initialCustomerUid) }
+
+    LaunchedEffect(initialCustomerUid) {
+        if (initialCustomerUid != null) {
+            mode = 0
+            activeThreadUid = initialCustomerUid
+            onClearInitialCustomer()
+        }
+    }
+
+    val usersById = remember(users) { users.associateBy { it.userId } }
+    val msgsByThread = remember(allDirectMessages) { allDirectMessages.groupBy { it.threadUserId } }
+
+    // Combine users who already messaged + all registered users
+    val orderedThreads = remember(users, msgsByThread) {
+        val uids = (msgsByThread.keys + users.map { it.userId }).distinct()
+        uids.sortedByDescending { uid ->
+            msgsByThread[uid]?.lastOrNull()?.createdAt?.seconds ?: 0L
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .widthIn(max = 640.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = mode == 0,
+                onClick = { mode = 0 },
+                leadingIcon = { Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text("Customer 1:1 (${msgsByThread.size})") },
+                modifier = Modifier.weight(1f).testTag("admin_chat_mode_direct")
+            )
+            FilterChip(
+                selected = mode == 1,
+                onClick = { mode = 1 },
+                leadingIcon = { Icon(Icons.Default.Groups, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text("Group Chat (${groupMessages.size})") },
+                modifier = Modifier.weight(1f).testTag("admin_chat_mode_group")
+            )
+        }
+
+        if (mode == 1) {
+            GroupChatThreadContent(
+                messages = groupMessages,
+                currentUserId = currentUserId,
+                isAdminViewer = true,
+                onSend = onSendGroupMessage,
+                onDeleteMessage = onDeleteGroupMessage
+            )
+        } else {
+            val selectedUid = activeThreadUid
+            if (selectedUid == null) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "Customer တစ်ဦးချင်းစီနှင့် တိုက်ရိုက်စကားပြောရန် ရွေးချယ်ပါ",
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (orderedThreads.isEmpty()) {
+                        item {
+                            Text("Customer မရှိသေးပါ", color = Color(0xFFB4C8BE))
+                        }
+                    } else {
+                        items(orderedThreads, key = { it }) { uid ->
+                            val user = usersById[uid]
+                            val threadMsgs = msgsByThread[uid].orEmpty()
+                            val lastMsg = threadMsgs.lastOrNull()
+                            val name = user?.displayName?.ifBlank { null }
+                                ?: threadMsgs.firstOrNull { it.senderRole == "customer" }?.senderName
+                                ?: "Member"
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = PearlCard),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { activeThreadUid = uid }
+                                    .testTag("admin_chat_thread_$uid")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(Icons.Default.Person, contentDescription = null, tint = PitchEmeraldDark)
+                                        Spacer(Modifier.width(10.dp))
+                                        Column {
+                                            Text(name, color = InkDark, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            if (user?.email?.isNotBlank() == true) {
+                                                Text(user.email, color = PitchEmeraldDark, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            Text(
+                                                text = if (lastMsg != null) "${lastMsg.senderName}: ${lastMsg.text}" else "စကားပြောရန် နှိပ်ပါ",
+                                                color = InkMuted,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        if (threadMsgs.isNotEmpty()) {
+                                            Surface(color = PitchEmeraldDark, shape = RoundedCornerShape(8.dp)) {
+                                                Text(
+                                                    text = "${threadMsgs.size}",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(formatTimestamp(lastMsg?.createdAt), color = InkMuted, style = MaterialTheme.typography.labelSmall)
+                                        } else {
+                                            Icon(Icons.Default.Forum, contentDescription = null, tint = PitchEmeraldDark)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                val targetUser = usersById[selectedUid]
+                val threadMsgs = msgsByThread[selectedUid].orEmpty()
+                val targetName = targetUser?.displayName?.ifBlank { null }
+                    ?: threadMsgs.firstOrNull { it.senderRole == "customer" }?.senderName
+                    ?: "Member"
+                Surface(color = DeepPitchSurface, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            IconButton(onClick = { activeThreadUid = null }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ChampionshipGold)
+                            }
+                            Column {
+                                Text(targetName, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (targetUser?.email?.isNotBlank() == true) {
+                                    Text(targetUser.email, color = ChampionshipGold, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                        OutlinedButton(onClick = { activeThreadUid = null }) {
+                            Text("စာရင်း", color = ChampionshipGold)
+                        }
+                    }
+                }
+                HorizontalDivider(color = Color(0xFF284236))
+                DirectChatThreadContent(
+                    messages = threadMsgs,
+                    currentUserId = currentUserId,
+                    isAdminViewer = true,
+                    emptyHint = "$targetName နှင့် တိုက်ရိုက်စကားပြောခန်း စတင်ပါ။",
+                    onSend = { text -> onSendAdminDirectMessage(selectedUid, text) },
+                    onDeleteMessage = onDeleteDirectMessage
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminUpdateAndQualityTab(
+    currentUserId: String,
+    appUpdateConfig: AppUpdateConfig?,
+    reviews: List<AppQualityReview>,
+    busy: Boolean,
+    onSaveAppUpdateConfig: (Int, String, String, String, Boolean) -> Unit,
+    onDeleteReview: (String) -> Unit
+) {
+    var showUpdatePanel by remember { mutableStateOf(true) }
+    var versionCodeText by remember { mutableStateOf((appUpdateConfig?.latestVersionCode ?: BuildConfig.VERSION_CODE).toString()) }
+    var versionNameText by remember { mutableStateOf(appUpdateConfig?.latestVersionName ?: BuildConfig.VERSION_NAME) }
+    var downloadUrlText by remember { mutableStateOf(appUpdateConfig?.downloadUrl ?: AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL) }
+    var releaseNotesText by remember { mutableStateOf(appUpdateConfig?.releaseNotes ?: "ဗားရှင်းအသစ် ထွက်ရှိပါပြီ။") }
+    var forceUpdate by remember { mutableStateOf(appUpdateConfig?.forceUpdate ?: false) }
+
+    LaunchedEffect(appUpdateConfig) {
+        if (appUpdateConfig != null) {
+            versionCodeText = appUpdateConfig.latestVersionCode.toString()
+            versionNameText = appUpdateConfig.latestVersionName
+            downloadUrlText = appUpdateConfig.downloadUrl
+            releaseNotesText = appUpdateConfig.releaseNotes
+            forceUpdate = appUpdateConfig.forceUpdate
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .widthIn(max = 640.dp)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+            border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.55f)),
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showUpdatePanel = !showUpdatePanel },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = ChampionshipGold)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "APK Update ကြေညာချက် (Customer Auto Prompt)",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "လက်ရှိ Build: v${BuildConfig.VERSION_NAME} (Code ${BuildConfig.VERSION_CODE})",
+                                color = Color(0xFFB4C8BE),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (showUpdatePanel) "ဝှက်မည်" else "ပြမည်",
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Icon(
+                            imageVector = if (showUpdatePanel) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = "Toggle update settings",
+                            tint = ChampionshipGold
+                        )
+                    }
+                }
+
+                if (showUpdatePanel) {
+                    Text(
+                        text = "GitHub Release အသစ်တင်လိုက်တိုင်း Customer App မှ အလိုအလျောက် စစ်ဆေးပေးသလို အောက်ပါ Version Code ကို မြှင့်၍လည်း ချက်ချင်း Update တင်ပြနိုင်ပါသည်။",
+                        color = Color(0xFFB4C8BE),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = versionCodeText,
+                            onValueChange = { versionCodeText = it.filter { c -> c.isDigit() }.take(6) },
+                            label = { Text("Version Code") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).testTag("admin_update_version_code")
+                        )
+                        OutlinedTextField(
+                            value = versionNameText,
+                            onValueChange = { versionNameText = it },
+                            label = { Text("Version Name") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).testTag("admin_update_version_name")
+                        )
+                    }
+                    OutlinedTextField(
+                        value = downloadUrlText,
+                        onValueChange = { downloadUrlText = it },
+                        label = { Text("APK Download Link (https://...)") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_update_url")
+                    )
+                    OutlinedTextField(
+                        value = releaseNotesText,
+                        onValueChange = { releaseNotesText = it },
+                        label = { Text("Update မှတ်စု") },
+                        maxLines = 2,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_update_notes")
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Customer များ မဖြစ်မနေ Update လုပ်ခိုင်းမည်", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = forceUpdate, onCheckedChange = { forceUpdate = it })
+                    }
+                    Button(
+                        onClick = {
+                            val code = (versionCodeText.toIntOrNull() ?: (BuildConfig.VERSION_CODE + 1)).coerceAtLeast(1)
+                            onSaveAppUpdateConfig(code, versionNameText, downloadUrlText, releaseNotesText, forceUpdate)
+                        },
+                        enabled = !busy,
+                        colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                        modifier = Modifier.fillMaxWidth().testTag("publish_apk_update_button")
+                    ) {
+                        Text("Customer များထံ APK Update ထုတ်ပြန်မည်", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Quality ratings viewer & moderator below
+        QualityReviewsContent(
+            reviews = reviews,
+            currentUserId = currentUserId,
+            isAdmin = true,
+            allowSubmit = false,
+            busy = busy,
+            onSubmitReview = { _, _, _ -> },
+            onDeleteReview = onDeleteReview
+        )
+    }
+}

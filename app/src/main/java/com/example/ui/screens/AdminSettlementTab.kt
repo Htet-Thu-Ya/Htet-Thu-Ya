@@ -91,6 +91,7 @@ fun AdminSettlementTab(
 ) {
     var range by remember { mutableStateOf(SettlementRange.TODAY) }
     var searchQuery by remember { mutableStateOf("") }
+    var showSummaryCard by remember { mutableStateOf(true) }
     val expandedCustomers = remember { mutableStateMapOf<String, Boolean>() }
 
     val report = remember(orders, usersById, range) {
@@ -142,17 +143,6 @@ fun AdminSettlementTab(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Assessment, contentDescription = null, tint = ChampionshipGold)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "Admin ${range.label} ပွဲစဉ် စာရင်းချုပ် (အနိုင်/အရှုံး)",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
                     val netColor = when {
                         report.adminNetKs > 0L -> Color(0xFF4ADE80)
                         report.adminNetKs < 0L -> Color(0xFFF87171)
@@ -164,99 +154,146 @@ fun AdminSettlementTab(
                         else -> "0 Ks (အရှုံးအမြတ် မရှိ)"
                     }
 
-                    Surface(
-                        color = DeepPitchSurface,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Admin အသားတင် ရလဒ် (${range.label})",
-                                color = Color(0xFFB4C8BE),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = netText,
-                                color = netColor,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSummaryCard = !showSummaryCard }
+                            .testTag("toggle_settlement_hero_card"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("စာရင်းပိတ် ထိုးကြေး", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                formatKs(report.totalSettledStakeKs),
-                                color = Color.White,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Assessment, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Admin ${range.label} ပွဲစဉ် စာရင်းချုပ်",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (!showSummaryCard) {
+                                    Text(
+                                        text = netText,
+                                        color = netColor,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            Text("ပြန်လျော်ငွေ စုစုပေါင်း", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                formatKs(report.totalPayoutKs),
-                                color = Color(0xFFFCA5A5),
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Customer ရှုံး (Admin ရ)", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                formatKs(report.totalLostKeptKs),
-                                color = Color(0xFF4ADE80),
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            Text("အနိုင်အကောက် ရငွေ", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                formatKs(report.totalCommissionKs),
+                                text = if (showSummaryCard) "ဝှက်မည်" else "ပြမည်",
                                 color = ChampionshipGold,
-                                fontFamily = JetBrainsMonoFontFamily,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = if (showSummaryCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle summary card",
+                                tint = ChampionshipGold
                             )
                         }
                     }
 
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-
-                    Text(
-                        text = "နိုင် ${report.wonCount} ခု • ရှုံး ${report.lostCount} ခု • သရေ/ပယ်ဖျက် ${report.pushRejectedCount} ခု • မရှင်းရသေး ${report.pendingCount} ခု (${formatKs(report.totalPendingStakeKs)})",
-                        color = Color(0xFFD5E3DC),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    if (report.pendingCount > 0) {
-                        Button(
-                            onClick = onAutoSettleAll,
-                            enabled = !busy,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ChampionshipGold,
-                                contentColor = InkDark
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("settlement_auto_settle_all_button")
+                    if (showSummaryCard) {
+                        Surface(
+                            color = DeepPitchSurface,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("ပွဲပြီးအော်ဒါအားလုံး Auto ရှင်းလင်းမည်", fontWeight = FontWeight.Bold)
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "Admin အသားတင် ရလဒ် (${range.label})",
+                                    color = Color(0xFFB4C8BE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = netText,
+                                    color = netColor,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("စာရင်းပိတ် ထိုးကြေး", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    formatKs(report.totalSettledStakeKs),
+                                    color = Color.White,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Text("ပြန်လျော်ငွေ စုစုပေါင်း", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    formatKs(report.totalPayoutKs),
+                                    color = Color(0xFFFCA5A5),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Customer ရှုံး (Admin ရ)", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    formatKs(report.totalLostKeptKs),
+                                    color = Color(0xFF4ADE80),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Text("အနိုင်အကောက် ရငွေ", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    formatKs(report.totalCommissionKs),
+                                    color = ChampionshipGold,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+
+                        Text(
+                            text = "နိုင် ${report.wonCount} ခု • ရှုံး ${report.lostCount} ခု • သရေ/ပယ်ဖျက် ${report.pushRejectedCount} ခု • မရှင်းရသေး ${report.pendingCount} ခု (${formatKs(report.totalPendingStakeKs)})",
+                            color = Color(0xFFD5E3DC),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        if (report.pendingCount > 0) {
+                            Button(
+                                onClick = onAutoSettleAll,
+                                enabled = !busy,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ChampionshipGold,
+                                    contentColor = InkDark
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settlement_auto_settle_all_button")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("ပွဲပြီးအော်ဒါအားလုံး Auto ရှင်းလင်းမည်", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

@@ -694,4 +694,155 @@ test("Betting commission config, order pickKeys, and commission settlement", asy
   );
 });
 
+test("APK update config, 1-on-1 direct chat, group chat, and quality rating rules", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID, {
+    email: "bob@gmail.com",
+    email_verified: true,
+  }).firestore();
+
+  // 1. app_update config: only Admin writes, Customer can read
+  await assertFails(
+    aliceDb.collection("app_settings").doc("app_update").set({
+      latestVersionCode: 3,
+      latestVersionName: "2.1",
+      downloadUrl: "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/HtetThuYa.apk",
+      releaseNotes: "Spoof",
+      forceUpdate: false,
+      updatedBy: ALICE_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("app_update").set({
+      latestVersionCode: 3,
+      latestVersionName: "2.1",
+      downloadUrl: "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/HtetThuYa.apk",
+      releaseNotes: "Chatbox & Quality Update",
+      forceUpdate: false,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("app_settings").doc("app_update").get());
+
+  // 2. Direct 1-on-1 chat isolation
+  await assertSucceeds(
+    aliceDb.collection("direct_messages").doc("dm_1").set({
+      threadUserId: ALICE_UID,
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderRole: "customer",
+      text: "Hello Admin!",
+      createdAt: pastDate(2000),
+    })
+  );
+  // Customer cannot impersonate admin role or write into Bob's thread
+  await assertFails(
+    aliceDb.collection("direct_messages").doc("dm_spoof").set({
+      threadUserId: ALICE_UID,
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderRole: "admin",
+      text: "Fake Admin",
+      createdAt: pastDate(1500),
+    })
+  );
+  await assertFails(
+    bobDb.collection("direct_messages").doc("dm_cross").set({
+      threadUserId: ALICE_UID,
+      senderId: BOB_UID,
+      senderName: "Bob",
+      senderRole: "customer",
+      text: "Hi Alice",
+      createdAt: pastDate(1500),
+    })
+  );
+  // Admin can reply to Alice's thread & read all; Bob cannot read Alice's DM
+  await assertSucceeds(
+    ownerDb.collection("direct_messages").doc("dm_2").set({
+      threadUserId: ALICE_UID,
+      senderId: OWNER_UID,
+      senderName: "Admin",
+      senderRole: "admin",
+      text: "Hello Alice!",
+      createdAt: pastDate(1000),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("direct_messages").where("threadUserId", "==", ALICE_UID).get());
+  await assertFails(bobDb.collection("direct_messages").where("threadUserId", "==", ALICE_UID).get());
+  await assertSucceeds(ownerDb.collection("direct_messages").get());
+
+  // 3. Group chat rules
+  await assertSucceeds(
+    aliceDb.collection("group_messages").doc("gm_1").set({
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderRole: "customer",
+      text: "မင်္ဂလာပါ အားလုံး!",
+      createdAt: pastDate(2000),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("group_messages").doc("gm_spoof").set({
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderRole: "admin",
+      text: "I am admin",
+      createdAt: pastDate(1500),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("group_messages").doc("gm_2").set({
+      senderId: OWNER_UID,
+      senderName: "Admin",
+      senderRole: "admin",
+      text: "Welcome!",
+      createdAt: pastDate(1000),
+    })
+  );
+  await assertSucceeds(bobDb.collection("group_messages").get());
+
+  // 4. Quality reviews (1-5 stars, self-owned)
+  await assertFails(
+    aliceDb.collection("app_reviews").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      stars: 6,
+      qualityTier: "Invalid",
+      comment: "Out of range",
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("app_reviews").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      stars: 5,
+      qualityTier: "အထူးကောင်းမွန်",
+      comment: "အရမ်းကောင်းပါတယ်",
+      updatedAt: pastDate(),
+    })
+  );
+  await assertFails(
+    bobDb.collection("app_reviews").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Hacker",
+      stars: 1,
+      qualityTier: "အားနည်း",
+      comment: "Tamper",
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(bobDb.collection("app_reviews").get());
+});
+
+
 

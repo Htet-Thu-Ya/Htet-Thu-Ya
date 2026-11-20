@@ -206,6 +206,62 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["winCommissionPercent", "winCommissionBasis", "autoSettleOrders", "updatedBy", "updatedAt"]
+    },
+    "AppUpdateConfig": {
+      "title": "AppUpdateConfig",
+      "description": "Admin-published APK release metadata for customer auto-update prompts.",
+      "type": "object",
+      "properties": {
+        "latestVersionCode": { "type": "integer" },
+        "latestVersionName": { "type": "string" },
+        "downloadUrl": { "type": "string" },
+        "releaseNotes": { "type": "string" },
+        "forceUpdate": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["latestVersionCode", "latestVersionName", "downloadUrl", "releaseNotes", "forceUpdate", "updatedBy", "updatedAt"]
+    },
+    "DirectChatMessage": {
+      "title": "DirectChatMessage",
+      "description": "Private 1-on-1 chat message between a Customer and Admin.",
+      "type": "object",
+      "properties": {
+        "threadUserId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["customer", "admin"] },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadUserId", "senderId", "senderName", "senderRole", "text", "createdAt"]
+    },
+    "GroupChatMessage": {
+      "title": "GroupChatMessage",
+      "description": "Shared community group chat message for Customers and Admins.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["customer", "admin"] },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "senderRole", "text", "createdAt"]
+    },
+    "AppQualityReview": {
+      "title": "AppQualityReview",
+      "description": "User quality rating and tier feedback.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "stars": { "type": "integer" },
+        "qualityTier": { "type": "string" },
+        "comment": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "stars", "qualityTier", "comment", "updatedAt"]
     }
   },
   "firestore": {
@@ -256,6 +312,22 @@
     "/app_settings/betting_config": {
       "schema": { "$ref": "#/entities/BettingConfig" },
       "description": "Winning commission and auto-settlement configuration."
+    },
+    "/app_settings/app_update": {
+      "schema": { "$ref": "#/entities/AppUpdateConfig" },
+      "description": "APK release notification settings."
+    },
+    "/direct_messages/{msgId}": {
+      "schema": { "$ref": "#/entities/DirectChatMessage" },
+      "description": "1-on-1 direct chat messages scoped by customer threadUserId."
+    },
+    "/group_messages/{msgId}": {
+      "schema": { "$ref": "#/entities/GroupChatMessage" },
+      "description": "Community group chat messages for Customers and Admins."
+    },
+    "/app_reviews/{userId}": {
+      "schema": { "$ref": "#/entities/AppQualityReview" },
+      "description": "User quality ratings and feedback."
     }
   }
 }

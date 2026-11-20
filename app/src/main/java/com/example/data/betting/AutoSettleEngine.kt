@@ -181,7 +181,7 @@ object AutoSettleEngine {
     }
 
     internal fun evaluateHandicapLeg(match: SportMatch, pickSide: String): Double? {
-        val raw = match.handicapLine.trim()
+        val raw = KyayFormatter.normalizeLegacyHandicap(match)
         val lower = raw.lowercase()
         val hasLeadingPlus = Regex("""(?:^|\s)\+\s*\d""").containsMatchIn(lower)
         val favIsHome = when {

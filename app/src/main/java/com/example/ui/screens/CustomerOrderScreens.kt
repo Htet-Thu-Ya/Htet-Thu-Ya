@@ -53,7 +53,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.betting.KyayFormatter
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UiState
@@ -113,6 +115,8 @@ fun SportsOrderScreen(
     }
 
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
+    val potentialGross = if (selectedPicks.isEmpty()) 0L else (parsedStake * combinedMultiplier).roundToLong()
+    val potentialProfit = (potentialGross - parsedStake).coerceAtLeast(0L)
     val minSelections = if (isParlay) 2 else 1
     val canSubmit = !busy &&
         selectedPicks.size >= minSelections &&
@@ -138,7 +142,7 @@ fun SportsOrderScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -156,10 +160,62 @@ fun SportsOrderScreen(
                             style = MaterialTheme.typography.labelMedium
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
+                    // 3D-style Outcome Preview (Total Stake, If Win, If Lose)
+                    Surface(
+                        color = DeepPitchElevated,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("sports_outcome_preview_card")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("ထိုးငွေစုစုပေါင်း", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    text = formatKs(parsedStake),
+                                    color = Color.White,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1.2f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("နိုင်ရင် ရရှိမည်", color = Color(0xFF6EE7B7), style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    text = if (selectedPicks.isEmpty()) "--" else "${formatKs(potentialGross)} (+${formatKs(potentialProfit)})",
+                                    color = ChampionshipGold,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Text("ရှုံးရင် ရှုံးမည်", color = Color(0xFFFCA5A5), style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    text = "-${formatKs(parsedStake)}",
+                                    color = Color(0xFFFCA5A5),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         listOf(500L, 1000L, 3000L, 5000L, 10000L).forEach { chipAmt ->
                             FilterChip(
@@ -320,8 +376,15 @@ private fun MatchBoardCard(
     selectedLabel: String?,
     onSelect: (String, Double, String) -> Unit
 ) {
-    val homePick = "${match.homeTeam} (${match.handicapLine}) vs ${match.awayTeam}"
-    val awayPick = "${match.awayTeam} (vs ${match.homeTeam} ${match.handicapLine})"
+    val handicapInfo = remember(match.id, match.handicapLine, match.homeTeam, match.awayTeam) {
+        KyayFormatter.formatHandicap(match)
+    }
+    val goalExplanation = remember(match.id, match.goalLine) {
+        KyayFormatter.formatGoalLine(match.goalLine)
+    }
+
+    val homePick = "${match.homeTeam} (${handicapInfo.homeBadge}) vs ${match.awayTeam}"
+    val awayPick = "${match.awayTeam} (${handicapInfo.awayBadge}) vs ${match.homeTeam}"
     val overPick = "${match.homeTeam}-${match.awayTeam} ဂိုးပေါင်း Over (${match.goalLine})"
     val underPick = "${match.homeTeam}-${match.awayTeam} ဂိုးပေါင်း Under (${match.goalLine})"
 
@@ -346,37 +409,65 @@ private fun MatchBoardCard(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
-            Text("ဘော်ဒီ (${match.handicapLine})", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(4.dp))
+            Surface(
+                color = Color(0xFFE8F5EE),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "ဘော်ဒီ: ${handicapInfo.summaryText}",
+                    color = PitchEmeraldDark,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                )
+            }
+            Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PickOptionChip(
-                    title = "${match.homeTeam} @ ${match.bodyOdds}",
+                    title = "${match.homeTeam} • @ ${match.bodyOdds}",
+                    subtitle = handicapInfo.homeBadge,
                     selected = selectedLabel == homePick,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelect(homePick, match.bodyOdds, "home") }
                 )
                 PickOptionChip(
-                    title = "${match.awayTeam} @ ${match.bodyOdds}",
+                    title = "${match.awayTeam} • @ ${match.bodyOdds}",
+                    subtitle = handicapInfo.awayBadge,
                     selected = selectedLabel == awayPick,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelect(awayPick, match.bodyOdds, "away") }
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
-            Text("ဂိုးပေါင်း (${match.goalLine})", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                color = Color(0xFFFEF6E7),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = goalExplanation,
+                    color = Color(0xFF92400E),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                )
+            }
+            Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PickOptionChip(
                     title = "အပေါ် Over @ ${match.goalOdds}",
+                    subtitle = "> ${match.goalLine} ဂိုး",
                     selected = selectedLabel == overPick,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelect(overPick, match.goalOdds, "over") }
                 )
                 PickOptionChip(
                     title = "အောက် Under @ ${match.goalOdds}",
+                    subtitle = "< ${match.goalLine} ဂိုး",
                     selected = selectedLabel == underPick,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelect(underPick, match.goalOdds, "under") }
@@ -389,6 +480,7 @@ private fun MatchBoardCard(
 @Composable
 private fun PickOptionChip(
     title: String,
+    subtitle: String = "",
     selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -398,11 +490,11 @@ private fun PickOptionChip(
         shape = RoundedCornerShape(10.dp),
         border = if (selected) BorderStroke(1.5.dp, ChampionshipGold) else null,
         modifier = modifier
-            .height(46.dp)
+            .height(54.dp)
             .clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -410,12 +502,25 @@ private fun PickOptionChip(
                 Icon(Icons.Default.Check, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
             }
-            Text(
-                text = title,
-                color = if (selected) Color.White else InkDark,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = title,
+                    color = if (selected) Color.White else InkDark,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        color = if (selected) ChampionshipGold else InkMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 }
@@ -605,29 +710,55 @@ fun ThreeDLotteryScreen(
                         )
 
                         Spacer(Modifier.height(14.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        val winGross = (stakePerNumber * drawMultiplier).roundToLong()
+                        val winNet = (winGross - totalStake).coerceAtLeast(0L)
+                        Surface(
+                            color = Color(0xFFF3F7F4),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, PearlCardBorder),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("စုစုပေါင်း ကျသင့်ငွေ:", color = InkMuted)
-                            Text(
-                                formatKs(totalStake),
-                                color = InkDark,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("တစ်ကွက်ပေါက်လျှင်:", color = InkMuted)
-                            Text(
-                                formatKs((stakePerNumber * drawMultiplier).roundToLong()),
-                                color = PitchEmeraldDark,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("လောင်းကြေးငွေစုစုပေါင်း:", color = InkMuted)
+                                    Text(
+                                        formatKs(totalStake),
+                                        color = InkDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("နိုင်ရင် ရရှိမည် (၁ ကွက်ပေါက်):", color = PitchEmeraldDark)
+                                    Text(
+                                        "${formatKs(winGross)} (အမြတ် +${formatKs(winNet)})",
+                                        color = PitchEmeraldDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("ရှုံးရင် ရှုံးမည်:", color = Color(0xFFB91C1C))
+                                    Text(
+                                        "-${formatKs(totalStake)}",
+                                        color = Color(0xFFB91C1C),
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(16.dp))

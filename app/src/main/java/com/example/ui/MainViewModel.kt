@@ -3,12 +3,19 @@ package com.example.ui
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.betting.AutoSettleSummary
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
+import com.example.data.model.AppQualityReview
+import com.example.data.model.AppUpdateConfig
+import com.example.data.model.AvailableApkUpdate
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.DirectChatMessage
+import com.example.data.model.GitHubReleaseInfo
+import com.example.data.model.GroupChatMessage
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.LiveFootballFixture
@@ -61,6 +68,10 @@ class MainViewModel(
 
     private val _liveFeed = MutableStateFlow<UiState<List<LiveFootballFixture>>>(UiState.Loading)
     val liveFeed: StateFlow<UiState<List<LiveFootballFixture>>> = _liveFeed.asStateFlow()
+
+    private val _githubRelease = MutableStateFlow<GitHubReleaseInfo?>(null)
+    private val _updateDismissed = MutableStateFlow(false)
+    val updateDismissed: StateFlow<Boolean> = _updateDismissed.asStateFlow()
 
     private val isBootstrappedOwner =
         isEmailVerified && currentUserEmail.equals(HtetThuYaRepository.BOOTSTRAPPED_ADMIN_EMAIL, ignoreCase = true)
@@ -124,6 +135,60 @@ class MainViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), BettingConfig())
 
+    val appUpdateConfig: StateFlow<AppUpdateConfig?> = repository.observeAppUpdateConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "App update config stream error", error)
+            emit(null)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
+    val availableApkUpdate: StateFlow<AvailableApkUpdate?> = combine(
+        appUpdateConfig,
+        _githubRelease
+    ) { fsCfg, ghRel ->
+        val fsNewer = fsCfg != null && fsCfg.latestVersionCode > BuildConfig.VERSION_CODE
+        val ghNewer = ghRel != null && ghRel.updatedAtEpochMs > (BuildConfig.BUILD_EPOCH_MS + 180_000L)
+        when {
+            fsNewer && fsCfg != null -> AvailableApkUpdate(
+                versionLabel = "v${fsCfg.latestVersionName} (Build ${fsCfg.latestVersionCode})",
+                releaseNotes = fsCfg.releaseNotes.ifBlank { "ဗားရှင်းအသစ် ထွက်ရှိနေပါပြီ။ အောက်ပါခလုတ်မှ Download ရယူ Update လုပ်ပါ။" },
+                downloadUrl = fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL },
+                forceUpdate = fsCfg.forceUpdate,
+                source = "Admin Push"
+            )
+            ghNewer && ghRel != null -> AvailableApkUpdate(
+                versionLabel = "Latest Release (${ghRel.tagName})",
+                releaseNotes = ghRel.releaseNotes.ifBlank { "GitHub တွင် APK ဗားရှင်းအသစ် တင်ထားပြီးဖြစ်ပါသည်။ Update ရယူနိုင်ပါပြီ။" },
+                downloadUrl = ghRel.downloadUrl,
+                forceUpdate = false,
+                source = "GitHub Auto"
+            )
+            else -> null
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
+    val userDirectMessages: StateFlow<UiState<List<DirectChatMessage>>> =
+        repository.observeDirectMessagesForUser(currentUserId)
+            .toUiState("Failed to load direct messages")
+
+    val allDirectMessages: StateFlow<UiState<List<DirectChatMessage>>> = isAdmin
+        .flatMapLatest { admin ->
+            if (!admin) flowOf(UiState.Success(emptyList()))
+            else repository.observeAllDirectMessages(currentUserId)
+                .map<List<DirectChatMessage>, UiState<List<DirectChatMessage>>> { UiState.Success(it) }
+                .catch { emit(UiState.Error(unwrapFirestoreMessage(it, "Failed to load chat threads"))) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val groupMessages: StateFlow<UiState<List<GroupChatMessage>>> =
+        repository.observeGroupMessages(currentUserId)
+            .toUiState("Failed to load group chat")
+
+    val appReviews: StateFlow<UiState<List<AppQualityReview>>> =
+        repository.observeAppReviews(currentUserId)
+            .toUiState("Failed to load quality ratings")
+
     // Admin-only live streams (only attached when user is actually an Admin!)
     val allOrders: StateFlow<UiState<List<BetOrder>>> = isAdmin
         .flatMapLatest { admin ->
@@ -183,6 +248,7 @@ class MainViewModel(
             }
         }
         refreshLiveFootballFeed()
+        checkForApkUpdate()
         viewModelScope.launch {
             combine(isAdmin, boardConfig) { admin, cfg -> admin to cfg }
                 .collect { (admin, cfg) ->
@@ -197,6 +263,16 @@ class MainViewModel(
                     }
                 }
         }
+    }
+
+    fun checkForApkUpdate() {
+        viewModelScope.launch {
+            _githubRelease.value = feedService.fetchLatestGitHubApkRelease()
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _updateDismissed.value = true
     }
 
     fun refreshLiveFootballFeed() {
@@ -232,6 +308,7 @@ class MainViewModel(
                 feedRes.onSuccess { fixtures ->
                     _liveFeed.value = UiState.Success(fixtures)
                 }
+                _githubRelease.value = feedService.fetchLatestGitHubApkRelease()
                 var msg = "ဒေတာအသစ်များ Refresh လုပ်ပြီးပါပြီ"
                 if (isAdmin.value) {
                     var syncedMatches = 0
@@ -628,6 +705,64 @@ class MainViewModel(
 
     fun seedSampleBoard() = runAction("နမူနာ ပွဲစဉ်များနှင့် ၃လုံးထီ ထည့်သွင်းပြီးပါပြီ") {
         repository.seedSampleBoard()
+    }
+
+    // --- APK Update, Chat & Quality Rating ---
+    fun saveAppUpdateConfig(
+        latestVersionCode: Int,
+        latestVersionName: String,
+        downloadUrl: String,
+        releaseNotes: String,
+        forceUpdate: Boolean
+    ) = runAction("APK Update အချက်အလက် Customer များထံ ပေးပို့ပြီးပါပြီ") {
+        repository.saveAppUpdateConfig(latestVersionCode, latestVersionName, downloadUrl, releaseNotes, forceUpdate)
+    }
+
+    fun sendCustomerDirectMessage(text: String) {
+        val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
+        viewModelScope.launch {
+            repository.sendDirectMessage(currentUserId, name, "customer", text)
+                .onFailure { err -> _events.emit(err.localizedMessage ?: "မက်ဆေ့ချ် ပေးပို့မရပါ") }
+        }
+    }
+
+    fun sendAdminDirectMessage(threadUserId: String, text: String) {
+        val adminName = adminMember.value?.displayName?.ifBlank { null } ?: "$displayName (Admin)"
+        viewModelScope.launch {
+            repository.sendDirectMessage(threadUserId, adminName, "admin", text)
+                .onFailure { err -> _events.emit(err.localizedMessage ?: "မက်ဆေ့ချ် ပေးပို့မရပါ") }
+        }
+    }
+
+    fun deleteDirectMessage(msgId: String) = runAction("မက်ဆေ့ချ် ဖျက်ပြီးပါပြီ") {
+        repository.deleteDirectMessage(msgId)
+    }
+
+    fun sendGroupMessage(text: String, asAdmin: Boolean = false) {
+        val role = if (asAdmin && isAdmin.value) "admin" else "customer"
+        val senderName = if (role == "admin") {
+            adminMember.value?.displayName?.ifBlank { null } ?: "$displayName (Admin)"
+        } else {
+            (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
+        }
+        viewModelScope.launch {
+            repository.sendGroupMessage(senderName, role, text)
+                .onFailure { err -> _events.emit(err.localizedMessage ?: "Group မက်ဆေ့ချ် ပေးပို့မရပါ") }
+        }
+    }
+
+    fun deleteGroupMessage(msgId: String) = runAction("Group မက်ဆေ့ချ် ဖျက်ပြီးပါပြီ") {
+        repository.deleteGroupMessage(msgId)
+    }
+
+    fun submitQualityReview(stars: Int, qualityTier: String, comment: String) =
+        runAction("အရည်အသွေး အဆင့်သတ်မှတ်ချက် ပေးပို့ပြီးပါပြီ") {
+            val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
+            repository.submitQualityReview(name, stars, qualityTier, comment)
+        }
+
+    fun deleteQualityReview(targetUserId: String) = runAction("သုံးသပ်ချက် ဖျက်ပြီးပါပြီ") {
+        repository.deleteQualityReview(targetUserId)
     }
 
     private fun runAction(successMsg: String, block: suspend () -> Result<Unit>) {

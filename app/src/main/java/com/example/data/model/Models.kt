@@ -246,3 +246,71 @@ data class LiveFootballFixture(
     val homeScore: Long,
     val awayScore: Long
 )
+
+@Keep
+@IgnoreExtraProperties
+data class AppUpdateConfig(
+    val latestVersionCode: Int = 2,
+    val latestVersionName: String = "2.0",
+    val downloadUrl: String = DEFAULT_APK_DOWNLOAD_URL,
+    val releaseNotes: String = "",
+    val forceUpdate: Boolean = false,
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    companion object {
+        const val DEFAULT_APK_DOWNLOAD_URL =
+            "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/HtetThuYa.apk"
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class DirectChatMessage(
+    @DocumentId val id: String = "",
+    val threadUserId: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
+    val senderRole: String = "customer",
+    val text: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class GroupChatMessage(
+    @DocumentId val id: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
+    val senderRole: String = "customer",
+    val text: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class AppQualityReview(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val displayName: String = "",
+    val stars: Int = 5,
+    val qualityTier: String = "အထူးကောင်းမွန်",
+    val comment: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+data class GitHubReleaseInfo(
+    val tagName: String,
+    val updatedAtEpochMs: Long,
+    val downloadUrl: String,
+    val releaseNotes: String
+)
+
+data class AvailableApkUpdate(
+    val versionLabel: String,
+    val releaseNotes: String,
+    val downloadUrl: String,
+    val forceUpdate: Boolean,
+    val source: String
+)
+

@@ -193,6 +193,50 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isValidAppUpdateConfig(data) {
+      return data.keys().hasAll(['latestVersionCode', 'latestVersionName', 'downloadUrl', 'releaseNotes', 'forceUpdate', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['latestVersionCode', 'latestVersionName', 'downloadUrl', 'releaseNotes', 'forceUpdate', 'updatedBy', 'updatedAt']) &&
+             data.latestVersionCode is int && data.latestVersionCode >= 1 && data.latestVersionCode <= 1000000 &&
+             data.latestVersionName is string && data.latestVersionName.size() >= 1 && data.latestVersionName.size() <= 30 &&
+             data.downloadUrl is string && data.downloadUrl.size() >= 8 && data.downloadUrl.size() <= 300 && data.downloadUrl.matches('^https://.*') &&
+             data.releaseNotes is string && data.releaseNotes.size() <= 500 &&
+             data.forceUpdate is bool &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidDirectMessage(data) {
+      return data.keys().hasAll(['threadUserId', 'senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             data.keys().hasOnly(['threadUserId', 'senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             data.threadUserId is string && isValidId(data.threadUserId) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.senderRole in ['customer', 'admin'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidGroupMessage(data) {
+      return data.keys().hasAll(['senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             data.keys().hasOnly(['senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.senderRole in ['customer', 'admin'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidAppReview(data) {
+      return data.keys().hasAll(['userId', 'displayName', 'stars', 'qualityTier', 'comment', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'displayName', 'stars', 'qualityTier', 'comment', 'updatedAt']) &&
+             data.userId is string && isValidId(data.userId) &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.stars is int && data.stars >= 1 && data.stars <= 5 &&
+             data.qualityTier is string && data.qualityTier.size() >= 1 && data.qualityTier.size() <= 40 &&
+             data.comment is string && data.comment.size() <= 300 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
     // --- COLLECTIONS ---
 
     match /users/{userId} {
@@ -409,14 +453,54 @@ service cloud.firestore {
     }
 
     match /app_settings/{settingId} {
-      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config'];
+      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config', 'app_update'];
       allow list: if isSignedIn();
       allow create, update: if isAdmin() && (
                               (settingId == 'wallet_config' && isValidWalletConfig(incoming())) ||
                               (settingId == 'board_config' && isValidBoardConfig(incoming())) ||
-                              (settingId == 'betting_config' && isValidBettingConfig(incoming()))
+                              (settingId == 'betting_config' && isValidBettingConfig(incoming())) ||
+                              (settingId == 'app_update' && isValidAppUpdateConfig(incoming()))
                             );
       allow delete: if false;
+    }
+
+    match /direct_messages/{msgId} {
+      allow get: if isSignedIn() && isValidId(msgId) && (resource.data.threadUserId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.threadUserId == request.auth.uid);
+      allow create: if isSignedIn() &&
+                       isValidId(msgId) &&
+                       isValidDirectMessage(incoming()) &&
+                       incoming().senderId == request.auth.uid && (
+                         (incoming().threadUserId == request.auth.uid && incoming().senderRole == 'customer') ||
+                         (isAdmin() && incoming().senderRole == 'admin')
+                       );
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(msgId);
+    }
+
+    match /group_messages/{msgId} {
+      allow get: if isSignedIn() && isValidId(msgId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() &&
+                       isValidId(msgId) &&
+                       isValidGroupMessage(incoming()) &&
+                       incoming().senderId == request.auth.uid && (
+                         incoming().senderRole == 'customer' ||
+                         (incoming().senderRole == 'admin' && isAdmin())
+                       );
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(msgId) && (isAdmin() || existing().senderId == request.auth.uid);
+    }
+
+    match /app_reviews/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
+      allow create, update: if isSignedIn() &&
+                               isValidId(userId) &&
+                               userId == request.auth.uid &&
+                               isValidAppReview(incoming()) &&
+                               incoming().userId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
     }
   }
 }
