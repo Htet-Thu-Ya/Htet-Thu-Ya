@@ -1585,15 +1585,27 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun autoSettleFinishedOrders(bettingConfig: BettingConfig): Result<AutoSettleSummary> {
-        val path = "orders/auto_settle"
+    suspend fun autoSettleFinishedOrders(
+        bettingConfig: BettingConfig,
+        targetUserId: String? = null
+    ): Result<AutoSettleSummary> {
+        val path = if (targetUserId != null) "orders/auto_settle_$targetUserId" else "orders/auto_settle"
         return try {
             requireUserId()
-            val pendingSnap = db.collection("orders")
-                .whereIn("status", listOf("pending", "accepted"))
-                .get()
-                .await()
-            val pendingOrders = pendingSnap.toObjects(BetOrder::class.java)
+            val pendingOrders = if (targetUserId != null) {
+                db.collection("orders")
+                    .whereEqualTo("userId", targetUserId)
+                    .get()
+                    .await()
+                    .toObjects(BetOrder::class.java)
+                    .filter { it.status in listOf("pending", "accepted") }
+            } else {
+                db.collection("orders")
+                    .whereIn("status", listOf("pending", "accepted"))
+                    .get()
+                    .await()
+                    .toObjects(BetOrder::class.java)
+            }
             if (pendingOrders.isEmpty()) {
                 return Result.success(AutoSettleSummary())
             }

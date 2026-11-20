@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -63,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.betting.SettlementCalculator
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.LotteryDraw
@@ -702,8 +704,10 @@ fun AdminCustomerDetailDialog(
     user: UserAccount,
     customerOrders: List<BetOrder>,
     customerWalletReqs: List<WalletRequest>,
+    busy: Boolean = false,
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
+    onAutoSettleCustomer: () -> Unit = {},
     onOpenAdjustBalance: () -> Unit,
     onOpenGiftPoints: () -> Unit,
     onAcceptOrder: (BetOrder) -> Unit,
@@ -720,6 +724,9 @@ fun AdminCustomerDetailDialog(
     }
     val settledOrders = remember(customerOrders) {
         customerOrders.filter { it.status in listOf("won", "lost", "rejected") }
+    }
+    val customerSummary = remember(user, customerOrders) {
+        SettlementCalculator.summarizeCustomer(user.userId, user, customerOrders)
     }
 
     Dialog(
@@ -804,7 +811,21 @@ fun AdminCustomerDetailDialog(
                         }
                         HorizontalDivider()
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("စုစုပေါင်းအနိုင်ရ: ${formatKs(user.totalWonKs)}", color = InkDark, style = MaterialTheme.typography.bodySmall)
+                            Text("နိုင်: ${customerSummary.wonCount} ခု (${formatKs(customerSummary.totalWonPayoutKs)})", color = PitchEmeraldDark, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("ရှုံး: ${customerSummary.lostCount} ခု (${formatKs(customerSummary.totalLostStakeKs)})", color = AdminCrimson, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                        val netLabel = when {
+                            customerSummary.customerNetKs > 0L -> "Customer အသားတင်: +${formatKs(customerSummary.customerNetKs)} (နိုင်)"
+                            customerSummary.customerNetKs < 0L -> "Customer အသားတင်: -${formatKs(kotlin.math.abs(customerSummary.customerNetKs))} (ရှုံး)"
+                            else -> "Customer အသားတင်: 0 Ks"
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                text = netLabel,
+                                color = if (customerSummary.customerNetKs >= 0L) PitchEmeraldDark else AdminCrimson,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold
+                            )
                             Text("စာရင်းဝင်: ${formatTimestamp(user.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
                         }
                         Text("UID: ${user.userId}", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontFamily = JetBrainsMonoFontFamily)
@@ -820,6 +841,20 @@ fun AdminCustomerDetailDialog(
                                 Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("ပွိုင့် +/-", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (activeOrders.isNotEmpty()) {
+                            Button(
+                                onClick = onAutoSettleCustomer,
+                                enabled = !busy,
+                                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("customer_detail_auto_settle_button")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("ဤ Customer အော်ဒါများ (${activeOrders.size}) Auto ရှင်းမည်", fontWeight = FontWeight.Bold)
                             }
                         }
                     }

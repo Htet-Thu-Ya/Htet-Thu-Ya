@@ -78,6 +78,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.betting.SettlementCalculator
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.BetOrder
@@ -133,6 +134,7 @@ fun AdminDashboardScreen(
     onSaveWalletConfig: (Double, String, Double, String) -> Unit,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
+    onAutoSettleCustomer: (String, String) -> Unit,
     onSaveNewMatch: (String, String, String, String, String, String, Double, Double) -> Unit,
     onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long) -> Unit,
     onDeleteMatch: (String) -> Unit,
@@ -259,24 +261,30 @@ fun AdminDashboardScreen(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("ငွေသွင်း/ထုတ် ($pendingWalletCount)") },
-                    modifier = Modifier.testTag("admin_tab_wallet")
+                    text = { Text("စာရင်းချုပ်") },
+                    modifier = Modifier.testTag("admin_tab_settlement")
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text("ပွဲစဉ် / ၃လုံး") },
-                    modifier = Modifier.testTag("admin_tab_board")
+                    text = { Text("ငွေသွင်း/ထုတ် ($pendingWalletCount)") },
+                    modifier = Modifier.testTag("admin_tab_wallet")
                 )
                 Tab(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    text = { Text("Customer (${users.size})") },
-                    modifier = Modifier.testTag("admin_tab_customers")
+                    text = { Text("ပွဲစဉ် / ၃လုံး") },
+                    modifier = Modifier.testTag("admin_tab_board")
                 )
                 Tab(
                     selected = selectedTab == 4,
                     onClick = { selectedTab = 4 },
+                    text = { Text("Customer (${users.size})") },
+                    modifier = Modifier.testTag("admin_tab_customers")
+                )
+                Tab(
+                    selected = selectedTab == 5,
+                    onClick = { selectedTab = 5 },
                     text = { Text("သူငယ်ချင်း Admin") },
                     modifier = Modifier.testTag("admin_tab_team")
                 )
@@ -294,6 +302,7 @@ fun AdminDashboardScreen(
                         busy = busy,
                         onSaveBettingConfig = onSaveBettingConfig,
                         onAutoSettleNow = onAutoSettleNow,
+                        onAutoSettleCustomer = onAutoSettleCustomer,
                         onInspectCustomer = { uid -> inspectingUserId = uid },
                         onAccept = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
                         onRequestSettleWin = { order -> settlingWinOrder = order },
@@ -302,7 +311,20 @@ fun AdminDashboardScreen(
                         onDeleteOrder = onDeleteOrder,
                         onClearCompletedOrders = onClearCompletedOrders
                     )
-                    1 -> AdminWalletRequestsTab(
+                    1 -> AdminSettlementTab(
+                        orders = orders,
+                        usersById = usersById,
+                        busy = busy,
+                        onAutoSettleAll = onAutoSettleNow,
+                        onAutoSettleCustomer = onAutoSettleCustomer,
+                        onInspectCustomer = { uid -> inspectingUserId = uid },
+                        onAcceptOrder = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
+                        onRequestSettleWin = { order -> settlingWinOrder = order },
+                        onSettleLoss = { onSettleLoss(it, "စာရင်းပိတ်ပြီး") },
+                        onRejectOrder = { onRejectOrder(it, "ပယ်ဖျက်ပြီး - ငွေပြန်အမ်းပြီး") },
+                        onDeleteOrder = onDeleteOrder
+                    )
+                    2 -> AdminWalletRequestsTab(
                         requests = walletReqs,
                         walletConfig = walletConfig,
                         busy = busy,
@@ -311,7 +333,7 @@ fun AdminDashboardScreen(
                         onClearProcessed = onClearProcessedWalletRequests,
                         onSaveWalletConfig = onSaveWalletConfig
                     )
-                    2 -> AdminBoardTab(
+                    3 -> AdminBoardTab(
                         matches = matches,
                         draws = draws,
                         boardConfig = boardConfig,
@@ -328,14 +350,16 @@ fun AdminDashboardScreen(
                         onToggleAutoDailyMatches = onToggleAutoDailyMatches,
                         onToggleAutoLiveResults = onToggleAutoLiveResults
                     )
-                    3 -> AdminCustomersTab(
+                    4 -> AdminCustomersTab(
                         users = users,
                         orders = orders,
+                        busy = busy,
+                        onAutoSettleCustomer = onAutoSettleCustomer,
                         onInspectCustomer = { u -> inspectingUserId = u.userId },
                         onOpenAdjustBalance = { u -> adjustingUser = u },
                         onOpenGiftPoints = { u -> giftingUser = u }
                     )
-                    4 -> AdminTeamTab(
+                    5 -> AdminTeamTab(
                         currentUserId = currentUserId,
                         admins = admins,
                         invites = invites,
@@ -359,8 +383,12 @@ fun AdminDashboardScreen(
             user = inspectedUser,
             customerOrders = custOrders,
             customerWalletReqs = custReqs,
+            busy = busy,
             onDismiss = { inspectingUserId = null },
             onRefresh = onRefreshAll,
+            onAutoSettleCustomer = {
+                onAutoSettleCustomer(uid, inspectedUser.displayName.ifBlank { "Member" })
+            },
             onOpenAdjustBalance = { adjustingUser = inspectedUser },
             onOpenGiftPoints = { giftingUser = inspectedUser },
             onAcceptOrder = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
@@ -417,6 +445,7 @@ private fun AdminOrdersTab(
     busy: Boolean,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
+    onAutoSettleCustomer: (String, String) -> Unit,
     onInspectCustomer: (String) -> Unit,
     onAccept: (BetOrder) -> Unit,
     onRequestSettleWin: (BetOrder) -> Unit,
@@ -657,8 +686,13 @@ private fun AdminOrdersTab(
                     ?: "Member"
                 val custEmail = userAccount?.email.orEmpty()
                 val totalStake = customerOrders.sumOf { it.stakeKs }
+                val hasActiveForUser = customerOrders.any { it.status in listOf("pending", "accepted") }
 
                 item(key = "header_$uid") {
+                    val allOrdersForUser = remember(orders, uid) { orders.filter { it.userId == uid } }
+                    val custSummary = remember(uid, userAccount, allOrdersForUser) {
+                        SettlementCalculator.summarizeCustomer(uid, userAccount, allOrdersForUser)
+                    }
                     Surface(
                         color = DeepPitchElevated,
                         shape = RoundedCornerShape(14.dp),
@@ -668,42 +702,64 @@ private fun AdminOrdersTab(
                             .clickable { onInspectCustomer(uid) }
                             .testTag("customer_order_group_$uid")
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = ChampionshipGold)
-                                Spacer(Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = custName,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (custEmail.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.Person, contentDescription = null, tint = ChampionshipGold)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
                                         Text(
-                                            text = custEmail,
-                                            color = ChampionshipGold,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            text = custName,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        if (custEmail.isNotBlank()) {
+                                            Text(
+                                                text = custEmail,
+                                                color = ChampionshipGold,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = "${customerOrders.size} ခု • ထိုးကြေး ${formatKs(totalStake)} • နိုင် ${custSummary.wonCount} / ရှုံး ${custSummary.lostCount}",
+                                            color = Color(0xFFC5D7CE),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
-                                    Text(
-                                        text = "${customerOrders.size} ခု • ထိုးကြေးစုစုပေါင်း ${formatKs(totalStake)}",
-                                        color = Color(0xFFC5D7CE),
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+                                }
+                                OutlinedButton(onClick = { onInspectCustomer(uid) }) {
+                                    Text("အသေးစိတ်", color = ChampionshipGold)
                                 }
                             }
-                            OutlinedButton(onClick = { onInspectCustomer(uid) }) {
-                                Text("အသေးစိတ်", color = ChampionshipGold)
+                            if (hasActiveForUser) {
+                                Button(
+                                    onClick = { onAutoSettleCustomer(uid, custName) },
+                                    enabled = !busy,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = PitchEmeraldDark,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("group_auto_settle_$uid")
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("$custName အော်ဒါများ Auto ရှင်းမည်")
+                                }
                             }
                         }
                     }
@@ -1317,6 +1373,8 @@ private fun AdminBoardTab(
 private fun AdminCustomersTab(
     users: List<UserAccount>,
     orders: List<BetOrder>,
+    busy: Boolean,
+    onAutoSettleCustomer: (String, String) -> Unit,
     onInspectCustomer: (UserAccount) -> Unit,
     onOpenAdjustBalance: (UserAccount) -> Unit,
     onOpenGiftPoints: (UserAccount) -> Unit
@@ -1368,6 +1426,9 @@ private fun AdminCustomersTab(
             items(filteredUsers, key = { it.userId }) { user ->
                 val userOrders = ordersByUser[user.userId].orEmpty()
                 val activeCount = userOrders.count { it.status in listOf("pending", "accepted") }
+                val custSummary = remember(user, userOrders) {
+                    SettlementCalculator.summarizeCustomer(user.userId, user, userOrders)
+                }
                 Card(
                     colors = CardDefaults.cardColors(containerColor = PearlCard),
                     shape = RoundedCornerShape(16.dp),
@@ -1427,6 +1488,17 @@ private fun AdminCustomersTab(
                                 )
                             }
                         }
+                        val netText = when {
+                            custSummary.customerNetKs > 0L -> "+${formatKs(custSummary.customerNetKs)} နိုင်"
+                            custSummary.customerNetKs < 0L -> "-${formatKs(kotlin.math.abs(custSummary.customerNetKs))} ရှုံး"
+                            else -> "0 Ks"
+                        }
+                        Text(
+                            "နိုင် ${custSummary.wonCount} (${formatKs(custSummary.totalWonPayoutKs)}) • ရှုံး ${custSummary.lostCount} (${formatKs(custSummary.totalLostStakeKs)}) • အသားတင်: $netText",
+                            color = if (custSummary.customerNetKs >= 0L) PitchEmeraldDark else AdminCrimson,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         Text(
                             "Active: ${formatKs(user.activeStakeKs)} • အော်ဒါ: ${userOrders.size} (လက်ရှိ $activeCount) • စာရင်းဝင်: ${formatTimestamp(user.createdAt)}",
                             color = InkMuted,
@@ -1443,6 +1515,18 @@ private fun AdminCustomersTab(
                                 modifier = Modifier.testTag("inspect_customer_${user.userId}")
                             ) {
                                 Text("လောင်းကြေး / အသေးစိတ်")
+                            }
+                            if (activeCount > 0) {
+                                Button(
+                                    onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
+                                    enabled = !busy,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
+                                    modifier = Modifier.testTag("customer_card_auto_settle_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Auto ရှင်း ($activeCount)")
+                                }
                             }
                             OutlinedButton(
                                 onClick = { onOpenAdjustBalance(user) },

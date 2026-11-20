@@ -370,6 +370,23 @@ class MainViewModel(
         }
     }
 
+    fun autoSettleCustomerOrdersNow(targetUserId: String, customerName: String) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.autoSettleFinishedOrders(bettingConfig.value, targetUserId)
+                res.onSuccess { summary ->
+                    val prefix = if (customerName.isNotBlank()) "$customerName: " else ""
+                    _events.emit(prefix + formatAutoSettleMessage(summary))
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "အလိုအလျောက် အလျော်အစား တွက်ချက်မှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
     private fun formatAutoSettleMessage(summary: AutoSettleSummary): String {
         return if (summary.settledCount > 0) {
             "အလိုအလျောက် ရှင်းလင်းပြီး ${summary.settledCount} ခု (နိုင် ${summary.wonCount}, ရှုံး ${summary.lostCount}, သရေ ${summary.pushCount})"

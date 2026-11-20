@@ -186,6 +186,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onSaveWalletConfig = vm::saveWalletConfig,
                     onSaveBettingConfig = vm::saveBettingConfig,
                     onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
+                    onAutoSettleCustomer = vm::autoSettleCustomerOrdersNow,
                     onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
                         vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
                     },
