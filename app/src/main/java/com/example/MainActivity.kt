@@ -140,6 +140,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val adminInvitesState by vm.adminInvites.collectAsStateWithLifecycle()
     val walletConfig by vm.walletConfig.collectAsStateWithLifecycle()
     val boardConfig by vm.boardConfig.collectAsStateWithLifecycle()
+    val bettingConfig by vm.bettingConfig.collectAsStateWithLifecycle()
     val liveFeedState by vm.liveFeed.collectAsStateWithLifecycle()
 
     val balanceKs = (accountState as? UiState.Success)?.data?.balanceKs ?: 0L
@@ -169,8 +170,10 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     adminInvitesState = adminInvitesState,
                     walletConfig = walletConfig,
                     boardConfig = boardConfig,
+                    bettingConfig = bettingConfig,
                     busy = busy,
                     onSwitchToCustomer = { vm.setAdminMode(false) },
+                    onRefreshAll = vm::refreshAllData,
                     onAcceptOrder = vm::acceptOrder,
                     onSettleWin = vm::settleOrderWon,
                     onSettleLoss = vm::settleOrderLost,
@@ -181,6 +184,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onDeleteWalletRequest = vm::deleteWalletRequest,
                     onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
                     onSaveWalletConfig = vm::saveWalletConfig,
+                    onSaveBettingConfig = vm::saveBettingConfig,
+                    onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
                     onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
                         vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
                     },
@@ -214,6 +219,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onNavigate = { route -> navController.navigate(route.name) },
                             onSwitchToAdmin = { vm.setAdminMode(true) },
                             onRedeemInviteCode = { code -> vm.redeemAdminInvite(code) },
+                            onRefresh = vm::refreshAllData,
                             onSignOut = {
                                 signOut(credentialManager, scope)
                             }
@@ -226,8 +232,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             balanceKs = balanceKs,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, round, stake, mult ->
-                                vm.placeOrder(type, sel, mIds, round, stake, mult) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -242,8 +248,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             balanceKs = balanceKs,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, round, stake, mult ->
-                                vm.placeOrder(type, sel, mIds, round, stake, mult) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }

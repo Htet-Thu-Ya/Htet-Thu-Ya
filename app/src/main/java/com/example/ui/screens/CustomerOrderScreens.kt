@@ -76,7 +76,8 @@ import kotlin.math.roundToLong
 private data class MatchPick(
     val matchId: String,
     val label: String,
-    val odds: Double
+    val odds: Double,
+    val pickKey: String
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -91,6 +92,7 @@ fun SportsOrderScreen(
         orderType: String,
         selections: List<String>,
         matchIds: List<String>,
+        pickKeys: List<String>,
         drawRound: String,
         stakeKs: Long,
         multiplier: Double
@@ -201,6 +203,7 @@ fun SportsOrderScreen(
                                     if (isParlay) "parlay" else "body_goal",
                                     ordered.map { it.label },
                                     ordered.map { it.matchId },
+                                    ordered.map { it.pickKey },
                                     if (isParlay) "မောင်း (${ordered.size} ပွဲ)" else "ဘော်ဒီ/ဂိုးပေါင်း",
                                     parsedStake,
                                     combinedMultiplier
@@ -293,12 +296,12 @@ fun SportsOrderScreen(
                                 MatchBoardCard(
                                     match = match,
                                     selectedLabel = currentPick?.label,
-                                    onSelect = { label, odds ->
+                                    onSelect = { label, odds, pickKey ->
                                         if (currentPick?.label == label) {
                                             selectedPicks.remove(match.id)
                                         } else {
                                             if (!isParlay) selectedPicks.clear()
-                                            selectedPicks[match.id] = MatchPick(match.id, label, odds)
+                                            selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
                                         }
                                     }
                                 )
@@ -315,7 +318,7 @@ fun SportsOrderScreen(
 private fun MatchBoardCard(
     match: SportMatch,
     selectedLabel: String?,
-    onSelect: (String, Double) -> Unit
+    onSelect: (String, Double, String) -> Unit
 ) {
     val homePick = "${match.homeTeam} (${match.handicapLine}) vs ${match.awayTeam}"
     val awayPick = "${match.awayTeam} (vs ${match.homeTeam} ${match.handicapLine})"
@@ -352,13 +355,13 @@ private fun MatchBoardCard(
                     title = "${match.homeTeam} @ ${match.bodyOdds}",
                     selected = selectedLabel == homePick,
                     modifier = Modifier.weight(1f),
-                    onClick = { onSelect(homePick, match.bodyOdds) }
+                    onClick = { onSelect(homePick, match.bodyOdds, "home") }
                 )
                 PickOptionChip(
                     title = "${match.awayTeam} @ ${match.bodyOdds}",
                     selected = selectedLabel == awayPick,
                     modifier = Modifier.weight(1f),
-                    onClick = { onSelect(awayPick, match.bodyOdds) }
+                    onClick = { onSelect(awayPick, match.bodyOdds, "away") }
                 )
             }
 
@@ -370,13 +373,13 @@ private fun MatchBoardCard(
                     title = "အပေါ် Over @ ${match.goalOdds}",
                     selected = selectedLabel == overPick,
                     modifier = Modifier.weight(1f),
-                    onClick = { onSelect(overPick, match.goalOdds) }
+                    onClick = { onSelect(overPick, match.goalOdds, "over") }
                 )
                 PickOptionChip(
                     title = "အောက် Under @ ${match.goalOdds}",
                     selected = selectedLabel == underPick,
                     modifier = Modifier.weight(1f),
-                    onClick = { onSelect(underPick, match.goalOdds) }
+                    onClick = { onSelect(underPick, match.goalOdds, "under") }
                 )
             }
         }

@@ -616,3 +616,82 @@ test("User email registration, gift points, completed order deletion, and app se
   await assertSucceeds(aliceDb.collection("orders").doc("ord_won_del").delete());
 });
 
+test("Betting commission config, order pickKeys, and commission settlement", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@gmail.com",
+    email_verified: true,
+  }).firestore();
+
+  // Only Admin can configure app_settings/betting_config
+  await assertFails(
+    aliceDb.collection("app_settings").doc("betting_config").set({
+      winCommissionPercent: 5.0,
+      winCommissionBasis: "payout",
+      autoSettleOrders: true,
+      updatedBy: ALICE_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("betting_config").set({
+      winCommissionPercent: 5.0,
+      winCommissionBasis: "payout",
+      autoSettleOrders: true,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("app_settings").doc("betting_config").get());
+
+  // Customer creates order with pickKeys
+  await assertSucceeds(
+    aliceDb.collection("orders").doc("ord_comm_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "body_goal",
+      selections: ["Arsenal (Home -0.5) vs Chelsea"],
+      matchIds: ["m1"],
+      pickKeys: ["home"],
+      drawRound: "ဘော်ဒီ/ဂိုးပေါင်း",
+      stakeKs: 10000,
+      multiplier: 1.9,
+      potentialPayoutKs: 19000,
+      actualPayoutKs: 0,
+      status: "pending",
+      adminNote: "",
+      settledBy: "",
+      createdAt: pastDate(4000),
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // Customer cannot self-settle with commission
+  await assertFails(
+    aliceDb.collection("orders").doc("ord_comm_1").update({
+      status: "won",
+      actualPayoutKs: 18050,
+      commissionPercent: 5.0,
+      commissionKs: 950,
+      updatedAt: pastDate(),
+    })
+  );
+
+  // Admin settles order as won with 5% commission deduction
+  await assertSucceeds(
+    ownerDb.collection("orders").doc("ord_comm_1").update({
+      status: "won",
+      actualPayoutKs: 18050,
+      commissionPercent: 5.0,
+      commissionKs: 950,
+      adminNote: "အနိုင်ရ (အကောက် 5% နှုတ်ပြီး)",
+      settledBy: OWNER_UID,
+      updatedAt: pastDate(),
+    })
+  );
+});
+
+

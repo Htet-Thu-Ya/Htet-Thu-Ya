@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Stadium
 import androidx.compose.material3.Badge
@@ -111,6 +112,7 @@ fun CustomerHomeScreen(
     onNavigate: (CustomerRoute) -> Unit,
     onSwitchToAdmin: () -> Unit,
     onRedeemInviteCode: (String) -> Unit,
+    onRefresh: () -> Unit = {},
     onSignOut: () -> Unit
 ) {
     var showInviteDialog by remember { mutableStateOf(false) }
@@ -246,6 +248,16 @@ fun CustomerHomeScreen(
                         }
 
                         Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = onRefresh,
+                            modifier = Modifier.testTag("customer_refresh_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh",
+                                tint = ChampionshipGold
+                            )
+                        }
                         IconButton(
                             onClick = onSignOut,
                             modifier = Modifier.testTag("sign_out_button")

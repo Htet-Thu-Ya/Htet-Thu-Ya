@@ -3,9 +3,11 @@ package com.example.ui
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.betting.AutoSettleSummary
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.BetOrder
+import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
@@ -114,6 +116,14 @@ class MainViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), BoardConfig())
 
+    val bettingConfig: StateFlow<BettingConfig> = repository.observeBettingConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Betting config stream error", error)
+            emit(BettingConfig())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), BettingConfig())
+
     // Admin-only live streams (only attached when user is actually an Admin!)
     val allOrders: StateFlow<UiState<List<BetOrder>>> = isAdmin
         .flatMapLatest { admin ->
@@ -209,6 +219,46 @@ class MainViewModel(
         _isAdminMode.value = enabled
     }
 
+    fun refreshAllData() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                repository.ensureUserInitialized(
+                    userId = currentUserId,
+                    rawDisplayName = displayName,
+                    rawEmail = currentUserEmail ?: ""
+                )
+                val feedRes = feedService.fetchFixturesForDays(listOf(-1, 0, 1))
+                feedRes.onSuccess { fixtures ->
+                    _liveFeed.value = UiState.Success(fixtures)
+                }
+                var msg = "ဒေတာအသစ်များ Refresh လုပ်ပြီးပါပြီ"
+                if (isAdmin.value) {
+                    var syncedMatches = 0
+                    if (boardConfig.value.autoSyncLiveResults) {
+                        syncedMatches = repository.syncLiveMatchResults(feedService).getOrDefault(0)
+                    }
+                    if (bettingConfig.value.autoSettleOrders) {
+                        val settled = repository.autoSettleFinishedOrders(bettingConfig.value)
+                            .getOrNull()?.settledCount ?: 0
+                        if (syncedMatches > 0 || settled > 0) {
+                            msg = "Refresh ပြီးပါပြီ (ရလဒ် $syncedMatches ပွဲ၊ အလိုအလျောက်ရှင်း $settled ခု)"
+                        }
+                    } else if (syncedMatches > 0) {
+                        msg = "Refresh ပြီးပါပြီ (တိုက်ရိုက်ရလဒ် $syncedMatches ပွဲ အပ်ဒိတ်)"
+                    }
+                }
+                _events.emit(msg)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _events.emit(e.localizedMessage ?: "Refresh မအောင်မြင်ပါ")
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
     fun placeOrder(
         orderType: String,
         selections: List<String>,
@@ -216,10 +266,11 @@ class MainViewModel(
         drawRound: String,
         stakeKs: Long,
         multiplier: Double,
+        pickKeys: List<String> = emptyList(),
         onSuccess: () -> Unit = {}
     ) = runAction("အော်ဒါတင်ပြီးပါပြီ (Admin စစ်ဆေးပေးပါမည်)") {
         val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
-        val res = repository.placeOrder(name, orderType, selections, matchIds, drawRound, stakeKs, multiplier)
+        val res = repository.placeOrder(name, orderType, selections, matchIds, drawRound, stakeKs, multiplier, pickKeys)
         if (res.isSuccess) onSuccess()
         res.map { }
     }
@@ -264,8 +315,13 @@ class MainViewModel(
         repository.acceptOrder(orderId, note)
     }
 
-    fun settleOrderWon(order: BetOrder, note: String) = runAction("အနိုင်ရ အော်ဒါ ငွေရှင်းပြီးပါပြီ") {
-        repository.settleOrderWon(order, note)
+    fun settleOrderWon(
+        order: BetOrder,
+        note: String,
+        customCommissionPercent: Double? = null,
+        customGrossPayoutKs: Long? = null
+    ) = runAction("အနိုင်ရ အော်ဒါ ငွေရှင်းပြီးပါပြီ") {
+        repository.settleOrderWon(order, note, bettingConfig.value, customCommissionPercent, customGrossPayoutKs)
     }
 
     fun settleOrderLost(order: BetOrder, note: String) = runAction("အော်ဒါ စာရင်းပိတ်ပြီးပါပြီ") {
@@ -288,6 +344,38 @@ class MainViewModel(
         withdrawMode: String
     ) = runAction("ငွေသွင်း / ငွေထုတ် ရာခိုင်နှုန်း သိမ်းဆည်းပြီးပါပြီ") {
         repository.saveWalletConfig(depositPercent, depositMode, withdrawPercent, withdrawMode)
+    }
+
+    fun saveBettingConfig(
+        winCommissionPercent: Double,
+        winCommissionBasis: String,
+        autoSettleOrders: Boolean
+    ) = runAction("အနိုင်အကောက် (%) နှင့် အလိုအလျောက်စနစ် သိမ်းဆည်းပြီးပါပြီ") {
+        repository.saveBettingConfig(winCommissionPercent, winCommissionBasis, autoSettleOrders)
+    }
+
+    fun autoSettleFinishedOrdersNow() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.autoSettleFinishedOrders(bettingConfig.value)
+                res.onSuccess { summary ->
+                    _events.emit(formatAutoSettleMessage(summary))
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "အလိုအလျောက် အလျော်အစား တွက်ချက်မှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    private fun formatAutoSettleMessage(summary: AutoSettleSummary): String {
+        return if (summary.settledCount > 0) {
+            "အလိုအလျောက် ရှင်းလင်းပြီး ${summary.settledCount} ခု (နိုင် ${summary.wonCount}, ရှုံး ${summary.lostCount}, သရေ ${summary.pushCount})"
+        } else {
+            "ပွဲပြီး/ဂဏန်းထွက် အော်ဒါအသစ် ရှင်းလင်းရန် မရှိသေးပါ"
+        }
     }
 
     fun toggleAutoSyncDailyMatches(enabled: Boolean) = runAction(
@@ -341,10 +429,15 @@ class MainViewModel(
             try {
                 val res = repository.syncLiveMatchResults(feedService)
                 res.onSuccess { updated ->
-                    _events.emit(
-                        if (updated > 0) "တိုက်ရိုက်/ပွဲပြီး ရလဒ် $updated ပွဲ အပ်ဒိတ်လုပ်ပြီးပါပြီ"
-                        else "တိုက်ရိုက်ရလဒ်များ စစ်ဆေးပြီးပါပြီ (ပြောင်းလဲမှုမရှိသေးပါ)"
-                    )
+                    val settledCount = if (bettingConfig.value.autoSettleOrders) {
+                        repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0
+                    } else 0
+                    val msg = buildString {
+                        if (updated > 0) append("တိုက်ရိုက်/ပွဲပြီး ရလဒ် $updated ပွဲ အပ်ဒိတ်လုပ်ပြီးပါပြီ")
+                        else append("တိုက်ရိုက်ရလဒ်များ စစ်ဆေးပြီးပါပြီ")
+                        if (settledCount > 0) append(" • အော်ဒါ $settledCount ခု အလိုအလျောက် ရှင်းလင်းပြီး")
+                    }
+                    _events.emit(msg)
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
                     _events.emit(err.localizedMessage ?: "တိုက်ရိုက်ရလဒ် ချိတ်ဆက်မှု မအောင်မြင်ပါ")
@@ -384,21 +477,40 @@ class MainViewModel(
         status: String,
         homeScore: Long,
         awayScore: Long
-    ) = runAction("ပွဲစဉ်အချက်အလက် ပြင်ဆင်ပြီးပါပြီ") {
-        repository.updateMatchDetails(
-            matchId = matchId,
-            league = league,
-            homeTeam = homeTeam,
-            awayTeam = awayTeam,
-            kickoffLabel = kickoffLabel,
-            handicapLine = handicapLine,
-            goalLine = goalLine,
-            bodyOdds = bodyOdds,
-            goalOdds = goalOdds,
-            status = status,
-            homeScore = homeScore,
-            awayScore = awayScore
-        )
+    ) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.updateMatchDetails(
+                    matchId = matchId,
+                    league = league,
+                    homeTeam = homeTeam,
+                    awayTeam = awayTeam,
+                    kickoffLabel = kickoffLabel,
+                    handicapLine = handicapLine,
+                    goalLine = goalLine,
+                    bodyOdds = bodyOdds,
+                    goalOdds = goalOdds,
+                    status = status,
+                    homeScore = homeScore,
+                    awayScore = awayScore
+                )
+                res.onSuccess {
+                    if (status == "finished" && bettingConfig.value.autoSettleOrders) {
+                        val settled = repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0
+                        if (settled > 0) {
+                            _events.emit("ပွဲစဉ်သိမ်းဆည်းပြီး အော်ဒါ $settled ခု အလိုအလျောက် ငွေရှင်းပြီးပါပြီ")
+                            return@onSuccess
+                        }
+                    }
+                    _events.emit("ပွဲစဉ်အချက်အလက် ပြင်ဆင်ပြီးပါပြီ")
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "Operation failed")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
     }
 
     fun deleteMatch(matchId: String) = runAction("ပွဲစဉ်အဟောင်း ဖျက်ပြီးပါပြီ") {
@@ -419,8 +531,27 @@ class MainViewModel(
         payoutMultiplier: Double,
         winningNumber: String,
         status: String
-    ) = runAction("၃လုံးထီ အချက်အလက် ပြင်ဆင်ပြီးပါပြီ") {
-        repository.updateLotteryDraw(drawId, roundTitle, closeTimeLabel, payoutMultiplier, winningNumber, status)
+    ) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.updateLotteryDraw(drawId, roundTitle, closeTimeLabel, payoutMultiplier, winningNumber, status)
+                res.onSuccess {
+                    if (status == "finished" && winningNumber.length == 3 && bettingConfig.value.autoSettleOrders) {
+                        val settled = repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0
+                        if (settled > 0) {
+                            _events.emit("၃လုံးထီသိမ်းဆည်းပြီး အော်ဒါ $settled ခု အလိုအလျောက် ငွေရှင်းပြီးပါပြီ")
+                            return@onSuccess
+                        }
+                    }
+                    _events.emit("၃လုံးထီ အချက်အလက် ပြင်ဆင်ပြီးပါပြီ")
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "Operation failed")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
     }
 
     fun deleteLotteryDraw(drawId: String) = runAction("၃လုံးထီ အကြိမ် ဖျက်ပြီးပါပြီ") {
@@ -455,7 +586,10 @@ class MainViewModel(
     }
 
     fun giftRewardPoints(targetUid: String, targetName: String, deltaPoints: Long, note: String) =
-        runAction("Customer ထံ လက်ဆောင်ပွိုင့် ပေးပို့ပြီးပါပြီ") {
+        runAction(
+            if (deltaPoints >= 0L) "Customer ထံ လက်ဆောင်ပွိုင့် ပေးပို့ပြီးပါပြီ"
+            else "Customer ထံမှ ပွိုင့်ပြန်နှုတ်ပြီးပါပြီ"
+        ) {
             repository.giftRewardPoints(targetUid, targetName, deltaPoints, note)
         }
 

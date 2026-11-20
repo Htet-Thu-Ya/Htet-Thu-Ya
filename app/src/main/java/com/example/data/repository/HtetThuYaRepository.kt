@@ -4,9 +4,13 @@ import android.content.Context
 import com.example.R
 import com.example.data.firebase.OperationType
 import com.example.data.firebase.handleFirestoreError
+import com.example.data.betting.AutoSettleDecision
+import com.example.data.betting.AutoSettleEngine
+import com.example.data.betting.AutoSettleSummary
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.BetOrder
+import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
@@ -319,6 +323,21 @@ class HtetThuYaRepository(
         )
     }
 
+    fun observeBettingConfig(userId: String): Flow<BettingConfig> = flow {
+        val path = "app_settings/betting_config"
+        emitAll(
+            db.collection("app_settings").document("betting_config")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(BettingConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                            ?: BettingConfig()
+                    } else BettingConfig()
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
     // --- ADMIN STREAMS ---
     fun observeAllOrders(userId: String): Flow<List<BetOrder>> = flow {
         emitAll(
@@ -389,7 +408,8 @@ class HtetThuYaRepository(
         matchIds: List<String>,
         drawRound: String,
         stakeKs: Long,
-        multiplier: Double
+        multiplier: Double,
+        pickKeys: List<String> = emptyList()
     ): Result<String> {
         val orderId = "ord_${UUID.randomUUID().toString().replace("-", "").take(16)}"
         val orderPath = "orders/$orderId"
@@ -403,6 +423,7 @@ class HtetThuYaRepository(
             val safeName = customerName.trim().ifBlank { "Member" }.take(60)
             val safeSelections = selections.map { it.take(120) }
             val safeMatchIds = matchIds.take(15).map { it.take(128) }
+            val safePickKeys = pickKeys.take(15).map { it.take(20) }
             val safeRound = drawRound.take(60)
             val potentialPayout = (stakeKs * multiplier).roundToLong().coerceAtLeast(stakeKs)
 
@@ -437,11 +458,14 @@ class HtetThuYaRepository(
                         "orderType" to orderType,
                         "selections" to safeSelections,
                         "matchIds" to safeMatchIds,
+                        "pickKeys" to safePickKeys,
                         "drawRound" to safeRound,
                         "stakeKs" to stakeKs,
                         "multiplier" to multiplier,
                         "potentialPayoutKs" to potentialPayout,
                         "actualPayoutKs" to 0L,
+                        "commissionPercent" to 0.0,
+                        "commissionKs" to 0L,
                         "status" to "pending",
                         "adminNote" to "",
                         "settledBy" to "",
@@ -716,7 +740,13 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun settleOrderWon(order: BetOrder, adminNote: String): Result<Unit> {
+    suspend fun settleOrderWon(
+        order: BetOrder,
+        adminNote: String,
+        bettingConfig: BettingConfig = BettingConfig(),
+        customCommissionPercent: Double? = null,
+        customGrossPayoutKs: Long? = null
+    ): Result<Unit> {
         val path = "orders/${order.id}"
         return try {
             val adminUid = requireUserId()
@@ -726,8 +756,12 @@ class HtetThuYaRepository(
             val lbRef = db.collection("leaderboard").document(order.userId)
             val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
 
-            val payout = order.potentialPayoutKs
+            val grossPayout = (customGrossPayoutKs ?: order.potentialPayoutKs).coerceIn(1L, 1_000_000_000L)
+            val appliedPct = (customCommissionPercent ?: bettingConfig.winCommissionPercent).coerceIn(0.0, 50.0)
+            val (commissionKs, payout) = bettingConfig.computeCommissionAndNet(order.stakeKs, grossPayout, appliedPct)
             val bonusPts = (order.stakeKs / 100L).coerceAtLeast(10L)
+            val noteSuffix = if (commissionKs > 0L) " (အကောက် ${appliedPct}% -${commissionKs} Ks)" else ""
+            val finalNote = (adminNote.trim().ifBlank { "အနိုင်ရ - ငွေရှင်းပြီး" } + noteSuffix).take(200)
 
             db.runTransaction { tx ->
                 val userSnap = tx.get(userRef)
@@ -747,7 +781,9 @@ class HtetThuYaRepository(
                     mapOf(
                         "status" to "won",
                         "actualPayoutKs" to payout,
-                        "adminNote" to adminNote.trim().ifBlank { "အနိုင်ရ - ငွေရှင်းပြီး" }.take(200),
+                        "commissionPercent" to appliedPct,
+                        "commissionKs" to commissionKs,
+                        "adminNote" to finalNote,
                         "settledBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -784,6 +820,11 @@ class HtetThuYaRepository(
                         )
                     )
                 }
+                val txTitle = if (commissionKs > 0L) {
+                    "${orderTypeLabel(order.orderType)} အနိုင်ရရှိငွေ (အကောက် -${commissionKs} Ks)"
+                } else {
+                    "${orderTypeLabel(order.orderType)} အနိုင်ရရှိငွေ"
+                }
                 tx.set(
                     txRef,
                     mapOf(
@@ -791,12 +832,74 @@ class HtetThuYaRepository(
                         "txType" to "order_win",
                         "direction" to "credit",
                         "amountKs" to payout,
-                        "title" to "${orderTypeLabel(order.orderType)} အနိုင်ရရှိငွေ",
+                        "title" to txTitle.take(120),
                         "balanceAfterKs" to newBalance,
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun settleOrderPartialReturn(order: BetOrder, returnKs: Long, adminNote: String): Result<Unit> {
+        val path = "orders/${order.id}"
+        return try {
+            val adminUid = requireUserId()
+            require(order.id.isNotBlank())
+            val safeReturn = returnKs.coerceIn(0L, order.stakeKs)
+            val orderRef = db.collection("orders").document(order.id)
+            val userRef = db.collection("users").document(order.userId)
+            val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
+
+            db.runTransaction { tx ->
+                val userSnap = tx.get(userRef)
+                val curBalance = userSnap.getLong("balanceKs") ?: 0L
+                val curActive = userSnap.getLong("activeStakeKs") ?: 0L
+                val newBalance = curBalance + safeReturn
+                val newActive = (curActive - order.stakeKs).coerceAtLeast(0L)
+
+                tx.update(
+                    orderRef,
+                    mapOf(
+                        "status" to "lost",
+                        "actualPayoutKs" to safeReturn,
+                        "commissionPercent" to 0.0,
+                        "commissionKs" to 0L,
+                        "adminNote" to adminNote.trim().ifBlank { "တစ်ဝက်ရှုံး ပြန်အမ်းငွေ" }.take(200),
+                        "settledBy" to adminUid,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                tx.update(
+                    userRef,
+                    mapOf(
+                        "balanceKs" to newBalance,
+                        "activeStakeKs" to newActive,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                if (safeReturn > 0L) {
+                    tx.set(
+                        txRef,
+                        mapOf(
+                            "userId" to order.userId,
+                            "txType" to "order_refund",
+                            "direction" to "credit",
+                            "amountKs" to safeReturn,
+                            "title" to "${orderTypeLabel(order.orderType)} ပြန်အမ်းငွေ",
+                            "balanceAfterKs" to newBalance,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
             }.await()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -1340,7 +1443,11 @@ class HtetThuYaRepository(
                 val curPts = snap.getLong("rewardPoints") ?: 0L
                 val curBalance = snap.getLong("balanceKs") ?: 0L
                 val curWon = snap.getLong("totalWonKs") ?: 0L
+                if (deltaPoints < 0L && curPts <= 0L) {
+                    throw IllegalStateException("Customer တွင် ပြန်နှုတ်စရာ ပွိုင့် 0 Pts သာ ရှိပါသည်")
+                }
                 val nextPts = (curPts + deltaPoints).coerceIn(0L, 100_000_000L)
+                val actualDelta = nextPts - curPts
                 tx.update(
                     userRef,
                     mapOf(
@@ -1369,16 +1476,17 @@ class HtetThuYaRepository(
                         )
                     )
                 }
-                val sign = if (deltaPoints >= 0) "+" else ""
-                val cleanNote = note.trim().ifBlank { "Admin လက်ဆောင်ပွိုင့်" }
+                val sign = if (actualDelta >= 0) "+" else ""
+                val defaultNote = if (actualDelta >= 0) "Admin လက်ဆောင်ပွိုင့်" else "Admin မှ ပွိုင့်ပြန်နှုတ်ခြင်း"
+                val cleanNote = note.trim().ifBlank { defaultNote }
                 tx.set(
                     txRef,
                     mapOf(
                         "userId" to targetUid,
                         "txType" to "point_gift",
-                        "direction" to if (deltaPoints >= 0) "credit" else "debit",
+                        "direction" to if (actualDelta >= 0) "credit" else "debit",
                         "amountKs" to 0L,
-                        "title" to "$cleanNote ($sign$deltaPoints Pts)".take(120),
+                        "title" to "$cleanNote ($sign$actualDelta Pts)".take(120),
                         "balanceAfterKs" to curBalance,
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -1446,6 +1554,97 @@ class HtetThuYaRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveBettingConfig(
+        winCommissionPercent: Double,
+        winCommissionBasis: String,
+        autoSettleOrders: Boolean
+    ): Result<Unit> {
+        val path = "app_settings/betting_config"
+        return try {
+            val adminUid = requireUserId()
+            require(winCommissionBasis in listOf("payout", "profit"))
+            db.collection("app_settings").document("betting_config").set(
+                mapOf(
+                    "winCommissionPercent" to winCommissionPercent.coerceIn(0.0, 50.0),
+                    "winCommissionBasis" to winCommissionBasis,
+                    "autoSettleOrders" to autoSettleOrders,
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun autoSettleFinishedOrders(bettingConfig: BettingConfig): Result<AutoSettleSummary> {
+        val path = "orders/auto_settle"
+        return try {
+            requireUserId()
+            val pendingSnap = db.collection("orders")
+                .whereIn("status", listOf("pending", "accepted"))
+                .get()
+                .await()
+            val pendingOrders = pendingSnap.toObjects(BetOrder::class.java)
+            if (pendingOrders.isEmpty()) {
+                return Result.success(AutoSettleSummary())
+            }
+
+            val matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+            val matchesById = matches.associateBy { it.id }
+            val draws = db.collection("lottery_draws").get().await().toObjects(LotteryDraw::class.java)
+
+            var wonCount = 0
+            var lostCount = 0
+            var pushCount = 0
+
+            for (order in pendingOrders) {
+                when (val decision = AutoSettleEngine.evaluate(order, matchesById, draws, bettingConfig)) {
+                    is AutoSettleDecision.Win -> {
+                        val res = settleOrderWon(
+                            order = order,
+                            adminNote = decision.note,
+                            bettingConfig = bettingConfig,
+                            customGrossPayoutKs = decision.grossPayoutKs
+                        )
+                        if (res.isSuccess) wonCount++
+                    }
+                    is AutoSettleDecision.Loss -> {
+                        val res = settleOrderLost(order, decision.note)
+                        if (res.isSuccess) lostCount++
+                    }
+                    is AutoSettleDecision.PushRefund -> {
+                        val res = rejectOrder(order, decision.note)
+                        if (res.isSuccess) pushCount++
+                    }
+                    is AutoSettleDecision.PartialReturn -> {
+                        val res = settleOrderPartialReturn(order, decision.returnKs, decision.note)
+                        if (res.isSuccess) lostCount++
+                    }
+                    AutoSettleDecision.NotReady -> Unit
+                }
+            }
+
+            Result.success(
+                AutoSettleSummary(
+                    settledCount = wonCount + lostCount + pushCount,
+                    wonCount = wonCount,
+                    lostCount = lostCount,
+                    pushCount = pushCount
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
             Result.failure(e)
         }
     }

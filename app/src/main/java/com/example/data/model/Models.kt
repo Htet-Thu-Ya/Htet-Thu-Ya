@@ -5,6 +5,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
+import kotlin.math.roundToLong
 
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
@@ -112,11 +113,14 @@ data class BetOrder(
     val orderType: String = "body_goal",
     val selections: List<String> = emptyList(),
     val matchIds: List<String> = emptyList(),
+    val pickKeys: List<String> = emptyList(),
     val drawRound: String = "",
     val stakeKs: Long = 0L,
     val multiplier: Double = 1.0,
     val potentialPayoutKs: Long = 0L,
     val actualPayoutKs: Long = 0L,
+    val commissionPercent: Double = 0.0,
+    val commissionKs: Long = 0L,
     val status: String = "pending",
     val adminNote: String = "",
     val settledBy: String = "",
@@ -198,6 +202,33 @@ data class BoardConfig(
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+@Keep
+@IgnoreExtraProperties
+data class BettingConfig(
+    val winCommissionPercent: Double = 0.0,
+    val winCommissionBasis: String = "payout", // "payout" or "profit"
+    val autoSettleOrders: Boolean = false,
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun computeCommissionAndNet(
+        stakeKs: Long,
+        grossPayoutKs: Long,
+        overridePercent: Double? = null
+    ): Pair<Long, Long> {
+        val pct = (overridePercent ?: winCommissionPercent).coerceIn(0.0, 50.0)
+        if (pct <= 0.0 || grossPayoutKs <= 0L) return 0L to grossPayoutKs
+        val baseKs = if (winCommissionBasis == "profit") {
+            (grossPayoutKs - stakeKs).coerceAtLeast(0L)
+        } else {
+            grossPayoutKs
+        }
+        val commissionKs = ((baseKs * pct) / 100.0).roundToLong().coerceIn(0L, grossPayoutKs)
+        val netPayoutKs = (grossPayoutKs - commissionKs).coerceAtLeast(0L)
+        return commissionKs to netPayoutKs
+    }
+}
 
 data class LiveFootballFixture(
     val externalId: String,

@@ -303,6 +303,21 @@ fun OrderSlipCard(
                 }
             }
 
+            if (order.status == "won" && order.commissionKs > 0L) {
+                Spacer(Modifier.height(6.dp))
+                val pctStr = if (order.commissionPercent % 1.0 == 0.0) {
+                    order.commissionPercent.toInt().toString()
+                } else {
+                    order.commissionPercent.toString()
+                }
+                Text(
+                    text = "အနိုင်အကောက် (-$pctStr%): -${formatKs(order.commissionKs)}",
+                    color = AdminCrimson,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
             if (order.adminNote.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(

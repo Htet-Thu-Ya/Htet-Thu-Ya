@@ -113,11 +113,14 @@
         "orderType": { "type": "string", "enum": ["parlay", "body_goal", "three_d"] },
         "selections": { "type": "array" },
         "matchIds": { "type": "array" },
+        "pickKeys": { "type": "array" },
         "drawRound": { "type": "string" },
         "stakeKs": { "type": "integer" },
         "multiplier": { "type": "number" },
         "potentialPayoutKs": { "type": "integer" },
         "actualPayoutKs": { "type": "integer" },
+        "commissionPercent": { "type": "number" },
+        "commissionKs": { "type": "integer" },
         "status": { "type": "string", "enum": ["pending", "accepted", "won", "lost", "rejected"] },
         "adminNote": { "type": "string" },
         "settledBy": { "type": "string" },
@@ -190,6 +193,19 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["autoSyncDailyMatches", "autoSyncLiveResults", "lastSyncedDate", "updatedBy", "updatedAt"]
+    },
+    "BettingConfig": {
+      "title": "BettingConfig",
+      "description": "Admin-configurable winning commission percentage and auto-settlement flags.",
+      "type": "object",
+      "properties": {
+        "winCommissionPercent": { "type": "number" },
+        "winCommissionBasis": { "type": "string", "enum": ["payout", "profit"] },
+        "autoSettleOrders": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["winCommissionPercent", "winCommissionBasis", "autoSettleOrders", "updatedBy", "updatedAt"]
     }
   },
   "firestore": {
@@ -236,6 +252,10 @@
     "/app_settings/board_config": {
       "schema": { "$ref": "#/entities/BoardConfig" },
       "description": "Daily match and live result sync configuration."
+    },
+    "/app_settings/betting_config": {
+      "schema": { "$ref": "#/entities/BettingConfig" },
+      "description": "Winning commission and auto-settlement configuration."
     }
   }
 }

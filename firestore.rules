@@ -119,11 +119,14 @@ service cloud.firestore {
              (data.selections.size() == 0 || (data.selections[0] is string && data.selections[0].size() <= 120)) &&
              data.matchIds is list && data.matchIds.size() <= 15 &&
              (data.matchIds.size() == 0 || (data.matchIds[0] is string && data.matchIds[0].size() <= 128)) &&
+             (!('pickKeys' in data) || (data.pickKeys is list && data.pickKeys.size() <= 15)) &&
              data.drawRound is string && data.drawRound.size() <= 60 &&
              data.stakeKs is int && data.stakeKs >= 100 && data.stakeKs <= 10000000 &&
              data.multiplier is number && data.multiplier >= 1.0 && data.multiplier <= 1000.0 &&
              data.potentialPayoutKs is int && data.potentialPayoutKs >= data.stakeKs && data.potentialPayoutKs <= 1000000000 &&
              data.actualPayoutKs is int && data.actualPayoutKs >= 0 && data.actualPayoutKs <= 1000000000 &&
+             (!('commissionPercent' in data) || (data.commissionPercent is number && data.commissionPercent >= 0.0 && data.commissionPercent <= 100.0)) &&
+             (!('commissionKs' in data) || (data.commissionKs is int && data.commissionKs >= 0 && data.commissionKs <= 1000000000)) &&
              data.status in ['pending', 'accepted', 'won', 'lost', 'rejected'] &&
              data.adminNote is string && data.adminNote.size() <= 200 &&
              data.settledBy is string && data.settledBy.size() <= 128 &&
@@ -176,6 +179,16 @@ service cloud.firestore {
              data.autoSyncDailyMatches is bool &&
              data.autoSyncLiveResults is bool &&
              data.lastSyncedDate is string && data.lastSyncedDate.size() <= 20 &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidBettingConfig(data) {
+      return data.keys().hasAll(['winCommissionPercent', 'winCommissionBasis', 'autoSettleOrders', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['winCommissionPercent', 'winCommissionBasis', 'autoSettleOrders', 'updatedBy', 'updatedAt']) &&
+             data.winCommissionPercent is number && data.winCommissionPercent >= 0.0 && data.winCommissionPercent <= 50.0 &&
+             data.winCommissionBasis in ['payout', 'profit'] &&
+             data.autoSettleOrders is bool &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -343,14 +356,14 @@ service cloud.firestore {
                        incoming().settledBy == '' &&
                        incoming().adminNote == '' &&
                        incoming().keys().hasAll(['userId', 'customerName', 'orderType', 'selections', 'matchIds', 'drawRound', 'stakeKs', 'multiplier', 'potentialPayoutKs', 'actualPayoutKs', 'status', 'adminNote', 'settledBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'customerName', 'orderType', 'selections', 'matchIds', 'drawRound', 'stakeKs', 'multiplier', 'potentialPayoutKs', 'actualPayoutKs', 'status', 'adminNote', 'settledBy', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['userId', 'customerName', 'orderType', 'selections', 'matchIds', 'pickKeys', 'drawRound', 'stakeKs', 'multiplier', 'potentialPayoutKs', 'actualPayoutKs', 'commissionPercent', 'commissionKs', 'status', 'adminNote', 'settledBy', 'createdAt', 'updatedAt']);
       allow update: if isSignedIn() &&
                        isValidId(orderId) &&
                        isValidOrder(incoming()) &&
                        isAdmin() &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'actualPayoutKs', 'adminNote', 'settledBy', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'actualPayoutKs', 'commissionPercent', 'commissionKs', 'adminNote', 'settledBy', 'updatedAt']);
       allow delete: if isSignedIn() &&
                        isValidId(orderId) &&
                        existing().status in ['won', 'lost', 'rejected'] &&
@@ -396,11 +409,12 @@ service cloud.firestore {
     }
 
     match /app_settings/{settingId} {
-      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config'];
+      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config'];
       allow list: if isSignedIn();
       allow create, update: if isAdmin() && (
                               (settingId == 'wallet_config' && isValidWalletConfig(incoming())) ||
-                              (settingId == 'board_config' && isValidBoardConfig(incoming()))
+                              (settingId == 'board_config' && isValidBoardConfig(incoming())) ||
+                              (settingId == 'betting_config' && isValidBettingConfig(incoming()))
                             );
       allow delete: if false;
     }
