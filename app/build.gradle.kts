@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.htetthuya.krmvxp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "2.0"
+    versionCode = 3
+    versionName = "3.0"
 
     buildConfigField("long", "BUILD_EPOCH_MS", "${System.currentTimeMillis()}L")
 

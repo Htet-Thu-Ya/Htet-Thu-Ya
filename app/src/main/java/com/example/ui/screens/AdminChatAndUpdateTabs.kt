@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,11 +23,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Videocam
@@ -55,7 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -308,7 +314,10 @@ fun AdminUpdateAndQualityTab(
     onSaveAppUpdateConfig: (Int, String, String, String, Boolean) -> Unit,
     onDeleteReview: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var showUpdatePanel by remember { mutableStateOf(true) }
+    var copiedLinkHint by remember { mutableStateOf(false) }
     var versionCodeText by remember { mutableStateOf((appUpdateConfig?.latestVersionCode ?: BuildConfig.VERSION_CODE).toString()) }
     var versionNameText by remember { mutableStateOf(appUpdateConfig?.latestVersionName ?: BuildConfig.VERSION_NAME) }
     var downloadUrlText by remember { mutableStateOf(appUpdateConfig?.downloadUrl ?: AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL) }
@@ -411,7 +420,10 @@ fun AdminUpdateAndQualityTab(
                     }
                     OutlinedTextField(
                         value = downloadUrlText,
-                        onValueChange = { downloadUrlText = it },
+                        onValueChange = {
+                            downloadUrlText = it
+                            copiedLinkHint = false
+                        },
                         label = { Text("APK Download Link (https://...)") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -420,6 +432,40 @@ fun AdminUpdateAndQualityTab(
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("admin_update_url")
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val target = downloadUrlText.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+                                clipboard.setText(AnnotatedString(target))
+                                copiedLinkHint = true
+                            },
+                            modifier = Modifier.weight(1f).testTag("copy_apk_update_link_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (copiedLinkHint) "ကူးယူပြီးပါပြီ" else "Link ကူးမည်", color = ChampionshipGold, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val target = downloadUrlText.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+                                val msg = "Htet Thu Ya APK Update ($versionNameText)\nDownload Link: $target"
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "Htet Thu Ya APK Update")
+                                    putExtra(Intent.EXTRA_TEXT, msg)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "APK Update Link မျှဝေမည်"))
+                            },
+                            modifier = Modifier.weight(1f).testTag("share_apk_update_link_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Customer ထံပို့မည်", color = Color(0xFF34D399), maxLines = 1)
+                        }
+                    }
                     OutlinedTextField(
                         value = releaseNotesText,
                         onValueChange = { releaseNotesText = it },
