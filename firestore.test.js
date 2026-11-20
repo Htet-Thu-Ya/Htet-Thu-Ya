@@ -844,5 +844,133 @@ test("APK update config, 1-on-1 direct chat, group chat, and quality rating rule
   await assertSucceeds(bobDb.collection("app_reviews").get());
 });
 
+test("Voice & Video call signaling: participant isolation, admin call, SDP answer, and ICE candidates", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID, {
+    email: "bob@gmail.com",
+    email_verified: true,
+  }).firestore();
+
+  // Customer Alice initiates a video call to Admin
+  await assertSucceeds(
+    aliceDb.collection("call_sessions").doc("call_1").set({
+      threadUserId: ALICE_UID,
+      callerId: ALICE_UID,
+      callerName: "Alice",
+      callerRole: "customer",
+      calleeName: "Admin",
+      callType: "video",
+      status: "ringing",
+      offerSdp: "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\n",
+      answerSdp: "",
+      answeredBy: "",
+      answeredByName: "",
+      createdAt: pastDate(3000),
+      updatedAt: pastDate(3000),
+    })
+  );
+
+  // Customer cannot spoof callerRole == 'admin' or start call inside Bob's thread
+  await assertFails(
+    aliceDb.collection("call_sessions").doc("call_spoof").set({
+      threadUserId: ALICE_UID,
+      callerId: ALICE_UID,
+      callerName: "Alice",
+      callerRole: "admin",
+      calleeName: "Bob",
+      callType: "voice",
+      status: "ringing",
+      offerSdp: "v=0",
+      answerSdp: "",
+      answeredBy: "",
+      answeredByName: "",
+      createdAt: pastDate(2000),
+      updatedAt: pastDate(2000),
+    })
+  );
+  await assertFails(
+    bobDb.collection("call_sessions").doc("call_cross").set({
+      threadUserId: ALICE_UID,
+      callerId: BOB_UID,
+      callerName: "Bob",
+      callerRole: "customer",
+      calleeName: "Alice",
+      callType: "voice",
+      status: "ringing",
+      offerSdp: "v=0",
+      answerSdp: "",
+      answeredBy: "",
+      answeredByName: "",
+      createdAt: pastDate(2000),
+      updatedAt: pastDate(2000),
+    })
+  );
+
+  // Bob cannot read Alice's call session or add ICE candidates to it
+  await assertFails(bobDb.collection("call_sessions").doc("call_1").get());
+  await assertFails(bobDb.collection("call_sessions").where("threadUserId", "==", ALICE_UID).get());
+  await assertFails(
+    bobDb.collection("call_sessions").doc("call_1").collection("candidates").doc("cand_bob").set({
+      senderId: BOB_UID,
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+      candidate: "candidate:1 1 UDP 2122252543 192.168.1.1 50000 typ host",
+      createdAt: pastDate(1000),
+    })
+  );
+
+  // Alice and Admin can query call_1 and exchange ICE candidates
+  await assertSucceeds(aliceDb.collection("call_sessions").where("threadUserId", "==", ALICE_UID).get());
+  await assertSucceeds(ownerDb.collection("call_sessions").get());
+  await assertSucceeds(
+    aliceDb.collection("call_sessions").doc("call_1").collection("candidates").doc("cand_a1").set({
+      senderId: ALICE_UID,
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+      candidate: "candidate:1 1 UDP 2122252543 192.168.1.2 50001 typ host",
+      createdAt: pastDate(1500),
+    })
+  );
+
+  // Admin answers Alice's call with answerSdp
+  await assertSucceeds(
+    ownerDb.collection("call_sessions").doc("call_1").update({
+      status: "accepted",
+      answerSdp: "v=0\r\no=- 67890 2 IN IP4 127.0.0.1\r\n",
+      answeredBy: OWNER_UID,
+      answeredByName: "Admin",
+      updatedAt: pastDate(1000),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("call_sessions").doc("call_1").collection("candidates").doc("cand_o1").set({
+      senderId: OWNER_UID,
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+      candidate: "candidate:2 1 UDP 2122252543 192.168.1.3 50002 typ host",
+      createdAt: pastDate(900),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("call_sessions").doc("call_1").collection("candidates").get()
+  );
+
+  // Alice or Admin can end the call
+  await assertSucceeds(
+    aliceDb.collection("call_sessions").doc("call_1").update({
+      status: "ended",
+      updatedAt: pastDate(500),
+    })
+  );
+});
+
+
 
 

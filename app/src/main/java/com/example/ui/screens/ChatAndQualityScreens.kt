@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Forum
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -224,6 +226,8 @@ fun ChatHubScreen(
     onSendGroupMessage: (String) -> Unit,
     onDeleteDirectMessage: (String) -> Unit,
     onDeleteGroupMessage: (String) -> Unit,
+    onStartVoiceCall: () -> Unit = {},
+    onStartVideoCall: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -278,22 +282,71 @@ fun ChatHubScreen(
             ) {
                 when (selectedTab) {
                     0 -> {
-                        when (directMessagesState) {
-                            is UiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(color = ChampionshipGold)
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Surface(
+                                color = DeepPitchElevated,
+                                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.35f)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Admin တိုက်ရိုက်ခေါ်ရန်",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = onStartVoiceCall,
+                                        colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("chat_voice_call_button")
+                                    ) {
+                                        Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Voice", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = onStartVideoCall,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("chat_video_call_button")
+                                    ) {
+                                        Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Video", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
-                            is UiState.Error -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                                Text(directMessagesState.message, color = Color(0xFFFCA5A5))
-                            }
-                            is UiState.Success -> {
-                                DirectChatThreadContent(
-                                    messages = directMessagesState.data,
-                                    currentUserId = currentUserId,
-                                    isAdminViewer = isAdmin,
-                                    emptyHint = "Admin ထံ မေးမြန်းလိုသည်များ၊ ငွေသွင်း/ငွေထုတ် သို့မဟုတ် အကူအညီများကို ဤနေရာတွင် တိုက်ရိုက် စာပို့နိုင်ပါသည်။",
-                                    onSend = onSendDirectMessage,
-                                    onDeleteMessage = onDeleteDirectMessage
-                                )
+
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                when (directMessagesState) {
+                                    is UiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = ChampionshipGold)
+                                    }
+                                    is UiState.Error -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                                        Text(directMessagesState.message, color = Color(0xFFFCA5A5))
+                                    }
+                                    is UiState.Success -> {
+                                        DirectChatThreadContent(
+                                            messages = directMessagesState.data,
+                                            currentUserId = currentUserId,
+                                            isAdminViewer = isAdmin,
+                                            emptyHint = "Admin ထံ မေးမြန်းလိုသည်များ၊ ငွေသွင်း/ငွေထုတ် သို့မဟုတ် အကူအညီများကို ဤနေရာတွင် တိုက်ရိုက် စာပို့/ဖုန်းခေါ်နိုင်ပါသည်။",
+                                            onSend = onSendDirectMessage,
+                                            onDeleteMessage = onDeleteDirectMessage
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

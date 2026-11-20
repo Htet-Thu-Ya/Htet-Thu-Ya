@@ -237,6 +237,34 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isValidCallSession(data) {
+      return data.keys().hasAll(['threadUserId', 'callerId', 'callerName', 'callerRole', 'calleeName', 'callType', 'status', 'offerSdp', 'answerSdp', 'answeredBy', 'answeredByName', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['threadUserId', 'callerId', 'callerName', 'callerRole', 'calleeName', 'callType', 'status', 'offerSdp', 'answerSdp', 'answeredBy', 'answeredByName', 'createdAt', 'updatedAt']) &&
+             data.threadUserId is string && isValidId(data.threadUserId) &&
+             data.callerId is string && data.callerId.size() >= 1 && data.callerId.size() <= 128 &&
+             data.callerName is string && data.callerName.size() >= 1 && data.callerName.size() <= 60 &&
+             data.callerRole in ['customer', 'admin'] &&
+             data.calleeName is string && data.calleeName.size() <= 60 &&
+             data.callType in ['voice', 'video'] &&
+             data.status in ['ringing', 'accepted', 'rejected', 'ended'] &&
+             data.offerSdp is string && data.offerSdp.size() >= 1 && data.offerSdp.size() <= 30000 &&
+             data.answerSdp is string && data.answerSdp.size() <= 30000 &&
+             data.answeredBy is string && data.answeredBy.size() <= 128 &&
+             data.answeredByName is string && data.answeredByName.size() <= 60 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCallCandidate(data) {
+      return data.keys().hasAll(['senderId', 'sdpMid', 'sdpMLineIndex', 'candidate', 'createdAt']) &&
+             data.keys().hasOnly(['senderId', 'sdpMid', 'sdpMLineIndex', 'candidate', 'createdAt']) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.sdpMid is string && data.sdpMid.size() <= 64 &&
+             data.sdpMLineIndex is int && data.sdpMLineIndex >= 0 && data.sdpMLineIndex <= 32 &&
+             data.candidate is string && data.candidate.size() >= 1 && data.candidate.size() <= 2048 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     // --- COLLECTIONS ---
 
     match /users/{userId} {
@@ -501,6 +529,64 @@ service cloud.firestore {
                                isValidAppReview(incoming()) &&
                                incoming().userId == request.auth.uid;
       allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+    }
+
+    match /call_sessions/{callId} {
+      allow get: if isSignedIn() && isValidId(callId) && (resource.data.threadUserId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.threadUserId == request.auth.uid);
+      allow create: if isSignedIn() &&
+                       isValidId(callId) &&
+                       isValidCallSession(incoming()) &&
+                       incoming().callerId == request.auth.uid &&
+                       incoming().status == 'ringing' &&
+                       incoming().answerSdp == '' &&
+                       incoming().answeredBy == '' &&
+                       incoming().answeredByName == '' && (
+                         (incoming().threadUserId == request.auth.uid && incoming().callerRole == 'customer') ||
+                         (isAdmin() && incoming().callerRole == 'admin')
+                       );
+      allow update: if isSignedIn() &&
+                       isValidId(callId) &&
+                       isValidCallSession(incoming()) &&
+                       (existing().threadUserId == request.auth.uid || isAdmin()) &&
+                       incoming().threadUserId == existing().threadUserId &&
+                       incoming().callerId == existing().callerId &&
+                       incoming().callerRole == existing().callerRole &&
+                       incoming().callType == existing().callType &&
+                       incoming().offerSdp == existing().offerSdp &&
+                       incoming().createdAt == existing().createdAt && (
+                         (existing().status == 'ringing' &&
+                          incoming().status == 'accepted' &&
+                          incoming().answerSdp.size() >= 1 &&
+                          incoming().answeredBy == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'answerSdp', 'answeredBy', 'answeredByName', 'updatedAt'])) ||
+                         (incoming().status in ['rejected', 'ended'] &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+                       );
+      allow delete: if isSignedIn() && isValidId(callId) && (existing().threadUserId == request.auth.uid || isAdmin());
+
+      match /candidates/{candId} {
+        allow get, list: if isSignedIn() &&
+                              isValidId(callId) && (
+                                isAdmin() ||
+                                get(/databases/$(database)/documents/call_sessions/$(callId)).data.threadUserId == request.auth.uid
+                              );
+        allow create: if isSignedIn() &&
+                         isValidId(callId) &&
+                         isValidId(candId) &&
+                         isValidCallCandidate(incoming()) &&
+                         incoming().senderId == request.auth.uid && (
+                           isAdmin() ||
+                           get(/databases/$(database)/documents/call_sessions/$(callId)).data.threadUserId == request.auth.uid
+                         );
+        allow update: if false;
+        allow delete: if isSignedIn() &&
+                         isValidId(callId) &&
+                         isValidId(candId) && (
+                           isAdmin() ||
+                           get(/databases/$(database)/documents/call_sessions/$(callId)).data.threadUserId == request.auth.uid
+                         );
+      }
     }
   }
 }

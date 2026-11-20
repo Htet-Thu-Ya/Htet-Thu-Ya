@@ -262,6 +262,40 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "displayName", "stars", "qualityTier", "comment", "updatedAt"]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "WebRTC signaling session for 1-on-1 Voice and Video calls between Customer and Admin.",
+      "type": "object",
+      "properties": {
+        "threadUserId": { "type": "string" },
+        "callerId": { "type": "string" },
+        "callerName": { "type": "string" },
+        "callerRole": { "type": "string", "enum": ["customer", "admin"] },
+        "calleeName": { "type": "string" },
+        "callType": { "type": "string", "enum": ["voice", "video"] },
+        "status": { "type": "string", "enum": ["ringing", "accepted", "rejected", "ended"] },
+        "offerSdp": { "type": "string" },
+        "answerSdp": { "type": "string" },
+        "answeredBy": { "type": "string" },
+        "answeredByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadUserId", "callerId", "callerName", "callerRole", "calleeName", "callType", "status", "offerSdp", "answerSdp", "answeredBy", "answeredByName", "createdAt", "updatedAt"]
+    },
+    "CallIceCandidate": {
+      "title": "CallIceCandidate",
+      "description": "WebRTC ICE candidate exchanged within a call session.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "sdpMid": { "type": "string" },
+        "sdpMLineIndex": { "type": "integer" },
+        "candidate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "sdpMid", "sdpMLineIndex", "candidate", "createdAt"]
     }
   },
   "firestore": {
@@ -328,6 +362,14 @@
     "/app_reviews/{userId}": {
       "schema": { "$ref": "#/entities/AppQualityReview" },
       "description": "User quality ratings and feedback."
+    },
+    "/call_sessions/{callId}": {
+      "schema": { "$ref": "#/entities/CallSession" },
+      "description": "Voice & Video WebRTC call signaling sessions scoped by customer threadUserId."
+    },
+    "/call_sessions/{callId}/candidates/{candId}": {
+      "schema": { "$ref": "#/entities/CallIceCandidate" },
+      "description": "WebRTC ICE candidates for a call session."
     }
   }
 }

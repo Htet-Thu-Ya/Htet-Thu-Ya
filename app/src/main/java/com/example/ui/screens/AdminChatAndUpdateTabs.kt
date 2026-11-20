@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -83,7 +86,8 @@ fun AdminChatTab(
     onSendAdminDirectMessage: (threadUserId: String, text: String) -> Unit,
     onDeleteDirectMessage: (String) -> Unit,
     onSendGroupMessage: (String) -> Unit,
-    onDeleteGroupMessage: (String) -> Unit
+    onDeleteGroupMessage: (String) -> Unit,
+    onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit = { _, _, _ -> }
 ) {
     var mode by remember { mutableIntStateOf(0) } // 0 = 1:1, 1 = Group
     var activeThreadUid by remember { mutableStateOf<String?>(initialCustomerUid) }
@@ -202,20 +206,34 @@ fun AdminChatTab(
                                             )
                                         }
                                     }
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        if (threadMsgs.isNotEmpty()) {
-                                            Surface(color = PitchEmeraldDark, shape = RoundedCornerShape(8.dp)) {
-                                                Text(
-                                                    text = "${threadMsgs.size}",
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                                )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { onCallCustomer(uid, name, "voice") },
+                                            modifier = Modifier.testTag("admin_chat_voice_call_$uid")
+                                        ) {
+                                            Icon(Icons.Default.Call, contentDescription = "Voice Call", tint = PitchEmeraldDark)
+                                        }
+                                        IconButton(
+                                            onClick = { onCallCustomer(uid, name, "video") },
+                                            modifier = Modifier.testTag("admin_chat_video_call_$uid")
+                                        ) {
+                                            Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = Color(0xFF0284C7))
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            if (threadMsgs.isNotEmpty()) {
+                                                Surface(color = PitchEmeraldDark, shape = RoundedCornerShape(8.dp)) {
+                                                    Text(
+                                                        text = "${threadMsgs.size}",
+                                                        color = Color.White,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                    )
+                                                }
+                                                Spacer(Modifier.height(2.dp))
+                                                Text(formatTimestamp(lastMsg?.createdAt), color = InkMuted, style = MaterialTheme.typography.labelSmall)
+                                            } else {
+                                                Icon(Icons.Default.Forum, contentDescription = null, tint = PitchEmeraldDark)
                                             }
-                                            Spacer(Modifier.height(2.dp))
-                                            Text(formatTimestamp(lastMsg?.createdAt), color = InkMuted, style = MaterialTheme.typography.labelSmall)
-                                        } else {
-                                            Icon(Icons.Default.Forum, contentDescription = null, tint = PitchEmeraldDark)
                                         }
                                     }
                                 }
@@ -248,8 +266,22 @@ fun AdminChatTab(
                                 }
                             }
                         }
-                        OutlinedButton(onClick = { activeThreadUid = null }) {
-                            Text("စာရင်း", color = ChampionshipGold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { onCallCustomer(selectedUid, targetName, "voice") },
+                                modifier = Modifier.testTag("admin_thread_voice_call")
+                            ) {
+                                Icon(Icons.Default.Call, contentDescription = "Voice Call", tint = Color(0xFF34D399))
+                            }
+                            IconButton(
+                                onClick = { onCallCustomer(selectedUid, targetName, "video") },
+                                modifier = Modifier.testTag("admin_thread_video_call")
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = Color(0xFF38BDF8))
+                            }
+                            OutlinedButton(onClick = { activeThreadUid = null }) {
+                                Text("စာရင်း", color = ChampionshipGold)
+                            }
                         }
                     }
                 }

@@ -14,6 +14,8 @@ import com.example.data.model.AppUpdateConfig
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.CallIceCandidate
+import com.example.data.model.CallSession
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
 import com.example.data.model.LeaderboardEntry
@@ -2246,6 +2248,193 @@ class HtetThuYaRepository(
         3 -> "သင့်တင့် (3★)"
         2 -> "တိုးတက်ရန်လို (2★)"
         else -> "အားနည်း (1★)"
+    }
+
+    // --- VOICE & VIDEO CALL SIGNALING ---
+
+    fun observeCallSessionsForUser(userId: String): Flow<List<CallSession>> = flow {
+        val uid = requireUserId()
+        check(uid == userId)
+        val path = "call_sessions"
+        emitAll(
+            db.collection("call_sessions")
+                .whereEqualTo("threadUserId", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CallSession::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, uid)
+        )
+    }
+
+    fun observeAllCallSessions(userId: String): Flow<List<CallSession>> = flow {
+        val path = "call_sessions"
+        emitAll(
+            db.collection("call_sessions")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CallSession::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, userId)
+        )
+    }
+
+    fun observeCallSession(callId: String): Flow<CallSession?> = flow {
+        require(callId.isNotBlank() && ID_REGEX.matches(callId))
+        val uid = requireUserId()
+        val path = "call_sessions/$callId"
+        emitAll(
+            db.collection("call_sessions").document(callId)
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(CallSession::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    } else null
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, uid)
+        )
+    }
+
+    fun observeCallCandidates(callId: String): Flow<List<CallIceCandidate>> = flow {
+        require(callId.isNotBlank() && ID_REGEX.matches(callId))
+        val uid = requireUserId()
+        val path = "call_sessions/$callId/candidates"
+        emitAll(
+            db.collection("call_sessions").document(callId)
+                .collection("candidates")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CallIceCandidate::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, uid)
+        )
+    }
+
+    suspend fun createCallSession(
+        callId: String,
+        threadUserId: String,
+        callerName: String,
+        callerRole: String,
+        calleeName: String,
+        callType: String,
+        offerSdp: String
+    ): Result<Unit> {
+        val path = "call_sessions/$callId"
+        return try {
+            val uid = requireUserId()
+            require(callId.isNotBlank() && ID_REGEX.matches(callId))
+            require(threadUserId.isNotBlank() && ID_REGEX.matches(threadUserId))
+            require(callerRole in listOf("customer", "admin"))
+            require(callType in listOf("voice", "video"))
+            require(offerSdp.isNotBlank() && offerSdp.length <= 30_000) { "Call offer SDP invalid" }
+
+            db.collection("call_sessions").document(callId).set(
+                mapOf(
+                    "threadUserId" to threadUserId,
+                    "callerId" to uid,
+                    "callerName" to callerName.trim().ifBlank { "Member" }.take(60),
+                    "callerRole" to callerRole,
+                    "calleeName" to calleeName.trim().take(60),
+                    "callType" to callType,
+                    "status" to "ringing",
+                    "offerSdp" to offerSdp,
+                    "answerSdp" to "",
+                    "answeredBy" to "",
+                    "answeredByName" to "",
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun answerCallSession(
+        callId: String,
+        answerSdp: String,
+        answeredByName: String
+    ): Result<Unit> {
+        val path = "call_sessions/$callId"
+        return try {
+            val uid = requireUserId()
+            require(callId.isNotBlank() && ID_REGEX.matches(callId))
+            require(answerSdp.isNotBlank() && answerSdp.length <= 30_000) { "Call answer SDP invalid" }
+            db.collection("call_sessions").document(callId).update(
+                mapOf(
+                    "status" to "accepted",
+                    "answerSdp" to answerSdp,
+                    "answeredBy" to uid,
+                    "answeredByName" to answeredByName.trim().ifBlank { "Member" }.take(60),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateCallStatus(callId: String, status: String): Result<Unit> {
+        val path = "call_sessions/$callId"
+        return try {
+            requireUserId()
+            require(callId.isNotBlank() && ID_REGEX.matches(callId))
+            require(status in listOf("rejected", "ended"))
+            db.collection("call_sessions").document(callId).update(
+                mapOf(
+                    "status" to status,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addCallIceCandidate(
+        callId: String,
+        sdpMid: String,
+        sdpMLineIndex: Int,
+        candidate: String
+    ): Result<Unit> {
+        val candId = "cand_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val path = "call_sessions/$callId/candidates/$candId"
+        return try {
+            val uid = requireUserId()
+            require(callId.isNotBlank() && ID_REGEX.matches(callId))
+            require(candidate.isNotBlank() && candidate.length <= 2048)
+            db.collection("call_sessions").document(callId)
+                .collection("candidates").document(candId)
+                .set(
+                    mapOf(
+                        "senderId" to uid,
+                        "sdpMid" to sdpMid.take(64),
+                        "sdpMLineIndex" to sdpMLineIndex.coerceIn(0, 32),
+                        "candidate" to candidate,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
     }
 
     private fun orderTypeLabel(orderType: String): String = when (orderType) {

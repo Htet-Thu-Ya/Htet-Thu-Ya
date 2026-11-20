@@ -314,3 +314,50 @@ data class AvailableApkUpdate(
     val source: String
 )
 
+@Keep
+@IgnoreExtraProperties
+data class CallSession(
+    @DocumentId val id: String = "",
+    val threadUserId: String = "",
+    val callerId: String = "",
+    val callerName: String = "",
+    val callerRole: String = "customer",
+    val calleeName: String = "",
+    val callType: String = "voice",
+    val status: String = "ringing",
+    val offerSdp: String = "",
+    val answerSdp: String = "",
+    val answeredBy: String = "",
+    val answeredByName: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class CallIceCandidate(
+    @DocumentId val id: String = "",
+    val senderId: String = "",
+    val sdpMid: String = "",
+    val sdpMLineIndex: Int = 0,
+    val candidate: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+data class ActiveCallUiState(
+    val callId: String,
+    val threadUserId: String,
+    val callType: String,
+    val peerName: String,
+    val peerRole: String,
+    val isOutgoing: Boolean,
+    val status: String, // "calling", "connecting", "connected", "ended"
+    val isMuted: Boolean = false,
+    val isSpeakerOn: Boolean = false,
+    val isCameraEnabled: Boolean = true,
+    val isFrontCamera: Boolean = true,
+    val connectedAtEpochMs: Long? = null,
+    val hasRemoteVideo: Boolean = false
+)
+
+

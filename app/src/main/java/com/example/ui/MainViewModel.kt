@@ -1,10 +1,13 @@
 package com.example.ui
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.betting.AutoSettleSummary
+import com.example.data.call.WebRtcCallManager
+import com.example.data.model.ActiveCallUiState
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.AppQualityReview
@@ -13,6 +16,7 @@ import com.example.data.model.AvailableApkUpdate
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.CallSession
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GitHubReleaseInfo
 import com.example.data.model.GroupChatMessage
@@ -30,6 +34,8 @@ import com.example.data.repository.HtetThuYaRepository
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,7 +51,10 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.webrtc.SurfaceViewRenderer
+import java.util.UUID
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(
@@ -54,8 +63,11 @@ class MainViewModel(
     private val currentUserEmail: String?,
     private val isEmailVerified: Boolean,
     val displayName: String,
-    private val feedService: FootballFeedService = FootballFeedService()
+    private val feedService: FootballFeedService = FootballFeedService(),
+    appContext: Context? = null
 ) : ViewModel() {
+
+    private val callManager: WebRtcCallManager? = appContext?.let { WebRtcCallManager(it) }
 
     private val _isAdminMode = MutableStateFlow(false)
     val isAdminMode: StateFlow<Boolean> = _isAdminMode.asStateFlow()
@@ -235,6 +247,46 @@ class MainViewModel(
         val pendingReqs = (reqState as? UiState.Success)?.data?.count { it.status == "pending" } ?: 0
         pendingOrders + pendingReqs
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), 0)
+
+    private val _activeCall = MutableStateFlow<ActiveCallUiState?>(null)
+    val activeCall: StateFlow<ActiveCallUiState?> = _activeCall.asStateFlow()
+
+    private val _dismissedCallIds = MutableStateFlow<Set<String>>(emptySet())
+    private val callCandidateJobs = mutableListOf<Job>()
+    private val processedCandidateIds = mutableSetOf<String>()
+    private val pendingLocalIceCandidates = mutableListOf<Triple<String, Int, String>>()
+    private val callSyncLock = Any()
+    @Volatile
+    private var canSendLocalIce = false
+
+    private val callSessionsStream: Flow<List<CallSession>> = isAdmin
+        .flatMapLatest { admin ->
+            val flow = if (admin) {
+                repository.observeAllCallSessions(currentUserId)
+            } else {
+                repository.observeCallSessionsForUser(currentUserId)
+            }
+            flow.catch { error ->
+                if (isPureCancellation(error)) throw error
+                Log.w(TAG, "Call sessions stream error", error)
+                emit(emptyList())
+            }
+        }
+
+    val incomingCall: StateFlow<CallSession?> = combine(
+        callSessionsStream,
+        _activeCall,
+        _dismissedCallIds
+    ) { sessions, active, dismissed ->
+        if (active != null) return@combine null
+        val cutoffEpochMs = System.currentTimeMillis() - 300_000L
+        sessions.firstOrNull { session ->
+            session.status == "ringing" &&
+                session.callerId != currentUserId &&
+                !dismissed.contains(session.id) &&
+                ((session.createdAt?.seconds?.times(1000L)) ?: Long.MAX_VALUE) >= cutoffEpochMs
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     init {
         viewModelScope.launch {
@@ -763,6 +815,380 @@ class MainViewModel(
 
     fun deleteQualityReview(targetUserId: String) = runAction("သုံးသပ်ချက် ဖျက်ပြီးပါပြီ") {
         repository.deleteQualityReview(targetUserId)
+    }
+
+    // --- VOICE & VIDEO CALLING ---
+
+    fun startCustomerCallToAdmin(callType: String) {
+        val myName = (userAccount.value as? UiState.Success)?.data?.displayName?.ifBlank { null } ?: displayName
+        startOutgoingCall(
+            threadUserId = currentUserId,
+            callerName = myName,
+            callerRole = "customer",
+            peerName = "Htet Thu Ya Admin",
+            peerRole = "admin",
+            callType = callType
+        )
+    }
+
+    fun startAdminCallToCustomer(customerUid: String, customerName: String, callType: String) {
+        if (!isAdmin.value) {
+            emitMessage("Admin ခွင့်ပြုချက် မရှိသေးပါ")
+            return
+        }
+        val adminName = adminMember.value?.displayName?.ifBlank { null } ?: "$displayName (Admin)"
+        startOutgoingCall(
+            threadUserId = customerUid,
+            callerName = adminName,
+            callerRole = "admin",
+            peerName = customerName.ifBlank { "Member" },
+            peerRole = "customer",
+            callType = callType
+        )
+    }
+
+    private fun startOutgoingCall(
+        threadUserId: String,
+        callerName: String,
+        callerRole: String,
+        peerName: String,
+        peerRole: String,
+        callType: String
+    ) {
+        val mgr = callManager
+        if (mgr == null) {
+            emitMessage("Call စနစ် အဆင်သင့်မဖြစ်သေးပါ")
+            return
+        }
+        if (_activeCall.value != null) {
+            emitMessage("ဖုန်းခေါ်ဆိုမှု လုပ်ဆောင်နေဆဲ ဖြစ်ပါသည်")
+            return
+        }
+        val callId = "call_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val isVideo = callType == "video"
+        synchronized(callSyncLock) {
+            canSendLocalIce = false
+            pendingLocalIceCandidates.clear()
+            processedCandidateIds.clear()
+        }
+        _dismissedCallIds.update { it + callId }
+        _activeCall.value = ActiveCallUiState(
+            callId = callId,
+            threadUserId = threadUserId,
+            callType = callType,
+            peerName = peerName,
+            peerRole = peerRole,
+            isOutgoing = true,
+            status = "calling",
+            isMuted = false,
+            isSpeakerOn = isVideo,
+            isCameraEnabled = isVideo,
+            isFrontCamera = true
+        )
+
+        mgr.startSession(
+            isVideo = isVideo,
+            listener = createCallListener(callId),
+            onReady = {
+                mgr.createOffer(
+                    onSuccess = { offerSdp ->
+                        viewModelScope.launch {
+                            val res = repository.createCallSession(
+                                callId = callId,
+                                threadUserId = threadUserId,
+                                callerName = callerName,
+                                callerRole = callerRole,
+                                calleeName = peerName,
+                                callType = callType,
+                                offerSdp = offerSdp
+                            )
+                            if (res.isSuccess) {
+                                val toFlush: List<Triple<String, Int, String>>
+                                synchronized(callSyncLock) {
+                                    canSendLocalIce = true
+                                    toFlush = pendingLocalIceCandidates.toList()
+                                    pendingLocalIceCandidates.clear()
+                                }
+                                toFlush.forEach { (mid, idx, cand) ->
+                                    launch { repository.addCallIceCandidate(callId, mid, idx, cand) }
+                                }
+                                observeActiveCallSignals(callId, isOutgoing = true)
+                            } else {
+                                cleanupLocalCall(res.exceptionOrNull()?.localizedMessage ?: "ဖုန်းခေါ်ဆိုမှု မအောင်မြင်ပါ")
+                            }
+                        }
+                    },
+                    onError = { err ->
+                        viewModelScope.launch {
+                            cleanupLocalCall(err)
+                        }
+                    }
+                )
+            },
+            onError = { err ->
+                viewModelScope.launch {
+                    cleanupLocalCall(err)
+                }
+            }
+        )
+    }
+
+    fun answerIncomingCall(session: CallSession) {
+        val mgr = callManager ?: return
+        if (_activeCall.value != null) return
+        val isVideo = session.callType == "video"
+        val myName = if (session.callerRole == "customer" && isAdmin.value) {
+            adminMember.value?.displayName?.ifBlank { null } ?: "$displayName (Admin)"
+        } else {
+            (userAccount.value as? UiState.Success)?.data?.displayName?.ifBlank { null } ?: displayName
+        }
+
+        _dismissedCallIds.update { it + session.id }
+        synchronized(callSyncLock) {
+            canSendLocalIce = true
+            pendingLocalIceCandidates.clear()
+            processedCandidateIds.clear()
+        }
+        _activeCall.value = ActiveCallUiState(
+            callId = session.id,
+            threadUserId = session.threadUserId,
+            callType = session.callType,
+            peerName = session.callerName.ifBlank { "Member" },
+            peerRole = session.callerRole,
+            isOutgoing = false,
+            status = "connecting",
+            isMuted = false,
+            isSpeakerOn = isVideo,
+            isCameraEnabled = isVideo,
+            isFrontCamera = true
+        )
+
+        observeActiveCallSignals(session.id, isOutgoing = false)
+
+        mgr.startSession(
+            isVideo = isVideo,
+            listener = createCallListener(session.id),
+            onReady = {
+                mgr.acceptOfferAndCreateAnswer(
+                    offerSdp = session.offerSdp,
+                    onSuccess = { answerSdp ->
+                        viewModelScope.launch {
+                            val res = repository.answerCallSession(session.id, answerSdp, myName)
+                            if (res.isFailure) {
+                                cleanupLocalCall(res.exceptionOrNull()?.localizedMessage ?: "ဖုန်းလက်ခံ၍ မရပါ")
+                            }
+                        }
+                    },
+                    onError = { err ->
+                        viewModelScope.launch {
+                            repository.updateCallStatus(session.id, "rejected")
+                            cleanupLocalCall(err)
+                        }
+                    }
+                )
+            },
+            onError = { err ->
+                viewModelScope.launch {
+                    repository.updateCallStatus(session.id, "rejected")
+                    cleanupLocalCall(err)
+                }
+            }
+        )
+    }
+
+    fun declineIncomingCall(session: CallSession) {
+        _dismissedCallIds.update { it + session.id }
+        viewModelScope.launch {
+            repository.updateCallStatus(session.id, "rejected")
+        }
+    }
+
+    fun hangupActiveCall() {
+        val current = _activeCall.value ?: return
+        cleanupLocalCall(null)
+        viewModelScope.launch(NonCancellable) {
+            repository.updateCallStatus(current.callId, "ended")
+        }
+    }
+
+    fun toggleCallMute() {
+        val cur = _activeCall.value ?: return
+        val next = !cur.isMuted
+        callManager?.setMuted(next)
+        _activeCall.value = cur.copy(isMuted = next)
+    }
+
+    fun toggleCallSpeaker() {
+        val cur = _activeCall.value ?: return
+        val next = !cur.isSpeakerOn
+        callManager?.setSpeakerEnabled(next)
+        _activeCall.value = cur.copy(isSpeakerOn = next)
+    }
+
+    fun toggleCallCamera() {
+        val cur = _activeCall.value ?: return
+        if (cur.callType != "video") return
+        val next = !cur.isCameraEnabled
+        callManager?.setCameraEnabled(next)
+        _activeCall.value = cur.copy(isCameraEnabled = next)
+    }
+
+    fun switchCallCamera() {
+        val cur = _activeCall.value ?: return
+        if (cur.callType != "video") return
+        callManager?.switchCamera { isFront ->
+            _activeCall.update { state -> state?.copy(isFrontCamera = isFront) }
+        }
+    }
+
+    fun attachLocalVideoRenderer(renderer: SurfaceViewRenderer) {
+        callManager?.attachLocalRenderer(renderer)
+    }
+
+    fun detachLocalVideoRenderer(renderer: SurfaceViewRenderer) {
+        callManager?.detachLocalRenderer(renderer)
+    }
+
+    fun attachRemoteVideoRenderer(renderer: SurfaceViewRenderer) {
+        callManager?.attachRemoteRenderer(renderer)
+    }
+
+    fun detachRemoteVideoRenderer(renderer: SurfaceViewRenderer) {
+        callManager?.detachRemoteRenderer(renderer)
+    }
+
+    private fun createCallListener(callId: String) = object : WebRtcCallManager.Listener {
+        override fun onLocalIceCandidate(sdpMid: String, sdpMLineIndex: Int, candidate: String) {
+            val sendNow = synchronized(callSyncLock) {
+                if (canSendLocalIce) {
+                    true
+                } else {
+                    pendingLocalIceCandidates.add(Triple(sdpMid, sdpMLineIndex, candidate))
+                    false
+                }
+            }
+            if (sendNow) {
+                viewModelScope.launch {
+                    repository.addCallIceCandidate(callId, sdpMid, sdpMLineIndex, candidate)
+                }
+            }
+        }
+
+        override fun onPeerConnected() {
+            _activeCall.update { cur ->
+                if (cur != null && cur.callId == callId) {
+                    cur.copy(
+                        status = "connected",
+                        connectedAtEpochMs = cur.connectedAtEpochMs ?: System.currentTimeMillis()
+                    )
+                } else cur
+            }
+        }
+
+        override fun onRemoteVideoAvailable(available: Boolean) {
+            _activeCall.update { cur ->
+                if (cur != null && cur.callId == callId) {
+                    cur.copy(hasRemoteVideo = available)
+                } else cur
+            }
+        }
+
+        override fun onPeerConnectionFailed(reason: String) {
+            viewModelScope.launch {
+                val active = _activeCall.value
+                if (active != null && active.callId == callId) {
+                    repository.updateCallStatus(callId, "ended")
+                    cleanupLocalCall(reason)
+                }
+            }
+        }
+    }
+
+    private fun observeActiveCallSignals(callId: String, isOutgoing: Boolean) {
+        callCandidateJobs.forEach { it.cancel() }
+        callCandidateJobs.clear()
+
+        val sessionJob = viewModelScope.launch {
+            repository.observeCallSession(callId)
+                .catch { error ->
+                    if (isPureCancellation(error)) throw error
+                    Log.w(TAG, "observeCallSession error", error)
+                }
+                .collect { session ->
+                    if (session == null) return@collect
+                    val active = _activeCall.value ?: return@collect
+                    if (active.callId != callId) return@collect
+
+                    if (isOutgoing && session.answeredByName.isNotBlank() && active.peerName != session.answeredByName) {
+                        _activeCall.update { it?.copy(peerName = session.answeredByName) }
+                    }
+                    if (isOutgoing && session.status == "accepted" && session.answerSdp.isNotBlank()) {
+                        _activeCall.update { cur ->
+                            if (cur != null && cur.status == "calling") cur.copy(status = "connecting") else cur
+                        }
+                        callManager?.setRemoteAnswer(session.answerSdp)
+                    }
+                    if (session.status == "rejected" || session.status == "ended") {
+                        val msg = if (session.status == "rejected") {
+                            "တစ်ဖက်မှ ဖုန်းခေါ်ဆိုမှု ငြင်းပယ်လိုက်ပါသည်"
+                        } else {
+                            "ဖုန်းခေါ်ဆိုမှု ပြီးဆုံးပါပြီ"
+                        }
+                        cleanupLocalCall(msg)
+                    }
+                }
+        }
+
+        val iceJob = viewModelScope.launch {
+            repository.observeCallCandidates(callId)
+                .catch { error ->
+                    if (isPureCancellation(error)) throw error
+                    Log.w(TAG, "observeCallCandidates error", error)
+                }
+                .collect { candidates ->
+                    candidates.forEach { cand ->
+                        if (cand.senderId != currentUserId) {
+                            val isNew = synchronized(callSyncLock) { processedCandidateIds.add(cand.id) }
+                            if (isNew) {
+                                callManager?.addRemoteIceCandidate(
+                                    sdpMid = cand.sdpMid,
+                                    sdpMLineIndex = cand.sdpMLineIndex,
+                                    candidateStr = cand.candidate
+                                )
+                            }
+                        }
+                    }
+                }
+        }
+
+        callCandidateJobs.add(sessionJob)
+        callCandidateJobs.add(iceJob)
+    }
+
+    private fun cleanupLocalCall(eventMessage: String?) {
+        callCandidateJobs.forEach { it.cancel() }
+        callCandidateJobs.clear()
+        synchronized(callSyncLock) {
+            canSendLocalIce = false
+            pendingLocalIceCandidates.clear()
+            processedCandidateIds.clear()
+        }
+        callManager?.release()
+        _activeCall.value = null
+        if (!eventMessage.isNullOrBlank()) {
+            emitMessage(eventMessage)
+        }
+    }
+
+    override fun onCleared() {
+        val activeId = _activeCall.value?.callId
+        if (activeId != null) {
+            kotlinx.coroutines.CoroutineScope(NonCancellable).launch {
+                runCatching { repository.updateCallStatus(activeId, "ended") }
+            }
+        }
+        callManager?.release()
+        super.onCleared()
     }
 
     private fun runAction(successMsg: String, block: suspend () -> Result<Unit>) {

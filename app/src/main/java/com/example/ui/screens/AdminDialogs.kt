@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -722,7 +724,9 @@ fun AdminCustomerDetailDialog(
     onDeleteOrder: (String) -> Unit,
     onProcessWalletRequest: (WalletRequest, Boolean, String) -> Unit,
     onDeleteWalletRequest: (String) -> Unit,
-    onOpenChat: () -> Unit = {}
+    onOpenChat: () -> Unit = {},
+    onStartVoiceCall: () -> Unit = {},
+    onStartVideoCall: () -> Unit = {}
 ) {
     var detailTab by remember { mutableIntStateOf(0) }
     var showAccountSummary by remember { mutableStateOf(true) }
@@ -783,6 +787,12 @@ fun AdminCustomerDetailDialog(
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = onStartVoiceCall, modifier = Modifier.testTag("customer_detail_voice_call")) {
+                                Icon(Icons.Default.Call, contentDescription = "Voice Call", tint = Color(0xFF34D399))
+                            }
+                            IconButton(onClick = onStartVideoCall, modifier = Modifier.testTag("customer_detail_video_call")) {
+                                Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = Color(0xFF38BDF8))
+                            }
                             IconButton(onClick = onRefresh, modifier = Modifier.testTag("customer_detail_refresh")) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = ChampionshipGold)
                             }

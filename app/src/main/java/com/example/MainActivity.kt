@@ -34,12 +34,14 @@ import com.example.data.auth.signOut
 import com.example.data.model.UiState
 import com.example.data.repository.HtetThuYaRepository
 import com.example.ui.MainViewModel
+import com.example.ui.screens.ActiveCallScreen
 import com.example.ui.screens.AdminDashboardScreen
 import com.example.ui.screens.ApkUpdatePromptDialog
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ChatHubScreen
 import com.example.ui.screens.CustomerHomeScreen
 import com.example.ui.screens.CustomerRoute
+import com.example.ui.screens.IncomingCallDialog
 import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.OrdersHistoryScreen
 import com.example.ui.screens.PointExchangeScreen
@@ -48,6 +50,7 @@ import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SportsOrderScreen
 import com.example.ui.screens.ThreeDLotteryScreen
 import com.example.ui.screens.WalletLedgerScreen
+import com.example.ui.screens.rememberCallPermissionLauncher
 import com.example.ui.theme.DeepPitchBg
 import com.example.ui.theme.HtetThuYaTheme
 import com.google.firebase.Firebase
@@ -58,6 +61,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,7 +118,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     currentUserId = user.uid,
                     currentUserEmail = user.email,
                     isEmailVerified = user.isEmailVerified,
-                    displayName = user.displayName ?: user.email?.substringBefore("@") ?: "Member"
+                    displayName = user.displayName ?: user.email?.substringBefore("@") ?: "Member",
+                    appContext = app.applicationContext
                 )
             }
         }
@@ -155,7 +160,15 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val allDirectMessagesState by vm.allDirectMessages.collectAsStateWithLifecycle()
     val groupMessagesState by vm.groupMessages.collectAsStateWithLifecycle()
     val appReviewsState by vm.appReviews.collectAsStateWithLifecycle()
+    val activeCall by vm.activeCall.collectAsStateWithLifecycle()
+    val incomingCall by vm.incomingCall.collectAsStateWithLifecycle()
     var manualOpenUpdateDialog by remember { mutableStateOf(false) }
+
+    val requestCallWithPermission = rememberCallPermissionLauncher { deniedMsg ->
+        scope.launch {
+            snackbarHostState.showSnackbar(deniedMsg)
+        }
+    }
 
     val balanceKs = (accountState as? UiState.Success)?.data?.balanceKs ?: 0L
     val navController = rememberNavController()
@@ -229,7 +242,12 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = true) },
                     onDeleteGroupMessage = vm::deleteGroupMessage,
                     onSaveAppUpdateConfig = vm::saveAppUpdateConfig,
-                    onDeleteQualityReview = vm::deleteQualityReview
+                    onDeleteQualityReview = vm::deleteQualityReview,
+                    onCallCustomer = { uid, name, callType ->
+                        requestCallWithPermission(callType) {
+                            vm.startAdminCallToCustomer(uid, name, callType)
+                        }
+                    }
                 )
             } else {
                 NavHost(
@@ -247,6 +265,16 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onNavigate = { route -> navController.navigate(route.name) },
                             onSwitchToAdmin = { vm.setAdminMode(true) },
                             onRedeemInviteCode = { code -> vm.redeemAdminInvite(code) },
+                            onStartVoiceCall = {
+                                requestCallWithPermission("voice") {
+                                    vm.startCustomerCallToAdmin("voice")
+                                }
+                            },
+                            onStartVideoCall = {
+                                requestCallWithPermission("video") {
+                                    vm.startCustomerCallToAdmin("video")
+                                }
+                            },
                             onRefresh = vm::refreshAllData,
                             onSignOut = {
                                 signOut(credentialManager, scope)
@@ -363,6 +391,16 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = false) },
                             onDeleteDirectMessage = vm::deleteDirectMessage,
                             onDeleteGroupMessage = vm::deleteGroupMessage,
+                            onStartVoiceCall = {
+                                requestCallWithPermission("voice") {
+                                    vm.startCustomerCallToAdmin("voice")
+                                }
+                            },
+                            onStartVideoCall = {
+                                requestCallWithPermission("video") {
+                                    vm.startCustomerCallToAdmin("video")
+                                }
+                            },
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -388,6 +426,33 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                         manualOpenUpdateDialog = false
                         vm.dismissUpdateDialog()
                     }
+                )
+            }
+
+            val currentCall = activeCall
+            val incoming = incomingCall
+            if (currentCall != null) {
+                ActiveCallScreen(
+                    callState = currentCall,
+                    onToggleMute = vm::toggleCallMute,
+                    onToggleSpeaker = vm::toggleCallSpeaker,
+                    onToggleCamera = vm::toggleCallCamera,
+                    onSwitchCamera = vm::switchCallCamera,
+                    onHangup = vm::hangupActiveCall,
+                    onAttachLocalRenderer = vm::attachLocalVideoRenderer,
+                    onDetachLocalRenderer = vm::detachLocalVideoRenderer,
+                    onAttachRemoteRenderer = vm::attachRemoteVideoRenderer,
+                    onDetachRemoteRenderer = vm::detachRemoteVideoRenderer
+                )
+            } else if (incoming != null) {
+                IncomingCallDialog(
+                    session = incoming,
+                    onAccept = {
+                        requestCallWithPermission(incoming.callType) {
+                            vm.answerIncomingCall(incoming)
+                        }
+                    },
+                    onDecline = { vm.declineIncomingCall(incoming) }
                 )
             }
         }

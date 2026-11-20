@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -166,7 +168,8 @@ fun AdminDashboardScreen(
     onSendGroupMessage: (String) -> Unit,
     onDeleteGroupMessage: (String) -> Unit,
     onSaveAppUpdateConfig: (Int, String, String, String, Boolean) -> Unit,
-    onDeleteQualityReview: (String) -> Unit
+    onDeleteQualityReview: (String) -> Unit,
+    onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit = { _, _, _ -> }
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var chatCustomerUid by remember { mutableStateOf<String?>(null) }
@@ -395,7 +398,8 @@ fun AdminDashboardScreen(
                         onOpenChatWithCustomer = { u ->
                             chatCustomerUid = u.userId
                             selectedTab = 6
-                        }
+                        },
+                        onCallCustomer = onCallCustomer
                     )
                     5 -> AdminTeamTab(
                         currentUserId = currentUserId,
@@ -415,7 +419,8 @@ fun AdminDashboardScreen(
                         onSendAdminDirectMessage = onSendAdminDirectMessage,
                         onDeleteDirectMessage = onDeleteDirectMessage,
                         onSendGroupMessage = onSendGroupMessage,
-                        onDeleteGroupMessage = onDeleteGroupMessage
+                        onDeleteGroupMessage = onDeleteGroupMessage,
+                        onCallCustomer = onCallCustomer
                     )
                     7 -> AdminUpdateAndQualityTab(
                         currentUserId = currentUserId,
@@ -461,6 +466,14 @@ fun AdminDashboardScreen(
                 inspectingUserId = null
                 chatCustomerUid = uid
                 selectedTab = 6
+            },
+            onStartVoiceCall = {
+                inspectingUserId = null
+                onCallCustomer(uid, inspectedUser.displayName.ifBlank { "Member" }, "voice")
+            },
+            onStartVideoCall = {
+                inspectingUserId = null
+                onCallCustomer(uid, inspectedUser.displayName.ifBlank { "Member" }, "video")
             }
         )
     }
@@ -1583,7 +1596,8 @@ private fun AdminCustomersTab(
     onInspectCustomer: (UserAccount) -> Unit,
     onOpenAdjustBalance: (UserAccount) -> Unit,
     onOpenGiftPoints: (UserAccount) -> Unit,
-    onOpenChatWithCustomer: (UserAccount) -> Unit
+    onOpenChatWithCustomer: (UserAccount) -> Unit,
+    onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
@@ -1769,6 +1783,35 @@ private fun AdminCustomersTab(
                                 Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "voice")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("customer_voice_call_${user.userId}")
+                            ) {
+                                Icon(Icons.Default.Call, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Voice Call", color = PitchEmeraldDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "video")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("customer_video_call_${user.userId}")
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF0369A1), modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Video Call", color = Color(0xFF0369A1), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
