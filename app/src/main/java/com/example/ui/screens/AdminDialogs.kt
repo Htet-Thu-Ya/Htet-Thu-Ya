@@ -708,6 +708,7 @@ fun AdminCustomerDetailDialog(
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
     onAutoSettleCustomer: () -> Unit = {},
+    onAutoSettleOrder: (BetOrder) -> Unit = {},
     onOpenAdjustBalance: () -> Unit,
     onOpenGiftPoints: () -> Unit,
     onAcceptOrder: (BetOrder) -> Unit,
@@ -843,19 +844,21 @@ fun AdminCustomerDetailDialog(
                                 Text("ပွိုင့် +/-", fontWeight = FontWeight.Bold)
                             }
                         }
-                        if (activeOrders.isNotEmpty()) {
-                            Button(
-                                onClick = onAutoSettleCustomer,
-                                enabled = !busy,
-                                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("customer_detail_auto_settle_button")
-                            ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("ဤ Customer အော်ဒါများ (${activeOrders.size}) Auto ရှင်းမည်", fontWeight = FontWeight.Bold)
-                            }
+                        Button(
+                            onClick = onAutoSettleCustomer,
+                            enabled = activeOrders.isNotEmpty() && !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("customer_detail_auto_settle_button")
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (activeOrders.isNotEmpty()) "ပွဲစဉ်အားလုံး Auto ရှင်းမည် (${activeOrders.size})"
+                                else "ပွဲစဉ်အားလုံး Auto ရှင်းမည် (0)",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -898,7 +901,9 @@ fun AdminCustomerDetailDialog(
                                     OrderSlipCard(
                                         order = order,
                                         isAdminView = true,
+                                        busy = busy,
                                         onAccept = onAcceptOrder,
+                                        onAutoSettleOrder = onAutoSettleOrder,
                                         onSettleWin = onRequestSettleWin,
                                         onSettleLoss = onSettleLoss,
                                         onReject = onRejectOrder

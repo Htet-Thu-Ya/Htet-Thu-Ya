@@ -82,6 +82,7 @@ fun AdminSettlementTab(
     onAutoSettleAll: () -> Unit,
     onAutoSettleCustomer: (userId: String, customerName: String) -> Unit,
     onInspectCustomer: (String) -> Unit,
+    onAutoSettleOrder: (BetOrder) -> Unit = {},
     onAcceptOrder: (BetOrder) -> Unit,
     onRequestSettleWin: (BetOrder) -> Unit,
     onSettleLoss: (BetOrder) -> Unit,
@@ -455,7 +456,9 @@ fun AdminSettlementTab(
                                 OrderSlipCard(
                                     order = order,
                                     isAdminView = true,
+                                    busy = busy,
                                     onAccept = onAcceptOrder,
+                                    onAutoSettleOrder = onAutoSettleOrder,
                                     onSettleWin = onRequestSettleWin,
                                     onSettleLoss = onSettleLoss,
                                     onReject = onRejectOrder,

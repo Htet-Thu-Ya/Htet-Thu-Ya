@@ -1661,6 +1661,75 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun autoSettleSingleOrder(
+        order: BetOrder,
+        bettingConfig: BettingConfig
+    ): Result<String> {
+        val path = "orders/${order.id}"
+        return try {
+            requireUserId()
+            if (order.status !in listOf("pending", "accepted")) {
+                return Result.success("ဤအော်ဒါသည် စာရင်းရှင်းလင်းပြီးသား ဖြစ်ပါသည်")
+            }
+            val matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+            val matchesById = matches.associateBy { it.id }
+            val draws = db.collection("lottery_draws").get().await().toObjects(LotteryDraw::class.java)
+
+            when (val decision = AutoSettleEngine.evaluate(order, matchesById, draws, bettingConfig)) {
+                is AutoSettleDecision.Win -> {
+                    val res = settleOrderWon(
+                        order = order,
+                        adminNote = decision.note,
+                        bettingConfig = bettingConfig,
+                        customGrossPayoutKs = decision.grossPayoutKs
+                    )
+                    res.getOrElse { throw it }
+                    Result.success("${order.customerName} (${orderTypeLabel(order.orderType)}) အလိုအလျောက် အနိုင်ရှင်းပြီးပါပြီ")
+                }
+                is AutoSettleDecision.Loss -> {
+                    val res = settleOrderLost(order, decision.note)
+                    res.getOrElse { throw it }
+                    Result.success("${order.customerName} (${orderTypeLabel(order.orderType)}) အလိုအလျောက် အရှုံးစာရင်းပိတ်ပြီးပါပြီ")
+                }
+                is AutoSettleDecision.PushRefund -> {
+                    val res = rejectOrder(order, decision.note)
+                    res.getOrElse { throw it }
+                    Result.success("${order.customerName} (${orderTypeLabel(order.orderType)}) သရေ (Push) ငွေပြန်အမ်းပြီးပါပြီ")
+                }
+                is AutoSettleDecision.PartialReturn -> {
+                    val res = settleOrderPartialReturn(order, decision.returnKs, decision.note)
+                    res.getOrElse { throw it }
+                    Result.success("${order.customerName} (${orderTypeLabel(order.orderType)}) တစ်ဝက်ရှုံး ${decision.returnKs} Ks ပြန်အမ်းပြီးပါပြီ")
+                }
+                AutoSettleDecision.NotReady -> {
+                    val reason = if (order.orderType == "three_d") {
+                        "3D ထွက်ဂဏန်း (${order.drawRound.ifBlank { "လက်ရှိအကြိမ်" }}) ရလဒ် 'ပြီးဆုံး' မဖြစ်သေးပါ"
+                    } else {
+                        val pendingMatchNames = order.matchIds.mapNotNull { id ->
+                            val m = matchesById[id]
+                            when {
+                                m == null -> null
+                                m.status != "finished" -> "${m.homeTeam} vs ${m.awayTeam}"
+                                else -> null
+                            }
+                        }.distinct()
+                        if (pendingMatchNames.isNotEmpty()) {
+                            "${pendingMatchNames.joinToString(", ")} ပွဲစဉ် ရလဒ် 'ပြီးဆုံး' မဖြစ်သေးပါ (ပွဲစဉ် Tab မှ ရလဒ်ထည့်ပါ)"
+                        } else {
+                            "ပွဲစဉ်ရလဒ် အချက်အလက် မပြည့်စုံသေးပါ — Live ရလဒ်ဆွဲယူပါ သို့မဟုတ် ကိုယ်တိုင် နိုင်/ရှုံး ရှင်းပေးပါ"
+                        }
+                    }
+                    Result.success(reason)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun syncDailyMatchesFromFeed(
         feedService: FootballFeedService,
         dayOffsets: List<Int> = listOf(0, 1),

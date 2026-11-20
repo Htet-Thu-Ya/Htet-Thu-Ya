@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -184,7 +185,9 @@ fun StatusBadge(status: String) {
 fun OrderSlipCard(
     order: BetOrder,
     isAdminView: Boolean = false,
+    busy: Boolean = false,
     onAccept: ((BetOrder) -> Unit)? = null,
+    onAutoSettleOrder: ((BetOrder) -> Unit)? = null,
     onSettleWin: ((BetOrder) -> Unit)? = null,
     onSettleLoss: ((BetOrder) -> Unit)? = null,
     onReject: ((BetOrder) -> Unit)? = null,
@@ -336,6 +339,24 @@ fun OrderSlipCard(
 
             if (isAdminView && (order.status == "pending" || order.status == "accepted")) {
                 Spacer(Modifier.height(10.dp))
+                if (onAutoSettleOrder != null) {
+                    Button(
+                        onClick = { onAutoSettleOrder(order) },
+                        enabled = !busy,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF0F766E),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auto_settle_order_${order.id}")
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("ဤပွဲ/အော်ဒါ Auto ရှင်းမည်", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

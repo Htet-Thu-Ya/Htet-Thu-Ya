@@ -387,6 +387,22 @@ class MainViewModel(
         }
     }
 
+    fun autoSettleSingleOrderNow(order: BetOrder) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.autoSettleSingleOrder(order, bettingConfig.value)
+                res.onSuccess { msg ->
+                    _events.emit(msg)
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "အလိုအလျောက် စာရင်းရှင်းလင်းမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
     private fun formatAutoSettleMessage(summary: AutoSettleSummary): String {
         return if (summary.settledCount > 0) {
             "အလိုအလျောက် ရှင်းလင်းပြီး ${summary.settledCount} ခု (နိုင် ${summary.wonCount}, ရှုံး ${summary.lostCount}, သရေ ${summary.pushCount})"

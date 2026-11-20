@@ -135,6 +135,7 @@ fun AdminDashboardScreen(
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
     onAutoSettleCustomer: (String, String) -> Unit,
+    onAutoSettleOrder: (BetOrder) -> Unit,
     onSaveNewMatch: (String, String, String, String, String, String, Double, Double) -> Unit,
     onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long) -> Unit,
     onDeleteMatch: (String) -> Unit,
@@ -303,6 +304,7 @@ fun AdminDashboardScreen(
                         onSaveBettingConfig = onSaveBettingConfig,
                         onAutoSettleNow = onAutoSettleNow,
                         onAutoSettleCustomer = onAutoSettleCustomer,
+                        onAutoSettleOrder = onAutoSettleOrder,
                         onInspectCustomer = { uid -> inspectingUserId = uid },
                         onAccept = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
                         onRequestSettleWin = { order -> settlingWinOrder = order },
@@ -318,6 +320,7 @@ fun AdminDashboardScreen(
                         onAutoSettleAll = onAutoSettleNow,
                         onAutoSettleCustomer = onAutoSettleCustomer,
                         onInspectCustomer = { uid -> inspectingUserId = uid },
+                        onAutoSettleOrder = onAutoSettleOrder,
                         onAcceptOrder = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
                         onRequestSettleWin = { order -> settlingWinOrder = order },
                         onSettleLoss = { onSettleLoss(it, "စာရင်းပိတ်ပြီး") },
@@ -389,6 +392,7 @@ fun AdminDashboardScreen(
             onAutoSettleCustomer = {
                 onAutoSettleCustomer(uid, inspectedUser.displayName.ifBlank { "Member" })
             },
+            onAutoSettleOrder = onAutoSettleOrder,
             onOpenAdjustBalance = { adjustingUser = inspectedUser },
             onOpenGiftPoints = { giftingUser = inspectedUser },
             onAcceptOrder = { onAcceptOrder(it.id, "Admin လက်ခံပြီး") },
@@ -446,6 +450,7 @@ private fun AdminOrdersTab(
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
     onAutoSettleCustomer: (String, String) -> Unit,
+    onAutoSettleOrder: (BetOrder) -> Unit,
     onInspectCustomer: (String) -> Unit,
     onAccept: (BetOrder) -> Unit,
     onRequestSettleWin: (BetOrder) -> Unit,
@@ -769,7 +774,9 @@ private fun AdminOrdersTab(
                     OrderSlipCard(
                         order = order,
                         isAdminView = true,
+                        busy = busy,
                         onAccept = onAccept,
+                        onAutoSettleOrder = onAutoSettleOrder,
                         onSettleWin = onRequestSettleWin,
                         onSettleLoss = onLose,
                         onReject = onReject,
@@ -782,7 +789,9 @@ private fun AdminOrdersTab(
                 OrderSlipCard(
                     order = order,
                     isAdminView = true,
+                    busy = busy,
                     onAccept = onAccept,
+                    onAutoSettleOrder = onAutoSettleOrder,
                     onSettleWin = onRequestSettleWin,
                     onSettleLoss = onLose,
                     onReject = onReject,
@@ -1504,40 +1513,50 @@ private fun AdminCustomersTab(
                             color = InkMuted,
                             style = MaterialTheme.typography.bodySmall
                         )
-                        FlowRow(
+                        Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Button(
                                 onClick = { onInspectCustomer(user) },
                                 colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
-                                modifier = Modifier.testTag("inspect_customer_${user.userId}")
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("inspect_customer_${user.userId}")
                             ) {
-                                Text("လောင်းကြေး / အသေးစိတ်")
+                                Text("လောင်းကြေး / အသေးစိတ်", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            if (activeCount > 0) {
-                                Button(
-                                    onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
-                                    enabled = !busy,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
-                                    modifier = Modifier.testTag("customer_card_auto_settle_${user.userId}")
-                                ) {
-                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Auto ရှင်း ($activeCount)")
-                                }
+                            Button(
+                                onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
+                                enabled = activeCount > 0 && !busy,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("customer_card_auto_settle_${user.userId}")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Auto ရှင်း ($activeCount)", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             OutlinedButton(
                                 onClick = { onOpenAdjustBalance(user) },
-                                modifier = Modifier.testTag("adjust_balance_${user.userId}")
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("adjust_balance_${user.userId}")
                             ) {
                                 Text("ငွေပြင်မည်", color = InkDark)
                             }
                             Button(
                                 onClick = { onOpenGiftPoints(user) },
                                 colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                                modifier = Modifier.testTag("gift_points_${user.userId}")
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("gift_points_${user.userId}")
                             ) {
                                 Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
