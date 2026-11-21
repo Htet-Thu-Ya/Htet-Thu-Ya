@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.History
@@ -43,10 +46,12 @@ import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Stadium
 import androidx.compose.material.icons.filled.StarRate
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -57,13 +62,17 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,17 +80,21 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppLanguage
+import com.example.data.model.AppUpdateConfig
 import com.example.data.model.AvailableApkUpdate
 import com.example.data.model.BrandingConfig
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
+import com.example.data.network.ApkDownloadHelper
+import kotlinx.coroutines.launch
 import com.example.ui.components.AdminInviteRedeemDialog
 import com.example.ui.components.BrandLogoAvatar
 import com.example.ui.components.formatKs
@@ -137,6 +150,7 @@ fun CustomerHomeScreen(
     brandingConfig: BrandingConfig = BrandingConfig(),
     appLanguage: AppLanguage = AppLanguage.MY,
     availableApkUpdate: AvailableApkUpdate? = null,
+    apkDownloadUrl: String = AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
     onOpenUpdateDialog: () -> Unit = {},
     onNavigate: (CustomerRoute) -> Unit,
     onSwitchToAdmin: () -> Unit,
@@ -146,7 +160,12 @@ fun CustomerHomeScreen(
     onRefresh: () -> Unit = {},
     onSignOut: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showInviteDialog by remember { mutableStateOf(false) }
+    var directDownloading by remember { mutableStateOf(false) }
+    var directDownloadProgress by remember { mutableIntStateOf(0) }
+    var directDownloadError by remember { mutableStateOf<String?>(null) }
 
     val account = (accountState as? UiState.Success)?.data
     val isLocked = account?.isLocked == true
@@ -667,6 +686,146 @@ fun CustomerHomeScreen(
                             Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Video", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            item(span = { GridItemSpan(2) }) {
+                val resolvedApkUrl = remember(availableApkUpdate, apkDownloadUrl) {
+                    ApkDownloadHelper.toDirectDownloadUrl(
+                        availableApkUpdate?.downloadUrl?.ifBlank { apkDownloadUrl } ?: apkDownloadUrl
+                    ).ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+                }
+                val appDisplayName = brandingConfig.appName.ifBlank { "လိုတရ" }
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, PitchEmerald.copy(alpha = 0.55f)),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_direct_apk_card")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "APK တိုက်ရိုက်ဒေါင်းရန် & မျှဝေရန်",
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Link နှိပ်၍ တိုက်ရိုက်ဒေါင်းနိုင်သလို ဖုန်းထဲမှ APK ဖိုင်ကိုပါ တိုက်ရိုက် ရှယ်ပို့နိုင်ပါသည်။",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (directDownloading) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (directDownloadProgress > 0) {
+                                    LinearProgressIndicator(
+                                        progress = { directDownloadProgress / 100f },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Text(
+                                        text = "APK ဒေါင်းလုဒ်ဆွဲနေသည်... $directDownloadProgress%",
+                                        color = Color(0xFF34D399),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                } else {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
+                            }
+                        }
+                        if (directDownloadError != null) {
+                            Text(
+                                text = directDownloadError!!,
+                                color = Color(0xFFFCA5A5),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                enabled = !directDownloading,
+                                onClick = {
+                                    if (availableApkUpdate != null) {
+                                        onOpenUpdateDialog()
+                                    } else {
+                                        directDownloading = true
+                                        directDownloadProgress = 0
+                                        directDownloadError = null
+                                        scope.launch {
+                                            ApkDownloadHelper.downloadApkToCache(
+                                                context = context,
+                                                rawUrl = resolvedApkUrl,
+                                                onProgress = { pct -> directDownloadProgress = pct }
+                                            ).onSuccess { file ->
+                                                directDownloading = false
+                                                ApkDownloadHelper.installApkFile(context, file)
+                                                    .onFailure { err ->
+                                                        directDownloadError = err.localizedMessage
+                                                    }
+                                            }.onFailure { err ->
+                                                directDownloading = false
+                                                directDownloadError = err.localizedMessage ?: "APK တိုက်ရိုက်ဒေါင်း၍မရပါ"
+                                            }
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.weight(1f).testTag("home_direct_apk_download_button")
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("APK ဒေါင်းမည်", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val shareText = ApkDownloadHelper.buildApkShareText(
+                                        appName = appDisplayName,
+                                        rawUrl = resolvedApkUrl,
+                                        versionLabel = availableApkUpdate?.versionLabel.orEmpty()
+                                    )
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "$appDisplayName APK Direct Download")
+                                        putExtra(Intent.EXTRA_TEXT, shareText)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Direct APK Link မျှဝေမည်"))
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.weight(1f).testTag("home_share_direct_link_button")
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Link ရှယ်မည်", color = Color(0xFF34D399), maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    ApkDownloadHelper.shareInstalledApkFile(context, appDisplayName)
+                                        .onFailure { err ->
+                                            Toast.makeText(
+                                                context,
+                                                err.localizedMessage ?: "APK ဖိုင်တိုက်ရိုက်ရှယ်၍မရပါ",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("home_share_apk_file_button")
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("APK ဖိုင်တိုက်ရိုက်ပို့မည် (Install Ready .apk)", color = ChampionshipGold, maxLines = 1)
                         }
                     }
                 }

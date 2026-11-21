@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,14 +25,17 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,12 +52,14 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +78,8 @@ import com.example.data.model.AppUpdateConfig
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
 import com.example.data.model.UserAccount
+import com.example.data.network.ApkDownloadHelper
+import kotlinx.coroutines.launch
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchElevated
@@ -332,6 +340,7 @@ fun AdminUpdateAndQualityTab(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     var showUpdatePanel by remember { mutableStateOf(true) }
     var copiedLinkHint by remember { mutableStateOf(false) }
     var versionCodeText by remember { mutableStateOf((appUpdateConfig?.latestVersionCode ?: BuildConfig.VERSION_CODE).toString()) }
@@ -339,6 +348,13 @@ fun AdminUpdateAndQualityTab(
     var downloadUrlText by remember { mutableStateOf(appUpdateConfig?.downloadUrl ?: AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL) }
     var releaseNotesText by remember { mutableStateOf(appUpdateConfig?.releaseNotes ?: "ဗားရှင်းအသစ် ထွက်ရှိပါပြီ။") }
     var forceUpdate by remember { mutableStateOf(appUpdateConfig?.forceUpdate ?: false) }
+
+    val resolvedDirectUrl = remember(downloadUrlText) {
+        ApkDownloadHelper.toDirectDownloadUrl(
+            downloadUrlText.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+        ).ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+    }
+    val canNormalizeUrl = downloadUrlText.trim().isNotBlank() && resolvedDirectUrl != downloadUrlText.trim()
 
     LaunchedEffect(appUpdateConfig) {
         if (appUpdateConfig != null) {
@@ -376,7 +392,7 @@ fun AdminUpdateAndQualityTab(
                         Spacer(Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "APK Update ကြေညာချက် (Customer Auto Prompt)",
+                                text = "APK Update ကြေညာချက် (Direct Download & Share)",
                                 color = Color.White,
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
@@ -405,7 +421,7 @@ fun AdminUpdateAndQualityTab(
 
                 if (showUpdatePanel) {
                     Text(
-                        text = "GitHub Release အသစ်တင်လိုက်တိုင်း Customer App မှ အလိုအလျောက် စစ်ဆေးပေးသလို အောက်ပါ Version Code ကို မြှင့်၍လည်း ချက်ချင်း Update တင်ပြနိုင်ပါသည်။",
+                        text = "Google Drive / Dropbox / GitHub Release လင့်ထည့်လိုက်ရုံဖြင့် တိုက်ရိုက် APK Download Link အဖြစ် အလိုအလျောက် ပြောင်းလဲပေးပြီး ဖိုင်တိုက်ရိုက် ရှယ်နိုင်ပါသည်။",
                         color = Color(0xFFB4C8BE),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -440,7 +456,7 @@ fun AdminUpdateAndQualityTab(
                             downloadUrlText = it
                             copiedLinkHint = false
                         },
-                        label = { Text("APK Download Link (https://...)") },
+                        label = { Text("APK Download Link (Drive / GitHub / Direct https://...)") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -448,38 +464,109 @@ fun AdminUpdateAndQualityTab(
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("admin_update_url")
                     )
+                    Surface(
+                        color = Color(0xFF0E2920),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "တိုက်ရိုက် Download Link (Auto-Direct):",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = resolvedDirectUrl,
+                                color = Color(0xFFD7EAE1),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (canNormalizeUrl) {
+                                TextButton(
+                                    onClick = { downloadUrlText = resolvedDirectUrl },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Default.Link, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Direct Link အဖြစ် Box ထဲပြောင်းထည့်မည်", color = Color(0xFF34D399))
+                                }
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
                             onClick = {
-                                val target = downloadUrlText.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
-                                clipboard.setText(AnnotatedString(target))
+                                clipboard.setText(AnnotatedString(resolvedDirectUrl))
                                 copiedLinkHint = true
                             },
                             modifier = Modifier.weight(1f).testTag("copy_apk_update_link_button")
                         ) {
                             Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (copiedLinkHint) "ကူးယူပြီးပါပြီ" else "Link ကူးမည်", color = ChampionshipGold, maxLines = 1)
+                            Text(if (copiedLinkHint) "ကူးယူပြီးပါပြီ" else "Direct Link ကူးမည်", color = ChampionshipGold, maxLines = 1)
                         }
                         OutlinedButton(
                             onClick = {
-                                val target = downloadUrlText.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
-                                val msg = "လိုတရ APK Update ($versionNameText)\nDownload Link: $target"
+                                val msg = ApkDownloadHelper.buildApkShareText(
+                                    appName = "လိုတရ",
+                                    rawUrl = resolvedDirectUrl,
+                                    versionLabel = versionNameText
+                                )
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "လိုတရ APK Update")
+                                    putExtra(Intent.EXTRA_SUBJECT, "လိုတရ APK Direct Download")
                                     putExtra(Intent.EXTRA_TEXT, msg)
                                 }
-                                context.startActivity(Intent.createChooser(shareIntent, "APK Update Link မျှဝေမည်"))
+                                context.startActivity(Intent.createChooser(shareIntent, "Direct APK Link မျှဝေမည်"))
                             },
                             modifier = Modifier.weight(1f).testTag("share_apk_update_link_button")
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Customer ထံပို့မည်", color = Color(0xFF34D399), maxLines = 1)
+                            Text("Direct Link ရှယ်မည်", color = Color(0xFF34D399), maxLines = 1)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                ApkDownloadHelper.enqueueSystemDownload(
+                                    context = context,
+                                    rawUrl = resolvedDirectUrl,
+                                    title = "လိုတရ $versionNameText APK"
+                                ).onSuccess {
+                                    Toast.makeText(context, "Downloads ဖိုင်တွဲသို့ APK တိုက်ရိုက်ဆွဲနေပါပြီ", Toast.LENGTH_SHORT).show()
+                                }.onFailure { err ->
+                                    Toast.makeText(context, err.localizedMessage ?: "Download စမ်းသပ်၍မရပါ", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f).testTag("admin_test_direct_download_button")
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("တိုက်ရိုက်ဒေါင်းစမ်းမည်", color = Color.White, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    ApkDownloadHelper.shareInstalledApkFile(context, "လိုတရ")
+                                        .onFailure { err ->
+                                            Toast.makeText(context, err.localizedMessage ?: "APK ဖိုင်ရှယ်၍မရပါ", Toast.LENGTH_LONG).show()
+                                        }
+                                }
+                            },
+                            modifier = Modifier.weight(1f).testTag("admin_share_apk_file_button")
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("APK ဖိုင်တိုက်ရိုက်ပို့မည်", color = ChampionshipGold, maxLines = 1)
                         }
                     }
                     OutlinedTextField(
@@ -504,7 +591,7 @@ fun AdminUpdateAndQualityTab(
                     Button(
                         onClick = {
                             val code = (versionCodeText.toIntOrNull() ?: (BuildConfig.VERSION_CODE + 1)).coerceAtLeast(1)
-                            onSaveAppUpdateConfig(code, versionNameText, downloadUrlText, releaseNotesText, forceUpdate)
+                            onSaveAppUpdateConfig(code, versionNameText, resolvedDirectUrl, releaseNotesText, forceUpdate)
                         },
                         enabled = !busy,
                         colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),

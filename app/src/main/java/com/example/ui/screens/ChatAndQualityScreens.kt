@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,7 +34,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.SupportAgent
@@ -64,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +78,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.network.ApkDownloadHelper
+import kotlinx.coroutines.launch
+import java.io.File
 import com.example.data.model.AppQualityReview
 import com.example.data.model.AvailableApkUpdate
 import com.example.data.model.BrandingConfig
@@ -167,8 +174,32 @@ fun ApkUpdatePromptDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val directUrl = remember(update.downloadUrl) {
+        ApkDownloadHelper.toDirectDownloadUrl(update.downloadUrl)
+    }
+    var downloading by remember { mutableStateOf(false) }
+    var progressPct by remember { mutableIntStateOf(0) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
+    var downloadedApk by remember { mutableStateOf<File?>(null) }
+
+    fun triggerInstall(file: File) {
+        ApkDownloadHelper.installApkFile(context, file)
+            .onSuccess { launched ->
+                statusMsg = if (launched) {
+                    "APK ဖိုင်ကို Install စတင်ဖွင့်လိုက်ပါပြီ။"
+                } else {
+                    "Unknown Apps ခွင့်ပြုချက်ဖွင့်ပြီးပါက 'APK ဖွင့်၍ Install မည်' ကို ထပ်နှိပ်ပါ။"
+                }
+            }
+            .onFailure { err ->
+                errorMsg = err.localizedMessage ?: "APK Install ဖွင့်၍မရပါ"
+            }
+    }
+
     AlertDialog(
-        onDismissRequest = { if (!update.forceUpdate) onDismiss() },
+        onDismissRequest = { if (!update.forceUpdate && !downloading) onDismiss() },
         icon = {
             Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(32.dp))
         },
@@ -186,33 +217,159 @@ fun ApkUpdatePromptDialog(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "အရင်းအမြစ်: ${update.source}\nတိုက်ရိုက်ဒေါင်းလုဒ်လင့်: $directUrl",
+                            color = PitchEmeraldDark,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (downloading) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (progressPct > 0) {
+                            LinearProgressIndicator(
+                                progress = { progressPct / 100f },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                text = "APK တိုက်ရိုက်ဒေါင်းလုဒ်ဆွဲနေပါသည်... $progressPct%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = PitchEmeraldDark,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            Text(
+                                text = "APK ဖိုင်ကို စတင်ဆွဲယူနေပါသည်...",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = PitchEmeraldDark
+                            )
+                        }
+                    }
+                }
+                if (statusMsg != null) {
                     Text(
-                        text = "အရင်းအမြစ်: ${update.source}\nDownload ပြီးပါက APK ဖိုင်ကို ဖွင့်၍ Install လုပ်ပါ။",
-                        color = PitchEmeraldDark,
+                        text = statusMsg!!,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(10.dp)
+                        color = PitchEmeraldDark,
+                        fontWeight = FontWeight.SemiBold
                     )
+                }
+                if (errorMsg != null) {
+                    Text(
+                        text = errorMsg!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFB91C1C),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            ApkDownloadHelper.enqueueSystemDownload(
+                                context = context,
+                                rawUrl = directUrl,
+                                title = "လိုတရ ${update.versionLabel}"
+                            ).onSuccess {
+                                statusMsg = "Download Manager ဖြင့် Downloads ဖိုင်တွဲသို့ တိုက်ရိုက်ဆွဲနေပါပြီ။"
+                                errorMsg = null
+                            }.onFailure { err ->
+                                errorMsg = err.localizedMessage ?: "DownloadManager မအောင်မြင်ပါ"
+                            }
+                        },
+                        modifier = Modifier.weight(1f).testTag("system_apk_download_button")
+                    ) {
+                        Text("Downloads ဖိုင်တွဲဆွဲ", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val shareText = ApkDownloadHelper.buildApkShareText(
+                                appName = "လိုတရ",
+                                rawUrl = directUrl,
+                                versionLabel = update.versionLabel
+                            )
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "လိုတရ APK Direct Download")
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Direct APK Link မျှဝေမည်"))
+                        },
+                        modifier = Modifier.weight(1f).testTag("share_apk_direct_link_button")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Link ရှယ်မည်", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl))
-                    context.startActivity(intent)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
-                modifier = Modifier.testTag("confirm_apk_update_download_button")
-            ) {
-                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Update Download လုပ်မည်")
+            val readyFile = downloadedApk
+            if (readyFile != null && readyFile.exists()) {
+                Button(
+                    onClick = { triggerInstall(readyFile) },
+                    colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                    modifier = Modifier.testTag("install_downloaded_apk_button")
+                ) {
+                    Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("APK ဖွင့်၍ Install မည်")
+                }
+            } else {
+                Button(
+                    enabled = !downloading,
+                    onClick = {
+                        downloading = true
+                        progressPct = 0
+                        errorMsg = null
+                        statusMsg = null
+                        scope.launch {
+                            ApkDownloadHelper.downloadApkToCache(
+                                context = context,
+                                rawUrl = directUrl,
+                                onProgress = { pct -> progressPct = pct }
+                            ).onSuccess { file ->
+                                downloading = false
+                                downloadedApk = file
+                                triggerInstall(file)
+                            }.onFailure { err ->
+                                downloading = false
+                                errorMsg = err.localizedMessage ?: "APK တိုက်ရိုက်ဒေါင်း၍မရပါ"
+                                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                    modifier = Modifier.testTag("confirm_apk_update_download_button")
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (downloading) "ဒေါင်းနေသည်..." else "တိုက်ရိုက် Download & Install")
+                }
             }
         },
         dismissButton = {
-            if (!update.forceUpdate) {
-                TextButton(onClick = onDismiss) {
-                    Text("နောက်မှ")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(directUrl)))
+                        }
+                    }
+                ) {
+                    Text("Browser")
+                }
+                if (!update.forceUpdate && !downloading) {
+                    TextButton(onClick = onDismiss) {
+                        Text("နောက်မှ")
+                    }
                 }
             }
         }

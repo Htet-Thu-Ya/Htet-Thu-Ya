@@ -506,6 +506,9 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             brandingConfig = brandingConfig,
                             appLanguage = appLanguage,
                             availableApkUpdate = availableApkUpdate,
+                            apkDownloadUrl = availableApkUpdate?.downloadUrl
+                                ?: appUpdateConfig?.downloadUrl
+                                ?: com.example.data.model.AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
                             onOpenUpdateDialog = { manualOpenUpdateDialog = true },
                             onNavigate = { route -> navController.navigate(route.name) },
                             onSwitchToAdmin = { vm.setAdminMode(true) },

@@ -270,14 +270,16 @@ class MainViewModel(
             fsNewer && fsCfg != null -> AvailableApkUpdate(
                 versionLabel = "v${fsCfg.latestVersionName} (Build ${fsCfg.latestVersionCode})",
                 releaseNotes = fsCfg.releaseNotes.ifBlank { "ဗားရှင်းအသစ် ထွက်ရှိနေပါပြီ။ အောက်ပါခလုတ်မှ Download ရယူ Update လုပ်ပါ။" },
-                downloadUrl = fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL },
+                downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(
+                    fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+                ),
                 forceUpdate = fsCfg.forceUpdate,
                 source = "Admin Push"
             )
             ghNewer && ghRel != null -> AvailableApkUpdate(
                 versionLabel = "Latest Release (${ghRel.tagName})",
                 releaseNotes = ghRel.releaseNotes.ifBlank { "GitHub တွင် APK ဗားရှင်းအသစ် တင်ထားပြီးဖြစ်ပါသည်။ Update ရယူနိုင်ပါပြီ။" },
-                downloadUrl = ghRel.downloadUrl,
+                downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(ghRel.downloadUrl),
                 forceUpdate = false,
                 source = "GitHub Auto"
             )

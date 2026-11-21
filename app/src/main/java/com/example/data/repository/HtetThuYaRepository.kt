@@ -3142,7 +3142,10 @@ class HtetThuYaRepository(
         val path = "app_settings/app_update"
         return try {
             val adminUid = requireUserId()
-            val safeUrl = downloadUrl.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }.take(300)
+            val normalizedUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(
+                downloadUrl.trim().ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+            )
+            val safeUrl = normalizedUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }.take(300)
             require(safeUrl.startsWith("https://")) { "Download URL သည် https:// ဖြင့် စတင်ရပါမည်" }
             val safeName = latestVersionName.trim().ifBlank { "2.0" }.take(30)
             val safeCode = latestVersionCode.coerceIn(1, 1_000_000)
