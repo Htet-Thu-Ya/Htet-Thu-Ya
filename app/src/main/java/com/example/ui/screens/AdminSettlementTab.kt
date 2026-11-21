@@ -79,6 +79,7 @@ fun AdminSettlementTab(
     orders: List<BetOrder>,
     usersById: Map<String, UserAccount>,
     busy: Boolean,
+    isOwnerAdmin: Boolean = true,
     onAutoSettleAll: () -> Unit,
     onAutoSettleCustomer: (userId: String, customerName: String) -> Unit,
     onInspectCustomer: (String) -> Unit,
@@ -87,15 +88,34 @@ fun AdminSettlementTab(
     onRequestSettleWin: (BetOrder) -> Unit,
     onSettleLoss: (BetOrder) -> Unit,
     onRejectOrder: (BetOrder) -> Unit,
-    onDeleteOrder: (String) -> Unit
+    onDeleteOrder: (String) -> Unit,
+    onToggleHideOrder: (BetOrder) -> Unit = {},
+    onEditOrder: (
+        orderId: String,
+        selections: List<String>,
+        drawRound: String,
+        stakeKs: Long,
+        multiplier: Double,
+        actualPayoutKs: Long,
+        status: String,
+        adminNote: String
+    ) -> Unit = { _, _, _, _, _, _, _, _ -> }
 ) {
     var range by remember { mutableStateOf(SettlementRange.TODAY) }
     var searchQuery by remember { mutableStateOf("") }
     var showSummaryCard by remember { mutableStateOf(true) }
+    var showHiddenOrders by remember { mutableStateOf(false) }
+    var editingOrder by remember { mutableStateOf<BetOrder?>(null) }
+    var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
     val expandedCustomers = remember { mutableStateMapOf<String, Boolean>() }
 
-    val report = remember(orders, usersById, range) {
-        SettlementCalculator.buildReport(orders, usersById, range)
+    val hiddenCount = remember(orders) { orders.count { it.isHidden } }
+    val visibleOrders = remember(orders, showHiddenOrders) {
+        if (showHiddenOrders) orders else orders.filter { !it.isHidden }
+    }
+
+    val report = remember(visibleOrders, usersById, range) {
+        SettlementCalculator.buildReport(visibleOrders, usersById, range)
     }
 
     val filteredCustomers = remember(report.customerSummaries, searchQuery) {
@@ -124,6 +144,14 @@ fun AdminSettlementTab(
                         onClick = { range = option },
                         label = { Text(option.label) },
                         modifier = Modifier.testTag("settlement_range_${option.name.lowercase()}")
+                    )
+                }
+                if (hiddenCount > 0 || showHiddenOrders) {
+                    FilterChip(
+                        selected = showHiddenOrders,
+                        onClick = { showHiddenOrders = !showHiddenOrders },
+                        label = { Text(if (showHiddenOrders) "Hidden ပြထား ($hiddenCount)" else "Hidden ကြည့် ($hiddenCount)") },
+                        modifier = Modifier.testTag("settlement_show_hidden_chip")
                     )
                 }
             }
@@ -494,12 +522,15 @@ fun AdminSettlementTab(
                                     order = order,
                                     isAdminView = true,
                                     busy = busy,
+                                    canDeleteAnyOrder = isOwnerAdmin,
                                     onAccept = onAcceptOrder,
                                     onAutoSettleOrder = onAutoSettleOrder,
                                     onSettleWin = onRequestSettleWin,
                                     onSettleLoss = onSettleLoss,
                                     onReject = onRejectOrder,
-                                    onDeleteOrder = { onDeleteOrder(it.id) }
+                                    onToggleHideOrder = onToggleHideOrder,
+                                    onEditOrder = if (isOwnerAdmin) ({ editingOrder = it }) else null,
+                                    onDeleteOrder = { deletingOrder = it }
                                 )
                             }
                         }
@@ -507,5 +538,30 @@ fun AdminSettlementTab(
                 }
             }
         }
+    }
+
+    editingOrder?.let { target ->
+        EditOrderDialog(
+            order = target,
+            onDismiss = { editingOrder = null },
+            onSave = { sels, round, stake, mult, actual, status, note ->
+                val id = target.id
+                editingOrder = null
+                onEditOrder(id, sels, round, stake, mult, actual, status, note)
+            }
+        )
+    }
+
+    deletingOrder?.let { target ->
+        ConfirmDeleteDialog(
+            title = "အော်ဒါမှတ်တမ်း ဖျက်မည်လား?",
+            message = "${target.customerName} (${formatKs(target.stakeKs)}) အော်ဒါမှတ်တမ်းကို ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingOrder = null },
+            onConfirm = {
+                val id = target.id
+                deletingOrder = null
+                onDeleteOrder(id)
+            }
+        )
     }
 }

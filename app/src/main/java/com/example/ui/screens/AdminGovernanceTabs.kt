@@ -72,13 +72,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.AdminPermissions
 import com.example.data.model.AuditLogEntry
 import com.example.data.model.BetOrder
+import com.example.data.model.LedgerTransaction
 import com.example.data.model.PaymentAccount
 import com.example.data.model.SecurityConfig
+import com.example.data.model.SupportAgentProfile
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletRequest
@@ -86,6 +90,8 @@ import com.example.ui.components.StatusBadge
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.AdminCrimson
+import com.example.ui.theme.AmberPending
+import com.example.ui.theme.AmberPendingSoft
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.InkDark
@@ -94,32 +100,78 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PitchEmeraldDark
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminFinancialOverviewTab(
     users: List<UserAccount>,
     orders: List<BetOrder>,
     walletRequests: List<WalletRequest>,
+    transactions: List<LedgerTransaction> = emptyList(),
     paymentAccounts: List<PaymentAccount>,
+    isOwnerAdmin: Boolean = true,
     busy: Boolean,
     onSavePaymentAccount: (id: String?, providerName: String, accountName: String, accountNumber: String, note: String, active: Boolean) -> Unit,
-    onDeletePaymentAccount: (String) -> Unit
+    onDeletePaymentAccount: (String) -> Unit,
+    onEditWalletRequest: (
+        reqId: String,
+        amountKs: Long,
+        netAmountKs: Long,
+        channel: String,
+        referenceNote: String,
+        status: String,
+        adminNote: String,
+        isHidden: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _ -> },
+    onDeleteWalletRequest: (String) -> Unit = {},
+    onEditTransaction: (
+        txId: String,
+        title: String,
+        amountKs: Long,
+        direction: String,
+        isHidden: Boolean
+    ) -> Unit = { _, _, _, _, _ -> },
+    onDeleteTransaction: (String) -> Unit = {}
 ) {
     var editingAccount by remember { mutableStateOf<PaymentAccount?>(null) }
     var showCreateAccountDialog by remember { mutableStateOf(false) }
+    var showSummaryCard by remember { mutableStateOf(true) }
+    var showLedgerManager by remember { mutableStateOf(true) }
+    var showHiddenItems by remember { mutableStateOf(false) }
+    var ledgerSubTab by remember { mutableStateOf("requests") } // "requests" or "ledger"
 
-    val totalTopups = remember(walletRequests) {
-        walletRequests.filter { it.requestType == "topup" && it.status == "approved" }.sumOf { it.amountKs }
+    var editingWalletReq by remember { mutableStateOf<WalletRequest?>(null) }
+    var deletingWalletReq by remember { mutableStateOf<WalletRequest?>(null) }
+    var editingTx by remember { mutableStateOf<LedgerTransaction?>(null) }
+    var deletingTx by remember { mutableStateOf<LedgerTransaction?>(null) }
+
+    val usersById = remember(users) { users.associateBy { it.userId } }
+
+    val visibleRequests = remember(walletRequests, showHiddenItems) {
+        if (showHiddenItems) walletRequests else walletRequests.filter { !it.isHidden }
     }
-    val totalWithdrawals = remember(walletRequests) {
-        walletRequests.filter { it.requestType == "withdraw" && it.status == "approved" }.sumOf { it.amountKs }
+    val visibleTransactions = remember(transactions, showHiddenItems) {
+        if (showHiddenItems) transactions else transactions.filter { !it.isHidden }
+    }
+    val hiddenFinanceCount = remember(walletRequests, transactions) {
+        walletRequests.count { it.isHidden } + transactions.count { it.isHidden }
+    }
+
+    val nonHiddenOrders = remember(orders) { orders.filter { !it.isHidden } }
+    val nonHiddenReqs = remember(walletRequests) { walletRequests.filter { !it.isHidden } }
+
+    val totalTopups = remember(nonHiddenReqs) {
+        nonHiddenReqs.filter { it.requestType == "topup" && it.status == "approved" }.sumOf { it.amountKs }
+    }
+    val totalWithdrawals = remember(nonHiddenReqs) {
+        nonHiddenReqs.filter { it.requestType == "withdraw" && it.status == "approved" }.sumOf { it.amountKs }
     }
     val awaitingDualCount = remember(walletRequests) {
         walletRequests.count { it.status == "awaiting_main_approval" }
     }
-    val totalStake = remember(orders) { orders.filter { it.status != "rejected" }.sumOf { it.stakeKs } }
-    val totalWonPayout = remember(orders) { orders.filter { it.status == "won" }.sumOf { it.actualPayoutKs } }
-    val totalLostStake = remember(orders) { orders.filter { it.status == "lost" }.sumOf { it.stakeKs } }
-    val totalCommission = remember(orders) { orders.filter { it.status == "won" }.sumOf { it.commissionKs } }
+    val totalStake = remember(nonHiddenOrders) { nonHiddenOrders.filter { it.status != "rejected" }.sumOf { it.stakeKs } }
+    val totalWonPayout = remember(nonHiddenOrders) { nonHiddenOrders.filter { it.status == "won" }.sumOf { it.actualPayoutKs } }
+    val totalLostStake = remember(nonHiddenOrders) { nonHiddenOrders.filter { it.status == "lost" }.sumOf { it.stakeKs } }
+    val totalCommission = remember(nonHiddenOrders) { nonHiddenOrders.filter { it.status == "won" }.sumOf { it.commissionKs } }
     val houseNetProfit = totalLostStake - totalWonPayout + totalCommission
     val totalUserBalances = remember(users) { users.sumOf { it.balanceKs } }
 
@@ -136,43 +188,77 @@ fun AdminFinancialOverviewTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "ဘဏ္ဍာရေးနှင့် ငွေစာရင်း အပြည့်အစုံ",
-                        color = ChampionshipGold,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSummaryCard = !showSummaryCard }
+                            .testTag("toggle_finance_overview_card"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("စုစုပေါင်း ငွေသွင်း", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
-                            Text(formatKs(totalTopups), color = Color(0xFF6EE7B7), fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                        }
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            Text("စုစုပေါင်း ငွေထုတ်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
-                            Text(formatKs(totalWithdrawals), color = Color(0xFFFCA5A5), fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("စုစုပေါင်း ကော်မရှင်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
-                            Text(formatKs(totalCommission), color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                        }
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            Text("Admin အမြတ်/အရှုံး", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
                             Text(
-                                text = (if (houseNetProfit >= 0) "+" else "-") + formatKs(kotlin.math.abs(houseNetProfit)),
-                                color = if (houseNetProfit >= 0) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
-                                fontFamily = JetBrainsMonoFontFamily,
+                                "ဘဏ္ဍာရေးနှင့် ငွေစာရင်း အပြည့်အစုံ",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
+                            )
+                            if (!showSummaryCard) {
+                                Text(
+                                    text = "အမြတ်: ${(if (houseNetProfit >= 0) "+" else "-") + formatKs(kotlin.math.abs(houseNetProfit))} • လက်ကျန်စုစုပေါင်း: ${formatKs(totalUserBalances)}",
+                                    color = Color(0xFFB4C8BE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (showSummaryCard) "ဝှက်မည်" else "ပြမည်",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Icon(
+                                imageVector = if (showSummaryCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle financial overview",
+                                tint = ChampionshipGold
                             )
                         }
                     }
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Customer လက်ကျန်စုစုပေါင်း: ${formatKs(totalUserBalances)}", color = Color.White, style = MaterialTheme.typography.bodySmall)
-                        Text("Dual Pending: $awaitingDualCount", color = ChampionshipGold, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+
+                    if (showSummaryCard) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("စုစုပေါင်း ငွေသွင်း", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(formatKs(totalTopups), color = Color(0xFF6EE7B7), fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Text("စုစုပေါင်း ငွေထုတ်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(formatKs(totalWithdrawals), color = Color(0xFFFCA5A5), fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("စုစုပေါင်း ကော်မရှင်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(formatKs(totalCommission), color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Text("Admin အမြတ်/အရှုံး", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = (if (houseNetProfit >= 0) "+" else "-") + formatKs(kotlin.math.abs(houseNetProfit)),
+                                    color = if (houseNetProfit >= 0) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Customer လက်ကျန်စုစုပေါင်း: ${formatKs(totalUserBalances)}", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                            Text("Dual Pending: $awaitingDualCount", color = ChampionshipGold, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                        Text("Total Valid Betting Volume: ${formatKs(totalStake)}", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("Total Valid Betting Volume: ${formatKs(totalStake)}", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -223,6 +309,14 @@ fun AdminFinancialOverviewTab(
                                 StatusBadge(if (acc.active) "active" else "suspended")
                             }
                             Text(acc.accountNumber, color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            Surface(color = Color(0xFFE6F4EE), shape = RoundedCornerShape(6.dp)) {
+                                Text(
+                                    text = if (acc.ownerAdminName.isNotBlank()) "Admin: ${acc.ownerAdminName}" else "Main Admin",
+                                    color = PitchEmeraldDark,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                             if (acc.note.isNotBlank()) {
                                 Text(acc.note, color = InkMuted, style = MaterialTheme.typography.bodySmall)
                             }
@@ -233,6 +327,172 @@ fun AdminFinancialOverviewTab(
                             }
                             IconButton(onClick = { onDeletePaymentAccount(acc.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete Account", tint = AdminCrimson)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Wallet Requests & Ledger Transactions Manager (Hide / Edit / Delete)
+        item {
+            HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showLedgerManager = !showLedgerManager }
+                    .testTag("toggle_finance_ledger_manager"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ငွေစာရင်း မှတ်တမ်းများ (Edit / Hide / Delete)",
+                    color = ChampionshipGold,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = if (showLedgerManager) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = "Toggle ledger manager",
+                    tint = ChampionshipGold
+                )
+            }
+        }
+
+        if (showLedgerManager) {
+            item {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FilterChip(
+                        selected = ledgerSubTab == "requests",
+                        onClick = { ledgerSubTab = "requests" },
+                        label = { Text("ငွေသွင်း/ထုတ် (${visibleRequests.size})") }
+                    )
+                    if (isOwnerAdmin) {
+                        FilterChip(
+                            selected = ledgerSubTab == "ledger",
+                            onClick = { ledgerSubTab = "ledger" },
+                            label = { Text("Ledger မှတ်တမ်း (${visibleTransactions.size})") }
+                        )
+                    }
+                    if (hiddenFinanceCount > 0 || showHiddenItems) {
+                        FilterChip(
+                            selected = showHiddenItems,
+                            onClick = { showHiddenItems = !showHiddenItems },
+                            label = { Text(if (showHiddenItems) "Hidden ပြထား ($hiddenFinanceCount)" else "Hidden ကြည့် ($hiddenFinanceCount)") },
+                            modifier = Modifier.testTag("finance_show_hidden_chip")
+                        )
+                    }
+                }
+            }
+
+            if (ledgerSubTab == "requests") {
+                if (visibleRequests.isEmpty()) {
+                    item {
+                        Text("ငွေသွင်း/ထုတ် မှတ်တမ်း မရှိသေးပါ", color = Color(0xFFB4C8BE))
+                    }
+                } else {
+                    items(visibleRequests, key = { "wr_${it.id}" }) { req ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = if (req.isHidden) Color(0xFFE5E7EB) else PearlCard),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "${req.customerName} • ${if (req.requestType == "topup") "ငွေသွင်း" else "ငွေထုတ်"}",
+                                        color = InkDark,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (req.isHidden) {
+                                            Surface(color = AmberPendingSoft, shape = RoundedCornerShape(6.dp)) {
+                                                Text("HIDDEN", color = AmberPending, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                            }
+                                        }
+                                        StatusBadge(req.status)
+                                        IconButton(onClick = {
+                                            onEditWalletRequest(req.id, req.amountKs, req.netAmountKs, req.channel, req.referenceNote, req.status, req.adminNote, !req.isHidden)
+                                        }) {
+                                            Icon(if (req.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = "Toggle Hide Wallet Request", tint = InkMuted)
+                                        }
+                                        if (isOwnerAdmin) {
+                                            IconButton(onClick = { editingWalletReq = req }) {
+                                                Icon(Icons.Default.Edit, contentDescription = "Edit Wallet Request", tint = PitchEmeraldDark)
+                                            }
+                                            IconButton(onClick = { deletingWalletReq = req }) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Wallet Request", tint = AdminCrimson)
+                                            }
+                                        }
+                                    }
+                                }
+                                Text("${formatKs(req.amountKs)} (Net: ${formatKs(req.netAmountKs)}) • ${req.channel}", color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                                Text("Ref: ${req.referenceNote} • ${formatTimestamp(req.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (visibleTransactions.isEmpty()) {
+                    item {
+                        Text("Ledger ငွေစာရင်း မှတ်တမ်း မရှိသေးပါ", color = Color(0xFFB4C8BE))
+                    }
+                } else {
+                    items(visibleTransactions.take(60), key = { "tx_${it.id}" }) { tx ->
+                        val custName = usersById[tx.userId]?.displayName?.ifBlank { null } ?: tx.userId.take(8)
+                        val isCredit = tx.direction == "credit"
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = if (tx.isHidden) Color(0xFFE5E7EB) else PearlCard),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(tx.title, color = InkDark, fontWeight = FontWeight.Bold)
+                                        if (tx.isHidden) {
+                                            Surface(color = AmberPendingSoft, shape = RoundedCornerShape(6.dp)) {
+                                                Text("HIDDEN", color = AmberPending, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                            }
+                                        }
+                                    }
+                                    Text("$custName • ${formatTimestamp(tx.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                    Text(
+                                        text = "${if (isCredit) "+" else "-"}${formatKs(tx.amountKs)} (Bal: ${formatKs(tx.balanceAfterKs)})",
+                                        color = if (isCredit) PitchEmeraldDark else AdminCrimson,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Row {
+                                    IconButton(onClick = {
+                                        onEditTransaction(tx.id, tx.title, tx.amountKs, tx.direction, !tx.isHidden)
+                                    }) {
+                                        Icon(if (tx.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = "Toggle Hide Transaction", tint = InkMuted)
+                                    }
+                                    if (isOwnerAdmin) {
+                                        IconButton(onClick = { editingTx = tx }) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit Transaction", tint = PitchEmeraldDark)
+                                        }
+                                        IconButton(onClick = { deletingTx = tx }) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete Transaction", tint = AdminCrimson)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -259,6 +519,56 @@ fun AdminFinancialOverviewTab(
             onSave = { provider, name, number, note, active ->
                 editingAccount = null
                 onSavePaymentAccount(acc.id, provider, name, number, note, active)
+            }
+        )
+    }
+
+    editingWalletReq?.let { req ->
+        EditWalletRequestDialog(
+            req = req,
+            onDismiss = { editingWalletReq = null },
+            onSave = { amt, net, ch, ref, st, note, hid ->
+                val id = req.id
+                editingWalletReq = null
+                onEditWalletRequest(id, amt, net, ch, ref, st, note, hid)
+            }
+        )
+    }
+
+    deletingWalletReq?.let { req ->
+        ConfirmDeleteDialog(
+            title = "ငွေသွင်း/ထုတ် မှတ်တမ်း ဖျက်မည်လား?",
+            message = "${req.customerName} (${formatKs(req.amountKs)}) မှတ်တမ်းကို ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingWalletReq = null },
+            onConfirm = {
+                val id = req.id
+                deletingWalletReq = null
+                onDeleteWalletRequest(id)
+            }
+        )
+    }
+
+    editingTx?.let { tx ->
+        EditLedgerTransactionDialog(
+            tx = tx,
+            onDismiss = { editingTx = null },
+            onSave = { title, amt, dir, hid ->
+                val id = tx.id
+                editingTx = null
+                onEditTransaction(id, title, amt, dir, hid)
+            }
+        )
+    }
+
+    deletingTx?.let { tx ->
+        ConfirmDeleteDialog(
+            title = "ငွေစာရင်း မှတ်တမ်း ဖျက်မည်လား?",
+            message = "${tx.title} (${formatKs(tx.amountKs)}) မှတ်တမ်းကို ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingTx = null },
+            onConfirm = {
+                val id = tx.id
+                deletingTx = null
+                onDeleteTransaction(id)
             }
         )
     }
@@ -311,8 +621,19 @@ fun AdminSubAdminsTab(
     currentUserId: String,
     admins: List<AdminMember>,
     invites: List<AdminInvite>,
+    supportAgents: List<SupportAgentProfile> = emptyList(),
     onCreateInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
     onToggleInvite: (String, Boolean) -> Unit,
+    onEditInvite: (
+        oldCode: String,
+        newCode: String,
+        label: String,
+        active: Boolean,
+        assignedEmail: String,
+        newPin: String?,
+        permissions: AdminPermissions
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
+    onDeleteInvite: (String) -> Unit = {},
     onUpdateAdminPermissions: (String, String, AdminPermissions) -> Unit,
     onSetAdminStatus: (String, String, Boolean) -> Unit,
     onResetAdminPin: (String, String, String) -> Unit,
@@ -328,6 +649,10 @@ fun AdminSubAdminsTab(
 
     var editingPermissionsMember by remember { mutableStateOf<AdminMember?>(null) }
     var resettingPinMember by remember { mutableStateOf<AdminMember?>(null) }
+    var editingInvite by remember { mutableStateOf<AdminInvite?>(null) }
+    var deletingInvite by remember { mutableStateOf<AdminInvite?>(null) }
+
+    val agentsByUid = remember(supportAgents) { supportAgents.associateBy { it.adminUid } }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
@@ -479,6 +804,18 @@ fun AdminSubAdminsTab(
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = "Share Invite Code", tint = PitchEmeraldDark)
                             }
+                            IconButton(
+                                onClick = { editingInvite = inv },
+                                modifier = Modifier.testTag("edit_invite_${inv.code}")
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit Invite Code", tint = PitchEmeraldDark)
+                            }
+                            IconButton(
+                                onClick = { deletingInvite = inv },
+                                modifier = Modifier.testTag("delete_invite_${inv.code}")
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Invite Code", tint = AdminCrimson)
+                            }
                             Switch(checked = inv.active, onCheckedChange = { onToggleInvite(inv.code, it) })
                         }
                     }
@@ -492,6 +829,7 @@ fun AdminSubAdminsTab(
         items(admins, key = { it.userId }) { member ->
             val perms = member.resolvedPermissions(member.role == "owner")
             val isSuspended = member.status == "suspended"
+            val agent = agentsByUid[member.userId]
             Card(colors = CardDefaults.cardColors(containerColor = PearlCard), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
@@ -506,6 +844,14 @@ fun AdminSubAdminsTab(
                                 color = InkMuted,
                                 style = MaterialTheme.typography.bodySmall
                             )
+                            if (agent != null && (agent.phone.isNotBlank() || agent.messagingHandle.isNotBlank() || agent.paymentSummary.isNotBlank())) {
+                                val contactLine = listOfNotNull(
+                                    agent.phone.takeIf { it.isNotBlank() }?.let { "Ph: $it" },
+                                    agent.messagingHandle.takeIf { it.isNotBlank() },
+                                    agent.paymentSummary.takeIf { it.isNotBlank() }
+                                ).joinToString(" • ")
+                                Text(contactLine, color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                         StatusBadge(if (member.role == "owner") "active" else member.status)
                     }
@@ -622,6 +968,30 @@ fun AdminSubAdminsTab(
             }
         )
     }
+
+    editingInvite?.let { inv ->
+        EditAdminInviteDialog(
+            invite = inv,
+            onDismiss = { editingInvite = null },
+            onSave = { oldCode, newCode, label, active, email, newPin, perms ->
+                editingInvite = null
+                onEditInvite(oldCode, newCode, label, active, email, newPin, perms)
+            }
+        )
+    }
+
+    deletingInvite?.let { inv ->
+        ConfirmDeleteDialog(
+            title = "Second Admin Invite Code ဖျက်မည်လား?",
+            message = "${inv.code} (${inv.label}) ကို အပြီးတိုင် ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingInvite = null },
+            onConfirm = {
+                val c = inv.code
+                deletingInvite = null
+                onDeleteInvite(c)
+            }
+        )
+    }
 }
 
 @Composable
@@ -672,6 +1042,8 @@ fun AdminSystemSettingsTab(
     var promoText by remember { mutableStateOf(config.bonusPromoText) }
     var maintenanceMode by remember { mutableStateOf(config.maintenanceMode) }
     var maintenanceMsg by remember { mutableStateOf(config.maintenanceMessage) }
+    var hideTwoD by remember { mutableStateOf(config.hideTwoD) }
+    var hideThreeD by remember { mutableStateOf(config.hideThreeD) }
 
     LaunchedEffect(config) {
         enabledGames = config.enabledGames
@@ -685,6 +1057,8 @@ fun AdminSystemSettingsTab(
         promoText = config.bonusPromoText
         maintenanceMode = config.maintenanceMode
         maintenanceMsg = config.maintenanceMessage
+        hideTwoD = config.hideTwoD
+        hideThreeD = config.hideThreeD
     }
 
     LazyColumn(
@@ -834,6 +1208,32 @@ fun AdminSystemSettingsTab(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("၂လုံးထီ (2D) ကို Customer Home မှ ဝှက်ထားမည်", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("ဖွင့်ထားပါက Customer မျက်နှာပြင်တွင် 2D ခလုတ် မမြင်ရပါ", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = hideTwoD, onCheckedChange = { hideTwoD = it }, modifier = Modifier.testTag("hide_twod_switch"))
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("၃လုံးထီ (3D) ကို Customer Home မှ ဝှက်ထားမည်", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("ဖွင့်ထားပါက Customer မျက်နှာပြင်တွင် 3D ခလုတ် မမြင်ရပါ", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = hideThreeD, onCheckedChange = { hideThreeD = it }, modifier = Modifier.testTag("hide_threed_switch"))
+                    }
+
                     Button(
                         onClick = {
                             onSaveSystemGameConfig(
@@ -848,7 +1248,9 @@ fun AdminSystemSettingsTab(
                                     sixAnimalsPayoutMultiplier = animalsMult.toDoubleOrNull() ?: 2.0,
                                     bonusPromoText = promoText.trim(),
                                     maintenanceMode = maintenanceMode,
-                                    maintenanceMessage = maintenanceMsg.trim()
+                                    maintenanceMessage = maintenanceMsg.trim(),
+                                    hideTwoD = hideTwoD,
+                                    hideThreeD = hideThreeD
                                 )
                             )
                         },
@@ -1044,9 +1446,13 @@ fun AdminSecurityControlsTab(
 @Composable
 fun AdminAuditLogsTab(
     logs: List<AuditLogEntry>,
-    isOwnerOrCanViewAll: Boolean
+    isOwnerOrCanViewAll: Boolean,
+    isOwnerAdmin: Boolean = false,
+    onDeleteAuditLog: (String) -> Unit = {},
+    onClearAllAuditLogs: (List<String>) -> Unit = {}
 ) {
     var categoryFilter by remember { mutableStateOf("all") }
+    var showClearAllConfirm by remember { mutableStateOf(false) }
 
     val filteredLogs = remember(logs, categoryFilter) {
         if (categoryFilter == "all") logs
@@ -1070,7 +1476,7 @@ fun AdminAuditLogsTab(
                         Icon(Icons.Default.History, contentDescription = null, tint = ChampionshipGold)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = if (isOwnerOrCanViewAll) "Audit Log (Admin အားလုံး မှတ်တမ်း - Immutable)"
+                            text = if (isOwnerOrCanViewAll) "Audit Log (Admin အားလုံး မှတ်တမ်း)"
                             else "မိမိ၏ လုပ်ဆောင်ချက် မှတ်တမ်း (Personal Log)",
                             color = ChampionshipGold,
                             style = MaterialTheme.typography.titleSmall,
@@ -1084,6 +1490,17 @@ fun AdminAuditLogsTab(
                                 onClick = { categoryFilter = cat },
                                 label = { Text(if (cat == "all") "All (${logs.size})" else cat) }
                             )
+                        }
+                    }
+                    if (isOwnerAdmin && logs.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { showClearAllConfirm = true },
+                            border = BorderStroke(1.dp, AdminCrimson.copy(alpha = 0.7f)),
+                            modifier = Modifier.fillMaxWidth().testTag("clear_all_audit_logs_button")
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Audit မှတ်တမ်းအားလုံး ရှင်းလင်းမည် (${logs.size})", color = AdminCrimson)
                         }
                     }
                 }
@@ -1108,13 +1525,23 @@ fun AdminAuditLogsTab(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(entry.action, color = InkDark, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Surface(color = Color(0xFFE2E8F0), shape = RoundedCornerShape(6.dp)) {
-                                Text(
-                                    text = entry.category,
-                                    color = InkDark,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(color = Color(0xFFE2E8F0), shape = RoundedCornerShape(6.dp)) {
+                                    Text(
+                                        text = entry.category,
+                                        color = InkDark,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                if (isOwnerAdmin) {
+                                    IconButton(
+                                        onClick = { onDeleteAuditLog(entry.id) },
+                                        modifier = Modifier.testTag("delete_audit_log_${entry.id}")
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Audit Log", tint = AdminCrimson)
+                                    }
+                                }
                             }
                         }
                         Text(
@@ -1134,5 +1561,18 @@ fun AdminAuditLogsTab(
                 }
             }
         }
+    }
+
+    if (showClearAllConfirm) {
+        ConfirmDeleteDialog(
+            title = "Audit မှတ်တမ်းအားလုံး ဖျက်မည်လား?",
+            message = "Audit မှတ်တမ်း ${logs.size} ခုလုံးကို အပြီးတိုင် ဖျက်ပစ်ပါမည်။",
+            onDismiss = { showClearAllConfirm = false },
+            onConfirm = {
+                val ids = logs.map { it.id }
+                showClearAllConfirm = false
+                onClearAllAuditLogs(ids)
+            }
+        )
     }
 }

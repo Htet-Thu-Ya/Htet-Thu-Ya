@@ -70,9 +70,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
 import com.example.data.betting.SettlementCalculator
+import com.example.data.model.AdminInvite
+import com.example.data.model.AdminPermissions
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
+import com.example.data.model.LedgerTransaction
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UserAccount
@@ -1110,4 +1115,428 @@ fun AdminCustomerDetailDialog(
         }
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun EditOrderDialog(
+    order: BetOrder,
+    onDismiss: () -> Unit,
+    onSave: (
+        selections: List<String>,
+        drawRound: String,
+        stakeKs: Long,
+        multiplier: Double,
+        actualPayoutKs: Long,
+        status: String,
+        adminNote: String
+    ) -> Unit
+) {
+    var selectionsText by remember(order.id) { mutableStateOf(order.selections.joinToString("\n")) }
+    var drawRound by remember(order.id) { mutableStateOf(order.drawRound) }
+    var stakeInput by remember(order.id) { mutableStateOf(order.stakeKs.toString()) }
+    var multInput by remember(order.id) { mutableStateOf(order.multiplier.toString()) }
+    var payoutInput by remember(order.id) { mutableStateOf(order.actualPayoutKs.toString()) }
+    var status by remember(order.id) { mutableStateOf(order.status) }
+    var adminNote by remember(order.id) { mutableStateOf(order.adminNote) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("အော်ဒါအချက်အလက် ပြင်ဆင်ရန် (${order.customerName})") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("အခြေအနေ (Status):", fontWeight = FontWeight.Bold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("pending", "accepted", "won", "lost", "rejected").forEach { st ->
+                        FilterChip(
+                            selected = status == st,
+                            onClick = { status = st },
+                            label = { Text(st) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = selectionsText,
+                    onValueChange = { selectionsText = it },
+                    label = { Text("ရွေးချယ်မှုများ (တစ်ကြောင်းလျှင် ၁ ခု)") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth().testTag("edit_order_selections_input")
+                )
+                OutlinedTextField(
+                    value = drawRound,
+                    onValueChange = { drawRound = it },
+                    label = { Text("အကြိမ် / Round") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = stakeInput,
+                        onValueChange = { stakeInput = it.filter { c -> c.isDigit() }.take(9) },
+                        label = { Text("ထိုးကြေး (Ks)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = multInput,
+                        onValueChange = { multInput = it.filter { c -> c.isDigit() || c == '.' }.take(6) },
+                        label = { Text("နှုန်း (Mult)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                OutlinedTextField(
+                    value = payoutInput,
+                    onValueChange = { payoutInput = it.filter { c -> c.isDigit() }.take(10) },
+                    label = { Text("အမှန်တကယ် ရငွေ (Actual Payout Ks)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = adminNote,
+                    onValueChange = { adminNote = it },
+                    label = { Text("Admin မှတ်ချက်") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val sels = selectionsText.lines().map { it.trim() }.filter { it.isNotBlank() }
+                        .ifEmpty { order.selections }
+                    val stake = (stakeInput.toLongOrNull() ?: order.stakeKs).coerceAtLeast(1L)
+                    val mult = (multInput.toDoubleOrNull() ?: order.multiplier).coerceAtLeast(0.1)
+                    val actual = (payoutInput.toLongOrNull() ?: order.actualPayoutKs).coerceAtLeast(0L)
+                    onSave(sels, drawRound.trim(), stake, mult, actual, status, adminNote.trim())
+                },
+                modifier = Modifier.testTag("confirm_edit_order_button")
+            ) {
+                Text("သိမ်းဆည်းမည်")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }
+        }
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun EditWalletRequestDialog(
+    req: WalletRequest,
+    onDismiss: () -> Unit,
+    onSave: (
+        amountKs: Long,
+        netAmountKs: Long,
+        channel: String,
+        referenceNote: String,
+        status: String,
+        adminNote: String,
+        isHidden: Boolean
+    ) -> Unit
+) {
+    var amountInput by remember(req.id) { mutableStateOf(req.amountKs.toString()) }
+    var netInput by remember(req.id) { mutableStateOf(req.netAmountKs.toString()) }
+    var channel by remember(req.id) { mutableStateOf(req.channel) }
+    var refNote by remember(req.id) { mutableStateOf(req.referenceNote) }
+    var status by remember(req.id) { mutableStateOf(req.status) }
+    var adminNote by remember(req.id) { mutableStateOf(req.adminNote) }
+    var isHidden by remember(req.id) { mutableStateOf(req.isHidden) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ငွေသွင်း/ထုတ် မှတ်တမ်း ပြင်ဆင်ရန် (${req.customerName})") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("pending", "awaiting_main_approval", "approved", "rejected").forEach { st ->
+                        FilterChip(
+                            selected = status == st,
+                            onClick = { status = st },
+                            label = { Text(st) }
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = amountInput,
+                        onValueChange = { amountInput = it.filter { c -> c.isDigit() }.take(9) },
+                        label = { Text("ပမာဏ (Ks)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = netInput,
+                        onValueChange = { netInput = it.filter { c -> c.isDigit() }.take(9) },
+                        label = { Text("အသားတင် (Net Ks)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                OutlinedTextField(
+                    value = channel,
+                    onValueChange = { channel = it },
+                    label = { Text("နည်းလမ်း (KBZPay / WavePay ...)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = refNote,
+                    onValueChange = { refNote = it },
+                    label = { Text("Reference ID / မှတ်ချက်") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = adminNote,
+                    onValueChange = { adminNote = it },
+                    label = { Text("Admin မှတ်ချက်") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Hide (ဖျောက်ထားမည်)")
+                    Switch(checked = isHidden, onCheckedChange = { isHidden = it })
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = (amountInput.toLongOrNull() ?: req.amountKs).coerceAtLeast(1L)
+                    val net = (netInput.toLongOrNull() ?: req.netAmountKs).coerceAtLeast(0L)
+                    onSave(amt, net, channel.trim(), refNote.trim(), status, adminNote.trim(), isHidden)
+                },
+                modifier = Modifier.testTag("confirm_edit_wallet_req_button")
+            ) {
+                Text("သိမ်းဆည်းမည်")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }
+        }
+    )
+}
+
+@Composable
+fun EditLedgerTransactionDialog(
+    tx: LedgerTransaction,
+    onDismiss: () -> Unit,
+    onSave: (title: String, amountKs: Long, direction: String, isHidden: Boolean) -> Unit
+) {
+    var title by remember(tx.id) { mutableStateOf(tx.title) }
+    var amountInput by remember(tx.id) { mutableStateOf(tx.amountKs.toString()) }
+    var direction by remember(tx.id) { mutableStateOf(tx.direction) }
+    var isHidden by remember(tx.id) { mutableStateOf(tx.isHidden) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ဘဏ္ဍာရေးစာရင်း ပြင်ဆင်ရန်") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = direction == "credit",
+                        onClick = { direction = "credit" },
+                        label = { Text("+ Credit (အဝင်)") }
+                    )
+                    FilterChip(
+                        selected = direction == "debit",
+                        onClick = { direction = "debit" },
+                        label = { Text("- Debit (အထွက်)") }
+                    )
+                }
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("ခေါင်းစဉ် / အကြောင်းအရာ") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = amountInput,
+                    onValueChange = { amountInput = it.filter { c -> c.isDigit() }.take(10) },
+                    label = { Text("ငွေပမာဏ (Ks)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Hide (ဖျောက်ထားမည်)")
+                    Switch(checked = isHidden, onCheckedChange = { isHidden = it })
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = (amountInput.toLongOrNull() ?: tx.amountKs).coerceAtLeast(0L)
+                    onSave(title.trim().ifBlank { tx.title }, amt, direction, isHidden)
+                },
+                modifier = Modifier.testTag("confirm_edit_tx_button")
+            ) {
+                Text("သိမ်းဆည်းမည်")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }
+        }
+    )
+}
+
+@Composable
+fun EditAdminInviteDialog(
+    invite: AdminInvite,
+    onDismiss: () -> Unit,
+    onSave: (
+        oldCode: String,
+        newCode: String,
+        label: String,
+        active: Boolean,
+        assignedEmail: String,
+        newPin: String?,
+        permissions: AdminPermissions
+    ) -> Unit
+) {
+    var codeInput by remember(invite.code) { mutableStateOf(invite.code) }
+    var labelInput by remember(invite.code) { mutableStateOf(invite.label) }
+    var emailInput by remember(invite.code) { mutableStateOf(invite.assignedEmail) }
+    var pinInput by remember(invite.code) { mutableStateOf("") }
+    var clearPin by remember(invite.code) { mutableStateOf(false) }
+    var active by remember(invite.code) { mutableStateOf(invite.active) }
+    var perms by remember(invite.code) { mutableStateOf(AdminPermissions.fromMap(invite.defaultPermissions)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Second Admin Code ပြင်ဆင်ရန်") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = codeInput,
+                    onValueChange = { codeInput = it.uppercase().filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' } },
+                    label = { Text("Invite Code") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("edit_invite_code_input")
+                )
+                OutlinedTextField(
+                    value = labelInput,
+                    onValueChange = { labelInput = it },
+                    label = { Text("Second Admin အမည် / ရာထူး") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = emailInput,
+                    onValueChange = { emailInput = it },
+                    label = { Text("ကန့်သတ် Gmail (Optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = pinInput,
+                    onValueChange = {
+                        pinInput = it.filter { c -> c.isDigit() }.take(8)
+                        if (pinInput.isNotEmpty()) clearPin = false
+                    },
+                    label = { Text("2FA PIN အသစ် (Optional, 4-8 digits)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { clearPin = !clearPin },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = clearPin, onCheckedChange = { clearPin = it })
+                    Text("PIN ဖယ်ရှားမည် (Clear PIN)")
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Code အသုံးပြုခွင့် ဖွင့်မည်")
+                    Switch(checked = active, onCheckedChange = { active = it })
+                }
+                HorizontalDivider()
+                Text("ခွင့်ပြုချက်များ:", fontWeight = FontWeight.Bold)
+                val rows = listOf(
+                    Triple("ငွေသွင်း/ထုတ် အတည်ပြုခွင့်", perms.canApproveWallet) { v: Boolean -> perms.copy(canApproveWallet = v) },
+                    Triple("အော်ဒါ စီမံခွင့်", perms.canManageOrders) { v: Boolean -> perms.copy(canManageOrders = v) },
+                    Triple("Customer စာရင်းကြည့်ခွင့်", perms.canViewUsers) { v: Boolean -> perms.copy(canViewUsers = v) },
+                    Triple("Customer Lock ခွင့်", perms.canLockUsers) { v: Boolean -> perms.copy(canLockUsers = v) },
+                    Triple("Board စီမံခွင့်", perms.canManageBoard) { v: Boolean -> perms.copy(canManageBoard = v) },
+                    Triple("Chat/Call ခွင့်", perms.canChat) { v: Boolean -> perms.copy(canChat = v) },
+                    Triple("Wallet % ပြင်ခွင့်", perms.canEditWalletRates) { v: Boolean -> perms.copy(canEditWalletRates = v) },
+                    Triple("Game Config ပြင်ခွင့်", perms.canEditGameConfig) { v: Boolean -> perms.copy(canEditGameConfig = v) },
+                    Triple("All Audit Logs ကြည့်ခွင့်", perms.canViewAllLogs) { v: Boolean -> perms.copy(canViewAllLogs = v) },
+                    Triple("Balance (+/-) ပြင်ခွင့်", perms.canAdjustBalance) { v: Boolean -> perms.copy(canAdjustBalance = v) }
+                )
+                rows.forEach { (lbl, checked, updater) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { perms = updater(!checked) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = checked, onCheckedChange = { perms = updater(it) })
+                        Text(lbl, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val effectivePin: String? = when {
+                        clearPin -> ""
+                        pinInput.isNotBlank() -> pinInput
+                        else -> null
+                    }
+                    onSave(
+                        invite.code,
+                        codeInput.trim().ifBlank { invite.code },
+                        labelInput.trim().ifBlank { invite.label },
+                        active,
+                        emailInput.trim(),
+                        effectivePin,
+                        perms
+                    )
+                },
+                enabled = codeInput.trim().length >= 4,
+                modifier = Modifier.testTag("confirm_edit_invite_button")
+            ) {
+                Text("သိမ်းဆည်းမည်")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }
+        }
+    )
+}
+
 

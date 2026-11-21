@@ -474,7 +474,8 @@ test("Admin match editing/deletion and processed wallet request deletion", async
     })
   );
 
-  await assertFails(ownerDb.collection("wallet_requests").doc("wr_pending").delete());
+  // Pending wallet requests cannot be deleted by customer or second admin, while Main Admin can manage/edit/delete
+  await assertFails(aliceDb.collection("wallet_requests").doc("wr_pending").delete());
 
   await assertSucceeds(
     ownerDb.collection("wallet_requests").doc("wr_pending").update({
@@ -611,9 +612,9 @@ test("User email registration, gift points, completed order deletion, and app se
   });
 
   await assertFails(aliceDb.collection("orders").doc("ord_pending_del").delete());
-  await assertFails(ownerDb.collection("orders").doc("ord_pending_del").delete());
   await assertFails(bobDb.collection("orders").doc("ord_won_del").delete());
   await assertSucceeds(aliceDb.collection("orders").doc("ord_won_del").delete());
+  await assertSucceeds(ownerDb.collection("orders").doc("ord_pending_del").delete());
 });
 
 test("Betting commission config, order pickKeys, and commission settlement", async () => {
@@ -1223,7 +1224,8 @@ test("Dual approval wallet flow, payment accounts, immutable audit logs, and sys
   await assertFails(secondDb.collection("audit_logs").doc("log_owner_1").get());
   await assertSucceeds(secondDb.collection("audit_logs").where("actorId", "==", "sub_admin_2").get());
   await assertSucceeds(ownerDb.collection("audit_logs").get());
-  await assertFails(ownerDb.collection("audit_logs").doc("log_sub_1").delete());
+  await assertFails(secondDb.collection("audit_logs").doc("log_sub_1").delete());
+  await assertSucceeds(ownerDb.collection("audit_logs").doc("log_sub_1").delete());
 
   // System & Security Configs
   await assertSucceeds(
@@ -1361,6 +1363,200 @@ test("Locked user blocked from betting/wallet, online presence update allowed, a
     })
   );
 });
+
+test("Branding config, mini-game control config, auto-accept orders, support agents, Second Admin payment accounts, and Main Admin ledger edits", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const secondDb = testEnv.authenticatedContext("sub_admin_ctrl", {
+    email: "subctrl@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.collection("admins").doc("sub_admin_ctrl").set({
+      userId: "sub_admin_ctrl",
+      displayName: "Agent Ko Lin",
+      email: "subctrl@gmail.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "CODE-CTRL",
+      permissions: { canApproveWallet: true, canManageOrders: true, canChat: true, canViewUsers: true },
+      createdAt: pastDate(9000),
+      updatedAt: pastDate(9000),
+    });
+  });
+
+  // Main Admin writes branding_config & mini_game_control; Second Admin & Customer cannot write
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("branding_config").set({
+      appName: "လိုတရ VIP",
+      logoVariant: "crest",
+      customLogoUrl: "",
+      themePreset: "royal_blue",
+      showRulesOnStartup: true,
+      rulesText: "စည်းမျဉ်းစည်းကမ်းများ",
+      maxContactMainAdminKs: 500000,
+      mainAdminContactNote: "Main Admin ဆက်သွယ်ရန်",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(4000),
+    })
+  );
+  await assertFails(
+    secondDb.collection("app_settings").doc("branding_config").set({
+      appName: "Hijack",
+      logoVariant: "crest",
+      customLogoUrl: "",
+      themePreset: "emerald_gold",
+      showRulesOnStartup: false,
+      rulesText: "",
+      maxContactMainAdminKs: 0,
+      mainAdminContactNote: "",
+      updatedBy: "sub_admin_ctrl",
+      updatedAt: pastDate(3500),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("app_settings").doc("branding_config").get());
+
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("mini_game_control").set({
+      diceStandardMult: 2.0,
+      diceTripleMult: 30.0,
+      diceExactMult: 8.0,
+      sixAnimalsMult: 2.5,
+      diceAllowedTotals: [7, 8, 9, 10, 11],
+      diceMaxBigPerDay: 20,
+      diceMaxSmallPerDay: 20,
+      diceMaxOddPerDay: 15,
+      diceMaxEvenPerDay: 15,
+      diceTotalDailyQuotas: { "10": 5 },
+      animalDailyQuotas: { "tiger": 10 },
+      globalDirective: "auto",
+      userDirectives: { [ALICE_UID]: "force_win" },
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(3500),
+    })
+  );
+  await assertFails(
+    secondDb.collection("app_settings").doc("mini_game_control").update({
+      globalDirective: "force_loss",
+      updatedBy: "sub_admin_ctrl",
+      updatedAt: pastDate(3000),
+    })
+  );
+
+  // Auto-Accept Orders enabled on betting_config allows customer order creation with status == 'accepted'
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("betting_config").set({
+      winCommissionPercent: 0.0,
+      winCommissionBasis: "payout",
+      autoSettleOrders: false,
+      autoAcceptOrders: true,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(3000),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("orders").doc("ord_auto_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "two_d",
+      selections: ["45"],
+      matchIds: [],
+      drawRound: "2D Evening",
+      stakeKs: 1000,
+      multiplier: 80.0,
+      potentialPayoutKs: 80000,
+      actualPayoutKs: 0,
+      status: "accepted",
+      adminNote: "",
+      settledBy: "",
+      isHidden: false,
+      matchKickoffMs: 0,
+      scanAtMs: 0,
+      createdAt: pastDate(2500),
+      updatedAt: pastDate(2500),
+    })
+  );
+
+  // Second Admin can update own support_agents profile & own payment account, but NOT other admin's
+  await assertSucceeds(
+    secondDb.collection("support_agents").doc("sub_admin_ctrl").set({
+      adminUid: "sub_admin_ctrl",
+      displayName: "Agent Ko Lin",
+      role: "admin",
+      phone: "0912345678",
+      messagingHandle: "@kolin_agent",
+      paymentSummary: "KBZPay / WavePay",
+      note: "24/7 Service",
+      active: true,
+      updatedAt: pastDate(2000),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("support_agents").get());
+
+  await assertSucceeds(
+    secondDb.collection("payment_accounts").doc("sub_kpay_1").set({
+      providerName: "KBZPay",
+      accountName: "Agent Ko Lin",
+      accountNumber: "09888777666",
+      note: "Second Admin KPay",
+      active: true,
+      createdBy: "sub_admin_ctrl",
+      ownerAdminId: "sub_admin_ctrl",
+      ownerAdminName: "Agent Ko Lin",
+      createdAt: pastDate(1800),
+      updatedAt: pastDate(1800),
+    })
+  );
+  await assertFails(
+    secondDb.collection("payment_accounts").doc("sub_spoof_pay").set({
+      providerName: "WavePay",
+      accountName: "Spoof",
+      accountNumber: "09000000",
+      note: "",
+      active: true,
+      createdBy: "sub_admin_ctrl",
+      ownerAdminId: OWNER_UID,
+      ownerAdminName: "Owner",
+      createdAt: pastDate(1700),
+      updatedAt: pastDate(1700),
+    })
+  );
+
+  // Main Admin can edit & delete ledger transactions; Second Admin cannot
+  await assertSucceeds(
+    ownerDb.collection("transactions").doc("tx_edit_1").set({
+      userId: ALICE_UID,
+      txType: "admin_adjust",
+      direction: "credit",
+      amountKs: 5000,
+      title: "Adjust",
+      balanceAfterKs: 5000,
+      isHidden: false,
+      createdAt: pastDate(1500),
+      updatedAt: pastDate(1500),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("transactions").doc("tx_edit_1").update({
+      title: "Corrected Adjust",
+      isHidden: true,
+      updatedAt: pastDate(1000),
+    })
+  );
+  await assertFails(
+    secondDb.collection("transactions").doc("tx_edit_1").delete()
+  );
+  await assertSucceeds(
+    ownerDb.collection("transactions").doc("tx_edit_1").delete()
+  );
+});
+
 
 
 

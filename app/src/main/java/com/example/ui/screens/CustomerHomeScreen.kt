@@ -78,11 +78,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppLanguage
 import com.example.data.model.AvailableApkUpdate
+import com.example.data.model.BrandingConfig
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.ui.components.AdminInviteRedeemDialog
-import com.example.ui.components.LoTaYaBrandLogo
+import com.example.ui.components.BrandLogoAvatar
 import com.example.ui.components.formatKs
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.ChampionshipGold
@@ -133,6 +134,7 @@ fun CustomerHomeScreen(
     isAdmin: Boolean,
     pendingAdminCount: Int,
     systemGameConfig: SystemGameConfig = SystemGameConfig(),
+    brandingConfig: BrandingConfig = BrandingConfig(),
     appLanguage: AppLanguage = AppLanguage.MY,
     availableApkUpdate: AvailableApkUpdate? = null,
     onOpenUpdateDialog: () -> Unit = {},
@@ -151,21 +153,25 @@ fun CustomerHomeScreen(
     val isMaintenance = systemGameConfig.maintenanceMode
     val isEnglish = appLanguage == AppLanguage.EN
 
-    val menuTiles = remember(isEnglish) {
-        listOf(
-            MenuTile(CustomerRoute.PARLAY, if (isEnglish) "Parlay" else "မောင်း", Icons.Default.Stadium, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_parlay", "parlay"),
-            MenuTile(CustomerRoute.BODY_GOAL, if (isEnglish) "Body / O-U" else "ဘော်ဒီ/ဂိုးပေါင်း", Icons.Default.SportsSoccer, Color(0xFF1E293B), Color(0xFFE2E8F0), "menu_body_goal", "body_goal"),
-            MenuTile(CustomerRoute.TWO_D, if (isEnglish) "2D Lottery" else "၂လုံးထီ (2D)", Icons.Default.TrendingUp, Color(0xFF0F766E), Color(0xFFCCFBF1), "menu_two_d", "two_d"),
-            MenuTile(CustomerRoute.THREE_D, if (isEnglish) "3D Lottery" else "၃လုံးထီ (3D)", Icons.Default.Casino, Color(0xFF059669), Color(0xFFD1FAE5), "menu_three_d", "three_d"),
-            MenuTile(CustomerRoute.DICE_GAME, if (isEnglish) "Dice Roll" else "အံစာတုံး", Icons.Default.Casino, Color(0xFF7C3AED), Color(0xFFEDE9FE), "menu_dice", "dice"),
-            MenuTile(CustomerRoute.SIX_ANIMALS, if (isEnglish) "6 Animals" else "၆ကောင်ဂျင်", Icons.Default.Pets, Color(0xFFB45309), Color(0xFFFEF3C7), "menu_six_animals", "six_animals"),
-            MenuTile(CustomerRoute.ACTIVE_ORDERS, if (isEnglish) "Active Slips" else "လောင်းထားသောပွဲစဉ်များ", Icons.Default.History, Color(0xFF334155), Color(0xFFE2E8F0), "menu_active_orders"),
-            MenuTile(CustomerRoute.PAST_ORDERS, if (isEnglish) "Past Slips" else "ပွဲစဉ်ဟောင်းများ", Icons.Default.CalendarMonth, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_past_orders"),
-            MenuTile(CustomerRoute.LEDGER, if (isEnglish) "Wallet" else "ငွေစာရင်း", Icons.Default.MonetizationOn, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_ledger"),
-            MenuTile(CustomerRoute.RESULTS, if (isEnglish) "Results" else "ပွဲပြီး ရလဒ်များ", Icons.Default.LiveTv, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_results"),
-            MenuTile(CustomerRoute.LEADERBOARD, if (isEnglish) "Leaderboard" else "အဆင့်ဇယား", Icons.Default.EmojiEvents, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_leaderboard"),
-            MenuTile(CustomerRoute.POINT_EXCHANGE, if (isEnglish) "Point Shop" else "ပွိုင့်လဲလှယ်", Icons.Default.CurrencyExchange, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_point_exchange")
-        )
+    val menuTiles = remember(isEnglish, systemGameConfig.hideTwoD, systemGameConfig.hideThreeD) {
+        buildList {
+            add(MenuTile(CustomerRoute.PARLAY, if (isEnglish) "Parlay" else "မောင်း", Icons.Default.Stadium, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_parlay", "parlay"))
+            add(MenuTile(CustomerRoute.BODY_GOAL, if (isEnglish) "Body / O-U" else "ဘော်ဒီ/ဂိုးပေါင်း", Icons.Default.SportsSoccer, Color(0xFF1E293B), Color(0xFFE2E8F0), "menu_body_goal", "body_goal"))
+            if (!systemGameConfig.hideTwoD) {
+                add(MenuTile(CustomerRoute.TWO_D, if (isEnglish) "2D Lottery" else "၂လုံးထီ (2D)", Icons.Default.TrendingUp, Color(0xFF0F766E), Color(0xFFCCFBF1), "menu_two_d", "two_d"))
+            }
+            if (!systemGameConfig.hideThreeD) {
+                add(MenuTile(CustomerRoute.THREE_D, if (isEnglish) "3D Lottery" else "၃လုံးထီ (3D)", Icons.Default.Casino, Color(0xFF059669), Color(0xFFD1FAE5), "menu_three_d", "three_d"))
+            }
+            add(MenuTile(CustomerRoute.DICE_GAME, if (isEnglish) "Dice Roll" else "အံစာတုံး", Icons.Default.Casino, Color(0xFF7C3AED), Color(0xFFEDE9FE), "menu_dice", "dice"))
+            add(MenuTile(CustomerRoute.SIX_ANIMALS, if (isEnglish) "6 Animals" else "၆ကောင်ဂျင်", Icons.Default.Pets, Color(0xFFB45309), Color(0xFFFEF3C7), "menu_six_animals", "six_animals"))
+            add(MenuTile(CustomerRoute.ACTIVE_ORDERS, if (isEnglish) "Active Slips" else "လောင်းထားသောပွဲစဉ်များ", Icons.Default.History, Color(0xFF334155), Color(0xFFE2E8F0), "menu_active_orders"))
+            add(MenuTile(CustomerRoute.PAST_ORDERS, if (isEnglish) "Past Slips" else "ပွဲစဉ်ဟောင်းများ", Icons.Default.CalendarMonth, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_past_orders"))
+            add(MenuTile(CustomerRoute.LEDGER, if (isEnglish) "Wallet" else "ငွေစာရင်း", Icons.Default.MonetizationOn, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_ledger"))
+            add(MenuTile(CustomerRoute.RESULTS, if (isEnglish) "Results" else "ပွဲပြီး ရလဒ်များ", Icons.Default.LiveTv, Color(0xFF0284C7), Color(0xFFE0F2FE), "menu_results"))
+            add(MenuTile(CustomerRoute.LEADERBOARD, if (isEnglish) "Leaderboard" else "အဆင့်ဇယား", Icons.Default.EmojiEvents, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_leaderboard"))
+            add(MenuTile(CustomerRoute.POINT_EXCHANGE, if (isEnglish) "Point Shop" else "ပွိုင့်လဲလှယ်", Icons.Default.CurrencyExchange, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_point_exchange"))
+        }
     }
 
     Box(
@@ -199,11 +205,11 @@ fun CustomerHomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
-                        LoTaYaBrandLogo(size = 46.dp)
+                        BrandLogoAvatar(brandingConfig = brandingConfig, size = 46.dp)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "လိုတရ",
+                                text = brandingConfig.appName.ifBlank { "လိုတရ" },
                                 style = MaterialTheme.typography.titleLarge,
                                 color = ChampionshipGoldBright,
                                 fontWeight = FontWeight.Bold

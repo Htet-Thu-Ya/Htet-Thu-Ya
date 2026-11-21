@@ -50,6 +50,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -69,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Live2DStatus
 import com.example.data.model.LotteryDraw
+import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
@@ -87,6 +89,7 @@ import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmerald
 import com.example.ui.theme.PitchEmeraldDark
+import java.util.Locale
 import kotlin.math.roundToLong
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -483,6 +486,7 @@ fun TwoDLotteryScreen(
 fun DiceGameScreen(
     balanceKs: Long,
     systemGameConfig: SystemGameConfig,
+    miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
     roundsState: UiState<List<MiniGameRound>>,
     busy: Boolean,
     onBack: () -> Unit,
@@ -494,15 +498,28 @@ fun DiceGameScreen(
     var lastDice by remember { mutableStateOf(listOf(4, 5, 2)) }
     var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
 
+    val allowedTotals = remember(miniGameControlConfig.diceAllowedTotals) {
+        miniGameControlConfig.diceAllowedTotals.filter { it in 3..18 }.distinct().sorted()
+    }
+    LaunchedEffect(allowedTotals) {
+        if (allowedTotals.isNotEmpty() && !allowedTotals.contains(exactNumber)) {
+            exactNumber = allowedTotals.first()
+        }
+    }
+
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
     val canPlay = !busy && parsedStake in minStake..maxStake && parsedStake <= balanceKs
 
+    val stdMult = miniGameControlConfig.diceStandardMult
+    val tripleMult = miniGameControlConfig.diceTripleMult
+    val exactMult = miniGameControlConfig.diceExactMult
+
     val multiplierPreview = when (selectedOption) {
-        "TRIPLE" -> 24.0
-        "EXACT" -> 8.0
-        else -> systemGameConfig.dicePayoutMultiplier
+        "TRIPLE" -> tripleMult
+        "EXACT" -> exactMult
+        else -> stdMult
     }
 
     val diceHistory = remember(roundsState) {
@@ -575,12 +592,12 @@ fun DiceGameScreen(
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("ကစားမည့် အမျိုးအစား ရွေးပါ", color = InkDark, fontWeight = FontWeight.Bold)
                         val options = listOf(
-                            Triple("BIG", "အကြီး (11-17)", "${systemGameConfig.dicePayoutMultiplier}x"),
-                            Triple("SMALL", "အသေး (4-10)", "${systemGameConfig.dicePayoutMultiplier}x"),
-                            Triple("ODD", "မ (Odd)", "${systemGameConfig.dicePayoutMultiplier}x"),
-                            Triple("EVEN", "စုံ (Even)", "${systemGameConfig.dicePayoutMultiplier}x"),
-                            Triple("TRIPLE", "၃ လုံးတူ (Triple)", "24x"),
-                            Triple("EXACT", "အတိအကျ (Exact)", "8x")
+                            Triple("BIG", "အကြီး (11-17)", "${stdMult}x"),
+                            Triple("SMALL", "အသေး (4-10)", "${stdMult}x"),
+                            Triple("ODD", "မ (Odd)", "${stdMult}x"),
+                            Triple("EVEN", "စုံ (Even)", "${stdMult}x"),
+                            Triple("TRIPLE", "၃ လုံးတူ (Triple)", "${tripleMult}x"),
+                            Triple("EXACT", "အတိအကျ (Exact)", "${exactMult}x")
                         )
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -596,24 +613,44 @@ fun DiceGameScreen(
                         }
 
                         if (selectedOption == "EXACT") {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("စုစုပေါင်း ဂဏန်း:", color = InkDark, fontWeight = FontWeight.SemiBold)
-                                IconButton(onClick = { if (exactNumber > 4) exactNumber-- }) {
-                                    Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                            if (allowedTotals.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        "Admin ခွင့်ပြုထားသော ဂဏန်းများ:",
+                                        color = PitchEmeraldDark,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        allowedTotals.forEach { num ->
+                                            FilterChip(
+                                                selected = exactNumber == num,
+                                                onClick = { exactNumber = num },
+                                                label = { Text("$num") }
+                                            )
+                                        }
+                                    }
                                 }
-                                Text(
-                                    text = "$exactNumber",
-                                    color = PitchEmeraldDark,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                IconButton(onClick = { if (exactNumber < 17) exactNumber++ }) {
-                                    Icon(Icons.Default.Add, contentDescription = "Increase")
+                            } else {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("စုစုပေါင်း ဂဏန်း:", color = InkDark, fontWeight = FontWeight.SemiBold)
+                                    IconButton(onClick = { if (exactNumber > 3) exactNumber-- }) {
+                                        Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                                    }
+                                    Text(
+                                        text = "$exactNumber",
+                                        color = PitchEmeraldDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    IconButton(onClick = { if (exactNumber < 18) exactNumber++ }) {
+                                        Icon(Icons.Default.Add, contentDescription = "Increase")
+                                    }
                                 }
                             }
                         }
@@ -750,6 +787,7 @@ private val SIX_ANIMALS_LIST = listOf(
 fun SixAnimalsGameScreen(
     balanceKs: Long,
     systemGameConfig: SystemGameConfig,
+    miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
     roundsState: UiState<List<MiniGameRound>>,
     busy: Boolean,
     onBack: () -> Unit,
@@ -769,6 +807,11 @@ fun SixAnimalsGameScreen(
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
     val canPlay = !busy && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+
+    val singleMult = miniGameControlConfig.sixAnimalsMult.coerceAtLeast(1.2)
+    val bonus = (singleMult - 1.0).coerceAtLeast(0.2)
+    val doubleMult = 1.0 + bonus * 2.0
+    val tripleAnimalMult = 1.0 + bonus * 3.0
 
     val animalHistory = remember(roundsState) {
         ((roundsState as? UiState.Success)?.data ?: emptyList()).filter { it.gameType == "six_animals" }
@@ -801,7 +844,11 @@ fun SixAnimalsGameScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("လက်ကျန်: ${formatKs(balanceKs)}", color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                            Text("1တူ=2x • 2တူ=3x • 3တူ=4x", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                "1တူ=${String.format(Locale.US, "%.1f", singleMult)}x • 2တူ=${String.format(Locale.US, "%.1f", doubleMult)}x • 3တူ=${String.format(Locale.US, "%.1f", tripleAnimalMult)}x",
+                                color = Color(0xFFB4C8BE),
+                                style = MaterialTheme.typography.labelMedium
+                            )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                             lastRolledIndices.forEach { idx ->

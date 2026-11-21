@@ -44,8 +44,18 @@ class FootballFeedService(
         return fmt.format(Date())
     }
 
-    suspend fun fetchFixturesForDays(dayOffsets: List<Int>): Result<List<LiveFootballFixture>> = withContext(Dispatchers.IO) {
+    suspend fun fetchFixturesForDays(
+        dayOffsets: List<Int>,
+        allowedLeagues: List<String> = emptyList()
+    ): Result<List<LiveFootballFixture>> = withContext(Dispatchers.IO) {
         try {
+            val allowedSet = allowedLeagues.map { it.trim().lowercase(Locale.US) }.filter { it.isNotBlank() }.toSet()
+            val targetLeagues = if (allowedSet.isEmpty()) {
+                espnLeagues
+            } else {
+                espnLeagues.filter { (_, name) -> name.lowercase(Locale.US) in allowedSet }
+                    .ifEmpty { espnLeagues }
+            }
             val allFixtures = linkedMapOf<String, LiveFootballFixture>()
             for (offset in dayOffsets) {
                 val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) }
@@ -53,18 +63,22 @@ class FootballFeedService(
                 val isoDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
 
                 val espnResults = coroutineScope {
-                    espnLeagues.map { (slug, leagueName) ->
+                    targetLeagues.map { (slug, leagueName) ->
                         async { fetchEspnLeague(slug, leagueName, espnDate, isoDate) }
                     }.awaitAll().flatten()
                 }
                 espnResults.forEach { fix ->
-                    allFixtures[fix.externalId] = fix
+                    if (allowedSet.isEmpty() || fix.league.lowercase(Locale.US) in allowedSet) {
+                        allFixtures[fix.externalId] = fix
+                    }
                 }
 
                 if (espnResults.isEmpty()) {
                     val tsdbResults = fetchTheSportsDbDay(isoDate)
                     tsdbResults.forEach { fix ->
-                        allFixtures.putIfAbsent(fix.externalId, fix)
+                        if (allowedSet.isEmpty() || fix.league.lowercase(Locale.US) in allowedSet) {
+                            allFixtures.putIfAbsent(fix.externalId, fix)
+                        }
                     }
                 }
             }
@@ -426,6 +440,19 @@ class FootballFeedService(
 
     companion object {
         private const val TAG = "FootballFeed"
+
+        val DEFAULT_LEAGUE_OPTIONS = listOf(
+            "Premier League",
+            "La Liga",
+            "Bundesliga",
+            "Serie A",
+            "Ligue 1",
+            "Champions League",
+            "Europa League",
+            "FA Cup",
+            "Carabao Cup",
+            "World Cup Qualifiers"
+        )
 
         fun normalizeTeam(name: String): String {
             return name.lowercase(Locale.US)

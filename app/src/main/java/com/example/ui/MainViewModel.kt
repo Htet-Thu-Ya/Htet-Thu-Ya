@@ -19,6 +19,7 @@ import com.example.data.model.AvailableApkUpdate
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.BrandingConfig
 import com.example.data.model.CallSession
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GitHubReleaseInfo
@@ -28,10 +29,12 @@ import com.example.data.model.LedgerTransaction
 import com.example.data.model.Live2DStatus
 import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
+import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
 import com.example.data.model.PaymentAccount
 import com.example.data.model.SecurityConfig
 import com.example.data.model.SportMatch
+import com.example.data.model.SupportAgentProfile
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
@@ -64,7 +67,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.webrtc.SurfaceViewRenderer
 import java.security.MessageDigest
+import java.util.Calendar
+import java.util.TimeZone
 import java.util.UUID
+import kotlin.math.roundToLong
 import kotlin.random.Random
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -222,6 +228,30 @@ class MainViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), SecurityConfig())
 
+    val brandingConfig: StateFlow<BrandingConfig> = repository.observeBrandingConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Branding config stream error", error)
+            emit(BrandingConfig())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), BrandingConfig())
+
+    val miniGameControlConfig: StateFlow<MiniGameControlConfig> = repository.observeMiniGameControlConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Mini-game control config stream error", error)
+            emit(MiniGameControlConfig())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), MiniGameControlConfig())
+
+    val supportAgents: StateFlow<List<SupportAgentProfile>> = repository.observeSupportAgents(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Support agents stream error", error)
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
     val appUpdateConfig: StateFlow<AppUpdateConfig?> = repository.observeAppUpdateConfig(currentUserId)
         .catch { error ->
             if (isPureCancellation(error)) throw error
@@ -342,6 +372,24 @@ class MainViewModel(
             .map<List<AuditLogEntry>, UiState<List<AuditLogEntry>>> { UiState.Success(it) }
             .catch { emit(UiState.Error(unwrapFirestoreMessage(it, "Failed to load audit logs"))) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val allMiniGameRounds: StateFlow<UiState<List<MiniGameRound>>> = isAdmin
+        .flatMapLatest { admin ->
+            if (!admin) flowOf(UiState.Success(emptyList()))
+            else repository.observeAllMiniGameRounds(currentUserId)
+                .map<List<MiniGameRound>, UiState<List<MiniGameRound>>> { UiState.Success(it) }
+                .catch { emit(UiState.Error(unwrapFirestoreMessage(it, "Failed to load mini-game rounds"))) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val allTransactions: StateFlow<UiState<List<LedgerTransaction>>> = isOwnerAdmin
+        .flatMapLatest { owner ->
+            if (!owner) flowOf(UiState.Success(emptyList()))
+            else repository.observeAllTransactions(currentUserId)
+                .map<List<LedgerTransaction>, UiState<List<LedgerTransaction>>> { UiState.Success(it) }
+                .catch { emit(UiState.Error(unwrapFirestoreMessage(it, "Failed to load ledger transactions"))) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
 
     val pendingAdminBadgeCount: StateFlow<Int> = combine(
         allOrders,
@@ -578,7 +626,10 @@ class MainViewModel(
     fun refreshLiveFootballFeed() {
         viewModelScope.launch {
             _liveFeed.value = UiState.Loading
-            val res = feedService.fetchFixturesForDays(listOf(-1, 0, 1))
+            val res = feedService.fetchFixturesForDays(
+                dayOffsets = listOf(-1, 0, 1),
+                allowedLeagues = boardConfig.value.allowedLeagues
+            )
             res.onSuccess { fixtures ->
                 _liveFeed.value = UiState.Success(fixtures)
             }.onFailure { err ->
@@ -616,7 +667,10 @@ class MainViewModel(
                     rawDisplayName = displayName,
                     rawEmail = currentUserEmail ?: ""
                 )
-                val feedRes = feedService.fetchFixturesForDays(listOf(-1, 0, 1))
+                val feedRes = feedService.fetchFixturesForDays(
+                    dayOffsets = listOf(-1, 0, 1),
+                    allowedLeagues = boardConfig.value.allowedLeagues
+                )
                 feedRes.onSuccess { fixtures ->
                     _liveFeed.value = UiState.Success(fixtures)
                 }
@@ -660,6 +714,8 @@ class MainViewModel(
         stakeKs: Long,
         multiplier: Double,
         pickKeys: List<String> = emptyList(),
+        matchKickoffMs: Long = 0L,
+        scanAtMs: Long = 0L,
         onSuccess: () -> Unit = {}
     ) {
         val sys = systemGameConfig.value
@@ -676,12 +732,48 @@ class MainViewModel(
             emitMessage("လောင်းကြေးသည် ${sys.minStakeKs} Ks မှ ${sys.maxStakeKs} Ks အတွင်း ဖြစ်ရပါမည်")
             return
         }
-        runAction("အော်ဒါတင်ပြီးပါပြီ (Admin စစ်ဆေးပေးပါမည်)") {
+        val autoAcc = bettingConfig.value.autoAcceptOrders
+        val successMsg = if (autoAcc) {
+            "အော်ဒါတင်ပြီး အလိုအလျောက် လက်ခံအတည်ပြုပြီးပါပြီ"
+        } else {
+            "အော်ဒါတင်ပြီးပါပြီ (Admin စစ်ဆေးပေးပါမည်)"
+        }
+        runAction(successMsg) {
             val name = acc?.displayName ?: displayName
-            val res = repository.placeOrder(name, orderType, selections, matchIds, drawRound, stakeKs, multiplier, pickKeys)
+            val res = repository.placeOrder(
+                customerName = name,
+                orderType = orderType,
+                selections = selections,
+                matchIds = matchIds,
+                drawRound = drawRound,
+                stakeKs = stakeKs,
+                multiplier = multiplier,
+                pickKeys = pickKeys,
+                autoAccept = autoAcc,
+                matchKickoffMs = matchKickoffMs,
+                scanAtMs = scanAtMs
+            )
             if (res.isSuccess) onSuccess()
             res.map { }
         }
+    }
+
+    private fun todayStartEpochSec(): Long {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Yangon"))
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal.timeInMillis / 1000L
+    }
+
+    private fun todaysMiniGameRounds(): List<MiniGameRound> {
+        val startSec = todayStartEpochSec()
+        val adminRounds = (allMiniGameRounds.value as? UiState.Success)?.data.orEmpty()
+        val userRounds = (userMiniGameRounds.value as? UiState.Success)?.data.orEmpty()
+        return (adminRounds + userRounds)
+            .distinctBy { it.id }
+            .filter { (it.createdAt?.seconds ?: Long.MAX_VALUE) >= startSec }
     }
 
     fun playDiceGame(
@@ -698,23 +790,90 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val d1 = Random.nextInt(1, 7)
-                val d2 = Random.nextInt(1, 7)
-                val d3 = Random.nextInt(1, 7)
+                val ctrl = miniGameControlConfig.value
+                val normOpt = betOption.trim().lowercase()
+                val stdMult = ctrl.diceStandardMult.coerceIn(1.1, 50.0)
+                val tripleMult = ctrl.diceTripleMult.coerceIn(1.1, 100.0)
+                val exactMult = ctrl.diceExactMult.coerceIn(1.1, 100.0)
+
+                val todayDiceRounds = todaysMiniGameRounds().filter { it.gameType == "dice" }
+                var bigHits = 0L
+                var smallHits = 0L
+                var oddHits = 0L
+                var evenHits = 0L
+                val totalHits = mutableMapOf<Int, Long>()
+                val sumRegex = Regex("""=\s*(\d+)""")
+                for (r in todayDiceRounds) {
+                    val sum = sumRegex.find(r.outcomeLabel)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
+                    val wasTriple = r.outcomeLabel.contains("Triple", ignoreCase = true)
+                    totalHits[sum] = (totalHits[sum] ?: 0L) + 1L
+                    if (!wasTriple) {
+                        if (sum in 11..17) bigHits++
+                        else if (sum in 4..10) smallHits++
+                        if (sum % 2 == 1) oddHits++ else evenHits++
+                    }
+                }
+
+                fun computeDiceOutcome(d1: Int, d2: Int, d3: Int): Pair<String, Long> {
+                    val sum = d1 + d2 + d3
+                    val isTriple = (d1 == d2 && d2 == d3)
+                    return when (normOpt) {
+                        "big" -> "ကြီး (11-17)" to if (!isTriple && sum in 11..17) (stakeKs * stdMult).roundToLong() else 0L
+                        "small" -> "သေး (4-10)" to if (!isTriple && sum in 4..10) (stakeKs * stdMult).roundToLong() else 0L
+                        "odd" -> "မ (Odd)" to if (!isTriple && sum % 2 == 1) (stakeKs * stdMult).roundToLong() else 0L
+                        "even" -> "စုံ (Even)" to if (!isTriple && sum % 2 == 0) (stakeKs * stdMult).roundToLong() else 0L
+                        "triple" -> "သုံးလုံးတူ (Triple)" to if (isTriple) (stakeKs * tripleMult).roundToLong() else 0L
+                        "exact" -> "ပေါင်းရလဒ် $exactNumber" to if (sum == exactNumber) (stakeKs * exactMult).roundToLong() else 0L
+                        else -> "ကြီး (11-17)" to if (!isTriple && sum in 11..17) (stakeKs * stdMult).roundToLong() else 0L
+                    }
+                }
+
+                fun isQuotaOk(d1: Int, d2: Int, d3: Int): Boolean {
+                    val sum = d1 + d2 + d3
+                    val isTriple = (d1 == d2 && d2 == d3)
+                    if (ctrl.diceAllowedTotals.isNotEmpty() && sum !in ctrl.diceAllowedTotals) return false
+                    val sumCap = ctrl.diceTotalDailyQuotas["$sum"] ?: 0L
+                    if (sumCap > 0L && (totalHits[sum] ?: 0L) >= sumCap) return false
+                    if (!isTriple) {
+                        if (sum in 11..17 && ctrl.diceMaxBigPerDay > 0L && bigHits >= ctrl.diceMaxBigPerDay) return false
+                        if (sum in 4..10 && ctrl.diceMaxSmallPerDay > 0L && smallHits >= ctrl.diceMaxSmallPerDay) return false
+                        if (sum % 2 == 1 && ctrl.diceMaxOddPerDay > 0L && oddHits >= ctrl.diceMaxOddPerDay) return false
+                        if (sum % 2 == 0 && ctrl.diceMaxEvenPerDay > 0L && evenHits >= ctrl.diceMaxEvenPerDay) return false
+                    }
+                    return true
+                }
+
+                val allCombos = buildList {
+                    for (a in 1..6) for (b in 1..6) for (c in 1..6) add(Triple(a, b, c))
+                }
+                val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
+                val quotaCombos = allCombos.filter { (a, b, c) -> isQuotaOk(a, b, c) }
+                val pool: List<Triple<Int, Int, Int>> = when (directive) {
+                    "force_win" -> {
+                        val qWin = quotaCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second > 0L }
+                        qWin.ifEmpty {
+                            allCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second > 0L }
+                        }.ifEmpty { allCombos }
+                    }
+                    "force_loss" -> {
+                        val qLoss = quotaCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second == 0L }
+                        qLoss.ifEmpty {
+                            allCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second == 0L }
+                        }.ifEmpty { allCombos }
+                    }
+                    else -> quotaCombos.ifEmpty { allCombos }
+                }
+
+                val chosen = pool[Random.nextInt(pool.size)]
+                val d1 = chosen.first
+                val d2 = chosen.second
+                val d3 = chosen.third
                 val dice = listOf(d1, d2, d3)
                 val sum = d1 + d2 + d3
                 val isTriple = (d1 == d2 && d2 == d3)
-                val stdMult = sys.dicePayoutMultiplier.coerceIn(1.2, 5.0)
+                val (label, rawPayout) = computeDiceOutcome(d1, d2, d3)
+                val payoutKs = rawPayout.coerceIn(0L, stakeKs * 100L)
 
-                val (label, payoutKs) = when (betOption) {
-                    "big" -> "ကြီး (11-17)" to if (!isTriple && sum in 11..17) (stakeKs * stdMult).toLong() else 0L
-                    "small" -> "သေး (4-10)" to if (!isTriple && sum in 4..10) (stakeKs * stdMult).toLong() else 0L
-                    "odd" -> "မ (Odd)" to if (!isTriple && sum % 2 == 1) (stakeKs * stdMult).toLong() else 0L
-                    "even" -> "စုံ (Even)" to if (!isTriple && sum % 2 == 0) (stakeKs * stdMult).toLong() else 0L
-                    "triple" -> "သုံးလုံးတူ (Triple)" to if (isTriple) stakeKs * 24L else 0L
-                    "exact" -> "ပေါင်းရလဒ် $exactNumber" to if (sum == exactNumber) stakeKs * 8L else 0L
-                    else -> "ကြီး (11-17)" to 0L
-                }
                 val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
                 val outcomeLabel = "$d1 + $d2 + $d3 = $sum" + if (isTriple) " (Triple!)" else ""
                 val res = repository.playMiniGameRound(
@@ -746,14 +905,59 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val r1 = Random.nextInt(0, 6)
-                val r2 = Random.nextInt(0, 6)
-                val r3 = Random.nextInt(0, 6)
-                val rolled = listOf(r1, r2, r3)
+                val ctrl = miniGameControlConfig.value
+                val animalKeys = listOf("deer", "tiger", "elephant", "rooster", "prawn", "fish")
+                val todayAnimalRounds = todaysMiniGameRounds().filter { it.gameType == "six_animals" }
+                val hitsPerIdx = IntArray(6)
+                for (r in todayAnimalRounds) {
+                    val tokens = r.outcomeLabel.split("•").map { it.trim() }
+                    for (tok in tokens) {
+                        val idx = animalLabels.indexOfFirst { lbl ->
+                            lbl.isNotBlank() && tok.contains(lbl.takeWhile { it != ' ' }, ignoreCase = true)
+                        }
+                        if (idx in 0..5) hitsPerIdx[idx]++
+                    }
+                }
+
+                fun isComboWithinQuota(r1: Int, r2: Int, r3: Int): Boolean {
+                    val roll = listOf(r1, r2, r3)
+                    for (idx in 0..5) {
+                        val cap = ctrl.animalDailyQuotas[animalKeys[idx]] ?: 0L
+                        if (cap > 0L) {
+                            val add = roll.count { it == idx }
+                            if (add > 0 && hitsPerIdx[idx] + add > cap) return false
+                        }
+                    }
+                    return true
+                }
+
+                val allCombos = buildList {
+                    for (a in 0..5) for (b in 0..5) for (c in 0..5) add(Triple(a, b, c))
+                }
+                val quotaCombos = allCombos.filter { (a, b, c) -> isComboWithinQuota(a, b, c) }
+                val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
+                val pool = when (directive) {
+                    "force_win" -> {
+                        quotaCombos.filter { (a, b, c) -> a == selectedAnimalIndex || b == selectedAnimalIndex || c == selectedAnimalIndex }
+                            .ifEmpty {
+                                allCombos.filter { (a, b, c) -> a == selectedAnimalIndex || b == selectedAnimalIndex || c == selectedAnimalIndex }
+                            }
+                    }
+                    "force_loss" -> {
+                        quotaCombos.filter { (a, b, c) -> a != selectedAnimalIndex && b != selectedAnimalIndex && c != selectedAnimalIndex }
+                            .ifEmpty {
+                                allCombos.filter { (a, b, c) -> a != selectedAnimalIndex && b != selectedAnimalIndex && c != selectedAnimalIndex }
+                            }
+                    }
+                    else -> quotaCombos.ifEmpty { allCombos }
+                }
+
+                val chosen = pool[Random.nextInt(pool.size)]
+                val rolled = listOf(chosen.first, chosen.second, chosen.third)
                 val matches = rolled.count { it == selectedAnimalIndex }
-                val baseBonus = (sys.sixAnimalsPayoutMultiplier - 1.0).coerceIn(0.5, 5.0)
+                val baseBonus = (ctrl.sixAnimalsMult - 1.0).coerceIn(0.2, 29.0)
                 val payoutKs = if (matches > 0) {
-                    stakeKs + (stakeKs * baseBonus * matches).toLong()
+                    (stakeKs + (stakeKs * baseBonus * matches).roundToLong()).coerceIn(0L, stakeKs * 100L)
                 } else 0L
 
                 val pickedName = animalLabels.getOrElse(selectedAnimalIndex) { "Pick #${selectedAnimalIndex + 1}" }
@@ -911,10 +1115,30 @@ class MainViewModel(
     fun saveBettingConfig(
         winCommissionPercent: Double,
         winCommissionBasis: String,
-        autoSettleOrders: Boolean
+        autoSettleOrders: Boolean,
+        autoAcceptOrders: Boolean = bettingConfig.value.autoAcceptOrders
     ) = runAction("အနိုင်အကောက် (%) နှင့် အလိုအလျောက်စနစ် သိမ်းဆည်းပြီးပါပြီ") {
-        val res = repository.saveBettingConfig(winCommissionPercent, winCommissionBasis, autoSettleOrders)
-        if (res.isSuccess) logAuditAsync("Updated betting commission", "settings", "betting_config", "", "$winCommissionPercent% ($winCommissionBasis)")
+        val res = repository.saveBettingConfig(winCommissionPercent, winCommissionBasis, autoSettleOrders, autoAcceptOrders)
+        if (res.isSuccess) {
+            logAuditAsync("Updated betting config", "settings", "betting_config", "", "$winCommissionPercent% ($winCommissionBasis), AutoAccept=$autoAcceptOrders")
+        }
+        res
+    }
+
+    fun toggleAutoAcceptOrders(enabled: Boolean) = runAction(
+        if (enabled) "အော်ဒါ အလိုအလျောက် လက်ခံစနစ် ဖွင့်ပြီးပါပြီ"
+        else "အော်ဒါ ကိုယ်တိုင်စစ်ဆေး လက်ခံစနစ် ပြောင်းလဲပြီးပါပြီ"
+    ) {
+        val cur = bettingConfig.value
+        val res = repository.saveBettingConfig(
+            winCommissionPercent = cur.winCommissionPercent,
+            winCommissionBasis = cur.winCommissionBasis,
+            autoSettleOrders = cur.autoSettleOrders,
+            autoAcceptOrders = enabled
+        )
+        if (res.isSuccess) {
+            logAuditAsync("Toggled auto-accept orders", "settings", "betting_config", "", "AutoAccept=$enabled")
+        }
         res
     }
 
@@ -925,7 +1149,7 @@ class MainViewModel(
                 action = "Updated system & game settings",
                 category = "settings",
                 targetId = "system_config",
-                details = "Maint=${config.maintenanceMode}, DualLimit=${config.dualApprovalThresholdKs} Ks"
+                details = "Maint=${config.maintenanceMode}, DualLimit=${config.dualApprovalThresholdKs} Ks, Hide2D=${config.hideTwoD}, Hide3D=${config.hideThreeD}"
             )
         }
         res
@@ -944,6 +1168,39 @@ class MainViewModel(
         res
     }
 
+    fun saveBrandingConfig(config: BrandingConfig) = runAction("APK နာမည်၊ Logo၊ Theme နှင့် စည်းကမ်းချက် သိမ်းဆည်းပြီးပါပြီ") {
+        val res = repository.saveBrandingConfig(config)
+        if (res.isSuccess) {
+            logAuditAsync("Updated app branding & rules", "settings", "branding_config", config.appName, "Theme=${config.themePreset}, MaxMain=${config.maxContactMainAdminKs}")
+        }
+        res
+    }
+
+    fun saveMiniGameControlConfig(config: MiniGameControlConfig) = runAction("ဂိမ်းခန်း အဆနှင့် ထိန်းချုပ်မှု သိမ်းဆည်းပြီးပါပြီ") {
+        val res = repository.saveMiniGameControlConfig(config)
+        if (res.isSuccess) {
+            logAuditAsync("Updated mini-game control", "settings", "mini_game_control", "", "Directive=${config.globalDirective}, DiceStd=x${config.diceStandardMult}")
+        }
+        res
+    }
+
+    fun setCustomerMiniGameDirective(targetUid: String, customerName: String, directive: String) {
+        val cur = miniGameControlConfig.value
+        val updatedMap = cur.userDirectives.toMutableMap()
+        if (directive == "auto") updatedMap.remove(targetUid) else updatedMap[targetUid] = directive
+        runAction("$customerName ဂိမ်းထိန်းချုပ်မှု ($directive) သတ်မှတ်ပြီးပါပြီ") {
+            val res = repository.saveMiniGameControlConfig(cur.copy(userDirectives = updatedMap))
+            if (res.isSuccess) logAuditAsync("Set mini-game directive", "settings", targetUid, customerName, directive)
+            res
+        }
+    }
+
+    fun saveSupportAgentProfile(profile: SupportAgentProfile) = runAction("ဆက်သွယ်ရန် အချက်အလက် သိမ်းဆည်းပြီးပါပြီ") {
+        val res = repository.saveSupportAgentProfile(profile)
+        if (res.isSuccess) logAuditAsync("Updated admin contact profile", "admin", profile.adminUid, profile.displayName, profile.phone)
+        res
+    }
+
     fun triggerGlobalForceLogout() = runAction("Session အားလုံးကို Force Logout လုပ်ပြီးပါပြီ") {
         val cur = securityConfig.value
         val updated = cur.copy(globalForceLogoutAtMs = System.currentTimeMillis())
@@ -958,9 +1215,22 @@ class MainViewModel(
         accountName: String,
         accountNumber: String,
         note: String,
-        active: Boolean
+        active: Boolean,
+        ownerAdminId: String = "",
+        ownerAdminName: String = ""
     ) = runAction("ငွေပေးချေမှု အကောင့် သိမ်းဆည်းပြီးပါပြီ") {
-        val res = repository.savePaymentAccount(accountId, providerName, accountName, accountNumber, note, active)
+        val effectiveOwnerId = if (ownerAdminId.isNotBlank()) ownerAdminId else if (!isOwnerAdmin.value) currentUserId else ""
+        val effectiveOwnerName = if (ownerAdminName.isNotBlank()) ownerAdminName else if (!isOwnerAdmin.value) (adminMember.value?.displayName ?: displayName) else ""
+        val res = repository.savePaymentAccount(
+            accountId = accountId,
+            providerName = providerName,
+            accountName = accountName,
+            accountNumber = accountNumber,
+            note = note,
+            active = active,
+            ownerAdminId = effectiveOwnerId,
+            ownerAdminName = effectiveOwnerName
+        )
         if (res.isSuccess) logAuditAsync("Saved payment account", "wallet", accountId ?: "new", providerName, "$accountName • $accountNumber")
         res
     }
@@ -1040,7 +1310,7 @@ class MainViewModel(
         else "အလိုအလျောက်ပွဲစဉ်ထည့်ခြင်း ပိတ်ပြီးပါပြီ"
     ) {
         val cur = boardConfig.value
-        val res = repository.saveBoardConfig(enabled, cur.autoSyncLiveResults, cur.lastSyncedDate)
+        val res = repository.saveBoardConfig(enabled, cur.autoSyncLiveResults, cur.lastSyncedDate, cur.allowedLeagues)
         if (res.isSuccess && enabled) {
             repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cur.copy(autoSyncDailyMatches = true))
         }
@@ -1052,9 +1322,18 @@ class MainViewModel(
         else "တိုက်ရိုက်ရလဒ် အလိုအလျောက်ချိတ်ဆက်ခြင်း ပိတ်ပြီးပါပြီ"
     ) {
         val cur = boardConfig.value
-        val res = repository.saveBoardConfig(cur.autoSyncDailyMatches, enabled, cur.lastSyncedDate)
+        val res = repository.saveBoardConfig(cur.autoSyncDailyMatches, enabled, cur.lastSyncedDate, cur.allowedLeagues)
         if (res.isSuccess && enabled) {
             repository.syncLiveMatchResults(feedService)
+        }
+        res
+    }
+
+    fun saveAllowedLeagues(leagues: List<String>) = runAction("ဖွင့်လှစ်မည့် ဘောလုံးဖလား/လိဂ် စာရင်း သိမ်းဆည်းပြီးပါပြီ") {
+        val cur = boardConfig.value
+        val res = repository.saveBoardConfig(cur.autoSyncDailyMatches, cur.autoSyncLiveResults, cur.lastSyncedDate, leagues)
+        if (res.isSuccess) {
+            logAuditAsync("Updated allowed leagues", "board", "board_config", "", "${leagues.size} leagues")
         }
         res
     }
@@ -1261,6 +1540,101 @@ class MainViewModel(
         val res = repository.toggleAdminInvite(code, active)
         if (res.isSuccess) logAuditAsync(if (active) "Activated invite" else "Disabled invite", "admin", code)
         res
+    }
+
+    fun saveAdminInviteEdit(
+        oldCode: String,
+        newCode: String,
+        label: String,
+        active: Boolean,
+        assignedEmail: String,
+        newPin: String?,
+        permissions: AdminPermissions
+    ) = runAction("Invite Code ပြင်ဆင်ပြီးပါပြီ") {
+        val pinHash = when {
+            newPin == null -> null
+            newPin.trim().isBlank() -> ""
+            else -> sha256(newPin.trim())
+        }
+        val res = repository.saveAdminInviteEdit(oldCode, newCode, label, active, assignedEmail, pinHash, permissions)
+        if (res.isSuccess) logAuditAsync("Edited Second Admin invite", "admin", newCode, label, "Old=$oldCode")
+        res
+    }
+
+    fun deleteAdminInvite(code: String) = runAction("Invite Code ဖျက်ပြီးပါပြီ") {
+        val res = repository.deleteAdminInvite(code)
+        if (res.isSuccess) logAuditAsync("Deleted Second Admin invite", "admin", code)
+        res
+    }
+
+    fun setCustomerHidden(userUid: String, userName: String, hidden: Boolean) =
+        runAction(if (hidden) "$userName အချက်အလက်ကို Hide ထားပြီးပါပြီ" else "$userName အချက်အလက်ကို ပြန်ဖော်ပြီးပါပြီ") {
+            val res = repository.setUserHidden(userUid, hidden)
+            if (res.isSuccess) logAuditAsync(if (hidden) "Hid Customer" else "Unhid Customer", "user", userUid, userName)
+            res
+        }
+
+    fun setOrderHidden(orderId: String, hidden: Boolean) =
+        runAction(if (hidden) "အော်ဒါကို Hide ထားပြီးပါပြီ" else "အော်ဒါကို ပြန်ဖော်ပြီးပါပြီ") {
+            val res = repository.setOrderHidden(orderId, hidden)
+            if (res.isSuccess) logAuditAsync(if (hidden) "Hid Order" else "Unhid Order", "order", orderId)
+            res
+        }
+
+    fun editOrderDetails(
+        orderId: String,
+        selections: List<String>,
+        drawRound: String,
+        stakeKs: Long,
+        multiplier: Double,
+        actualPayoutKs: Long,
+        status: String,
+        adminNote: String
+    ) = runAction("အော်ဒါအချက်အလက် ပြင်ဆင်ပြီးပါပြီ") {
+        val res = repository.editOrderDetails(orderId, selections, drawRound, stakeKs, multiplier, actualPayoutKs, status, adminNote)
+        if (res.isSuccess) logAuditAsync("Edited order", "order", orderId, "", "Stake=$stakeKs, Status=$status")
+        res
+    }
+
+    fun editWalletRequest(
+        reqId: String,
+        amountKs: Long,
+        netAmountKs: Long,
+        channel: String,
+        referenceNote: String,
+        status: String,
+        adminNote: String,
+        isHidden: Boolean
+    ) = runAction("ငွေသွင်း/ထုတ် မှတ်တမ်း ပြင်ဆင်ပြီးပါပြီ") {
+        val res = repository.editWalletRequest(reqId, amountKs, netAmountKs, channel, referenceNote, status, adminNote, isHidden)
+        if (res.isSuccess) logAuditAsync("Edited wallet request", "wallet", reqId, "", "$amountKs Ks ($status)")
+        res
+    }
+
+    fun editTransaction(
+        txId: String,
+        title: String,
+        amountKs: Long,
+        direction: String,
+        isHidden: Boolean
+    ) = runAction("ငွေစာရင်းမှတ်တမ်း ပြင်ဆင်ပြီးပါပြီ") {
+        val res = repository.editTransaction(txId, title, amountKs, direction, isHidden)
+        if (res.isSuccess) logAuditAsync("Edited ledger transaction", "wallet", txId, title, "$amountKs Ks ($direction)")
+        res
+    }
+
+    fun deleteTransaction(txId: String) = runAction("ငွေစာရင်းမှတ်တမ်း ဖျက်ပြီးပါပြီ") {
+        val res = repository.deleteTransaction(txId)
+        if (res.isSuccess) logAuditAsync("Deleted ledger transaction", "wallet", txId)
+        res
+    }
+
+    fun deleteAuditLog(logId: String) = runAction("Audit မှတ်တမ်း ဖျက်ပြီးပါပြီ") {
+        repository.deleteAuditLog(logId)
+    }
+
+    fun clearAllAuditLogs(logIds: List<String>) = runAction("Audit မှတ်တမ်းအားလုံး ရှင်းလင်းပြီးပါပြီ") {
+        repository.clearAllAuditLogs(logIds).map { }
     }
 
     fun updateAdminMemberPermissions(adminUid: String, adminName: String, permissions: AdminPermissions) =

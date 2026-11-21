@@ -76,10 +76,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppQualityReview
 import com.example.data.model.AvailableApkUpdate
+import com.example.data.model.BrandingConfig
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
+import com.example.data.model.SupportAgentProfile
 import com.example.data.model.UiState
 import com.example.ui.components.SubScreenTopBar
+import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.ChampionshipGold
@@ -222,6 +225,8 @@ fun ChatHubScreen(
     isAdmin: Boolean,
     directMessagesState: UiState<List<DirectChatMessage>>,
     groupMessagesState: UiState<List<GroupChatMessage>>,
+    brandingConfig: BrandingConfig = BrandingConfig(),
+    supportAgents: List<SupportAgentProfile> = emptyList(),
     onSendDirectMessage: (String) -> Unit,
     onSendGroupMessage: (String) -> Unit,
     onDeleteDirectMessage: (String) -> Unit,
@@ -231,6 +236,7 @@ fun ChatHubScreen(
     onBack: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showAgentDirectory by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = DeepPitchBg,
@@ -291,39 +297,85 @@ fun ChatHubScreen(
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Admin တိုက်ရိုက်ခေါ်ရန်",
-                                        color = ChampionshipGold,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Button(
-                                        onClick = onStartVoiceCall,
-                                        colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        modifier = Modifier.testTag("chat_voice_call_button")
+                                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Voice", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "Admin တိုက်ရိုက်ခေါ်ရန်",
+                                            color = ChampionshipGold,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Button(
+                                            onClick = onStartVoiceCall,
+                                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.testTag("chat_voice_call_button")
+                                        ) {
+                                            Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Voice", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                        Button(
+                                            onClick = onStartVideoCall,
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.testTag("chat_video_call_button")
+                                        ) {
+                                            Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Video", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        }
                                     }
-                                    Button(
-                                        onClick = onStartVideoCall,
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        modifier = Modifier.testTag("chat_video_call_button")
-                                    ) {
-                                        Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Video", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+
+                                    val activeAgents = remember(supportAgents) { supportAgents.filter { it.active } }
+                                    if (activeAgents.isNotEmpty() || brandingConfig.maxContactMainAdminKs > 0L) {
+                                        OutlinedButton(
+                                            onClick = { showAgentDirectory = !showAgentDirectory },
+                                            border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.4f)),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = if (showAgentDirectory) "Second Admin / Main Admin ဆက်သွယ်ရန် ဝှက်မည်"
+                                                else "Second Admin / Main Admin ဖုန်း & ငွေလက်ခံအချက်အလက် (${activeAgents.size})",
+                                                color = ChampionshipGold,
+                                                style = MaterialTheme.typography.labelMedium
+                                            )
+                                        }
+                                    }
+
+                                    if (showAgentDirectory) {
+                                        if (brandingConfig.maxContactMainAdminKs > 0L) {
+                                            Text(
+                                                text = "* ${formatKs(brandingConfig.maxContactMainAdminKs)} နှင့်အထက်အတွက် Main Admin တိုက်ရိုက်ဆက်သွယ်ပါ။",
+                                                color = Color(0xFFFDE68A),
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                        activeAgents.forEach { ag ->
+                                            Surface(
+                                                color = Color(0xFF1A3329),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                    Text(
+                                                        "${ag.displayName} (${if (ag.role == "owner") "Main Admin" else "Second Admin"})",
+                                                        color = Color.White,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    if (ag.phone.isNotBlank()) Text("Phone: ${ag.phone}", color = ChampionshipGold, style = MaterialTheme.typography.labelSmall)
+                                                    if (ag.messagingHandle.isNotBlank()) Text("Msg: ${ag.messagingHandle}", color = Color(0xFFD1FAE5), style = MaterialTheme.typography.labelSmall)
+                                                    if (ag.paymentSummary.isNotBlank()) Text("Pay: ${ag.paymentSummary}", color = Color(0xFF93C5FD), style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

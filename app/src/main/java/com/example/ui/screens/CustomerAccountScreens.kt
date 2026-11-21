@@ -63,12 +63,14 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import com.example.data.model.BetOrder
+import com.example.data.model.BrandingConfig
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
 import com.example.data.model.PaymentAccount
 import com.example.data.model.SportMatch
+import com.example.data.model.SupportAgentProfile
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletConfig
@@ -204,6 +206,8 @@ fun WalletLedgerScreen(
     requestsState: UiState<List<WalletRequest>>,
     transactionsState: UiState<List<LedgerTransaction>>,
     walletConfig: WalletConfig,
+    brandingConfig: BrandingConfig = BrandingConfig(),
+    supportAgents: List<SupportAgentProfile> = emptyList(),
     paymentAccounts: List<PaymentAccount> = emptyList(),
     busy: Boolean,
     onBack: () -> Unit,
@@ -219,6 +223,9 @@ fun WalletLedgerScreen(
 
     val activePaymentAccounts = remember(paymentAccounts) {
         paymentAccounts.filter { it.active }
+    }
+    val activeAgents = remember(supportAgents) {
+        supportAgents.filter { it.active }
     }
     val channelOptions = remember(activePaymentAccounts) {
         (activePaymentAccounts.map { it.providerName } + listOf("KBZPay", "WavePay", "CB Pay", "Cash"))
@@ -237,7 +244,7 @@ fun WalletLedgerScreen(
 
     Scaffold(
         containerColor = DeepPitchBg,
-        topBar = { SubScreenTopBar(title = "ငွေစာရင်း (Wallet)", onBack = onBack) }
+        topBar = { SubScreenTopBar(title = "ငွေစာရင်း (Wallet)", onBack = onBack, brandingConfig = brandingConfig) }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -260,6 +267,94 @@ fun WalletLedgerScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (brandingConfig.maxContactMainAdminKs > 0L) {
+                        item {
+                            Surface(
+                                color = Color(0xFF422006),
+                                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        "Main Admin တိုက်ရိုက် ဆက်သွယ်ရန် ကန့်သတ်ချက်: ${formatKs(brandingConfig.maxContactMainAdminKs)} နှင့်အထက်",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (brandingConfig.mainAdminContactNote.isNotBlank()) {
+                                        Text(
+                                            brandingConfig.mainAdminContactNote,
+                                            color = Color(0xFFFDE68A),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (activeAgents.isNotEmpty()) {
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                                border = BorderStroke(1.dp, PitchEmerald.copy(alpha = 0.6f)),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        "Admin နှင့် Second Admin ဆက်သွယ်ရန် လိပ်စာများ",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    activeAgents.forEach { ag ->
+                                        Surface(
+                                            color = Color(0xFF1A3329),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(ag.displayName.ifBlank { "Admin" }, color = Color.White, fontWeight = FontWeight.Bold)
+                                                    Surface(
+                                                        color = if (ag.role == "owner") ChampionshipGold else Color(0xFF0284C7),
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            if (ag.role == "owner") "Main Admin" else "Second Admin",
+                                                            color = if (ag.role == "owner") InkDark else Color.White,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                                if (ag.phone.isNotBlank()) {
+                                                    Text("ဖုန်း: ${ag.phone}", color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, style = MaterialTheme.typography.bodySmall)
+                                                }
+                                                if (ag.messagingHandle.isNotBlank()) {
+                                                    Text("Viber/Telegram: ${ag.messagingHandle}", color = Color(0xFFD1FAE5), style = MaterialTheme.typography.bodySmall)
+                                                }
+                                                if (ag.paymentSummary.isNotBlank()) {
+                                                    Text("ငွေကြေးစနစ်: ${ag.paymentSummary}", color = Color(0xFF93C5FD), style = MaterialTheme.typography.bodySmall)
+                                                }
+                                                if (ag.note.isNotBlank()) {
+                                                    Text(ag.note, color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (reqType == "topup" && activePaymentAccounts.isNotEmpty()) {
                         item {
                             Card(
@@ -292,6 +387,13 @@ fun WalletLedgerScreen(
                                                         color = Color.White,
                                                         fontWeight = FontWeight.Bold
                                                     )
+                                                    if (acc.ownerAdminName.isNotBlank()) {
+                                                        Text(
+                                                            "တာဝန်ခံ: ${acc.ownerAdminName}",
+                                                            color = Color(0xFF93C5FD),
+                                                            style = MaterialTheme.typography.labelSmall
+                                                        )
+                                                    }
                                                     Text(
                                                         acc.accountNumber,
                                                         color = ChampionshipGold,

@@ -10,20 +10,33 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,12 +47,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
@@ -58,6 +74,8 @@ import com.example.data.auth.signOut
 import com.example.data.model.UiState
 import com.example.data.repository.HtetThuYaRepository
 import com.example.ui.MainViewModel
+import com.example.ui.components.BrandLogoAvatar
+import com.example.ui.components.formatKs
 import com.example.ui.screens.ActiveCallScreen
 import com.example.ui.screens.AdminDashboardScreen
 import com.example.ui.screens.ApkUpdatePromptDialog
@@ -79,14 +97,18 @@ import com.example.ui.screens.ThreeDLotteryScreen
 import com.example.ui.screens.TwoDLotteryScreen
 import com.example.ui.screens.WalletLedgerScreen
 import com.example.ui.screens.rememberCallPermissionLauncher
+import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchBg
 import com.example.ui.theme.HtetThuYaTheme
+import com.example.ui.theme.InkDark
+import com.example.ui.theme.PitchEmeraldDark
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
@@ -227,6 +249,12 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val securityConfig by vm.securityConfig.collectAsStateWithLifecycle()
     val liveFeedState by vm.liveFeed.collectAsStateWithLifecycle()
 
+    val brandingConfig by vm.brandingConfig.collectAsStateWithLifecycle()
+    val miniGameControlConfig by vm.miniGameControlConfig.collectAsStateWithLifecycle()
+    val supportAgents by vm.supportAgents.collectAsStateWithLifecycle()
+    val allMiniGameRoundsState by vm.allMiniGameRounds.collectAsStateWithLifecycle()
+    val allTransactionsState by vm.allTransactions.collectAsStateWithLifecycle()
+
     val appUpdateConfig by vm.appUpdateConfig.collectAsStateWithLifecycle()
     val availableApkUpdate by vm.availableApkUpdate.collectAsStateWithLifecycle()
     val updateDismissed by vm.updateDismissed.collectAsStateWithLifecycle()
@@ -237,6 +265,13 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
     val incomingCall by vm.incomingCall.collectAsStateWithLifecycle()
     var manualOpenUpdateDialog by remember { mutableStateOf(false) }
+    var showSplashOverlay by remember { mutableStateOf(true) }
+    var startupRulesDismissed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(1400L)
+        showSplashOverlay = false
+    }
 
     LaunchedEffect(isForceLoggedOut) {
         if (isForceLoggedOut) {
@@ -268,15 +303,16 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
             !adminPinVerified
     }
 
-    Scaffold(
-        containerColor = DeepPitchBg,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = innerPadding.calculateBottomPadding() * 0f)
-        ) {
+    HtetThuYaTheme(themePreset = brandingConfig.themePreset) {
+        Scaffold(
+            containerColor = DeepPitchBg,
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = innerPadding.calculateBottomPadding() * 0f)
+            ) {
             if (isAdmin && isAdminMode) {
                 BackHandler {
                     vm.setAdminMode(false)
@@ -343,6 +379,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     else -> {
                         AdminDashboardScreen(
                             currentUserId = user.uid,
+                            defaultDisplayName = vm.displayName,
                             isOwnerAdmin = isOwnerAdmin,
                             permissions = currentAdminPermissions,
                             allOrdersState = allOrdersState,
@@ -356,13 +393,18 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             groupMessagesState = groupMessagesState,
                             appReviewsState = appReviewsState,
                             auditLogsState = auditLogsState,
+                            allMiniGameRoundsState = allMiniGameRoundsState,
+                            allTransactionsState = allTransactionsState,
                             paymentAccounts = paymentAccounts,
+                            supportAgents = supportAgents,
                             appUpdateConfig = appUpdateConfig,
                             walletConfig = walletConfig,
                             boardConfig = boardConfig,
                             bettingConfig = bettingConfig,
                             systemGameConfig = systemGameConfig,
                             securityConfig = securityConfig,
+                            brandingConfig = brandingConfig,
+                            miniGameControlConfig = miniGameControlConfig,
                             currentPublicIp = currentPublicIp,
                             busy = busy,
                             onSwitchToCustomer = { vm.setAdminMode(false) },
@@ -373,16 +415,30 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onRejectOrder = vm::rejectOrder,
                             onDeleteOrder = vm::deleteOrder,
                             onClearCompletedOrders = vm::clearCompletedOrders,
+                            onToggleHideOrder = { ord -> vm.setOrderHidden(ord.id, !ord.isHidden) },
+                            onEditOrder = vm::editOrderDetails,
                             onProcessWalletRequest = vm::processWalletRequest,
                             onDeleteWalletRequest = vm::deleteWalletRequest,
+                            onEditWalletRequest = vm::editWalletRequest,
                             onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
+                            onEditTransaction = vm::editTransaction,
+                            onDeleteTransaction = vm::deleteTransaction,
                             onSaveWalletConfig = vm::saveWalletConfig,
-                            onSaveBettingConfig = vm::saveBettingConfig,
+                            onSaveBettingConfig = { pct, basis, autoSettle ->
+                                vm.saveBettingConfig(pct, basis, autoSettle)
+                            },
+                            onToggleAutoAcceptOrders = vm::toggleAutoAcceptOrders,
                             onSaveSystemGameConfig = vm::saveSystemGameConfig,
                             onSaveSecurityConfig = vm::saveSecurityConfig,
+                            onSaveBrandingConfig = vm::saveBrandingConfig,
+                            onSaveMiniGameControlConfig = vm::saveMiniGameControlConfig,
+                            onSetCustomerMiniGameDirective = vm::setCustomerMiniGameDirective,
+                            onSaveSupportAgentProfile = vm::saveSupportAgentProfile,
                             onRefreshPublicIp = vm::refreshPublicIp,
                             onTriggerGlobalForceLogout = vm::triggerGlobalForceLogout,
-                            onSavePaymentAccount = vm::savePaymentAccount,
+                            onSavePaymentAccount = { id, p, n, num, note, act ->
+                                vm.savePaymentAccount(id, p, n, num, note, act)
+                            },
                             onDeletePaymentAccount = vm::deletePaymentAccount,
                             onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
                             onAutoSettleCustomer = vm::autoSettleCustomerOrdersNow,
@@ -400,10 +456,13 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
                             onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
                             onToggleAutoLiveResults = vm::toggleAutoSyncLiveResults,
+                            onSaveAllowedLeagues = vm::saveAllowedLeagues,
                             onCreateAdminInvite = { label, email, pin, perms ->
                                 vm.createAdminInvite(label, email, pin, perms)
                             },
                             onToggleAdminInvite = vm::toggleAdminInvite,
+                            onEditAdminInvite = vm::saveAdminInviteEdit,
+                            onDeleteAdminInvite = vm::deleteAdminInvite,
                             onUpdateAdminPermissions = vm::updateAdminMemberPermissions,
                             onSetAdminStatus = vm::setAdminMemberStatus,
                             onResetAdminPin = vm::resetAdminMemberPin,
@@ -412,7 +471,12 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onAdjustUserBalance = vm::adjustUserBalance,
                             onGiftRewardPoints = vm::giftRewardPoints,
                             onToggleLockUser = vm::setCustomerLocked,
+                            onToggleHideUser = { acc ->
+                                vm.setCustomerHidden(acc.userId, acc.displayName.ifBlank { "Member" }, !acc.isHidden)
+                            },
                             onForceLogoutUser = vm::triggerForceLogoutUser,
+                            onDeleteAuditLog = vm::deleteAuditLog,
+                            onClearAllAuditLogs = vm::clearAllAuditLogs,
                             onSendAdminDirectMessage = vm::sendAdminDirectMessage,
                             onDeleteDirectMessage = vm::deleteDirectMessage,
                             onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = true) },
@@ -439,6 +503,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             isAdmin = isAdmin,
                             pendingAdminCount = pendingAdminBadge,
                             systemGameConfig = systemGameConfig,
+                            brandingConfig = brandingConfig,
                             appLanguage = appLanguage,
                             availableApkUpdate = availableApkUpdate,
                             onOpenUpdateDialog = { manualOpenUpdateDialog = true },
@@ -467,10 +532,11 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             matchesState = matchesState,
                             balanceKs = balanceKs,
                             systemGameConfig = systemGameConfig,
+                            boardConfig = boardConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult ->
-                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -484,10 +550,11 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             matchesState = matchesState,
                             balanceKs = balanceKs,
                             systemGameConfig = systemGameConfig,
+                            boardConfig = boardConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult ->
-                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -533,6 +600,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                         DiceGameScreen(
                             balanceKs = balanceKs,
                             systemGameConfig = systemGameConfig,
+                            miniGameControlConfig = miniGameControlConfig,
                             roundsState = userMiniGameRoundsState,
                             busy = busy,
                             onBack = { navController.popBackStack() },
@@ -552,6 +620,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                         SixAnimalsGameScreen(
                             balanceKs = balanceKs,
                             systemGameConfig = systemGameConfig,
+                            miniGameControlConfig = miniGameControlConfig,
                             roundsState = userMiniGameRoundsState,
                             busy = busy,
                             onBack = { navController.popBackStack() },
@@ -589,6 +658,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             requestsState = userWalletRequestsState,
                             transactionsState = userTransactionsState,
                             walletConfig = walletConfig,
+                            brandingConfig = brandingConfig,
+                            supportAgents = supportAgents,
                             paymentAccounts = paymentAccounts,
                             busy = busy,
                             onBack = { navController.popBackStack() },
@@ -627,6 +698,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             displayName = vm.displayName,
                             currentLanguage = appLanguage,
                             systemGameConfig = systemGameConfig,
+                            brandingConfig = brandingConfig,
+                            miniGameControlConfig = miniGameControlConfig,
                             onSelectLanguage = vm::setAppLanguage,
                             onUpdateSecurityPin = vm::updateCustomerSecurityPin,
                             onBack = { navController.popBackStack() }
@@ -638,6 +711,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             isAdmin = isAdmin,
                             directMessagesState = userDirectMessagesState,
                             groupMessagesState = groupMessagesState,
+                            brandingConfig = brandingConfig,
+                            supportAgents = supportAgents,
                             onSendDirectMessage = vm::sendCustomerDirectMessage,
                             onSendGroupMessage = { text -> vm.sendGroupMessage(text, asAdmin = false) },
                             onDeleteDirectMessage = vm::deleteDirectMessage,
@@ -706,7 +781,102 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     onDecline = { vm.declineIncomingCall(incoming) }
                 )
             }
+
+            if (showSplashOverlay) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(DeepPitchBg)
+                        .clickable { showSplashOverlay = false }
+                        .testTag("startup_splash_overlay"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        BrandLogoAvatar(brandingConfig = brandingConfig, size = 112.dp)
+                        Text(
+                            text = brandingConfig.appName.ifBlank { "လိုတရ" },
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "စိတ်ချယုံကြည်ရသော အွန်လိုင်းကစားဝိုင်း",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else if (
+                !startupRulesDismissed &&
+                brandingConfig.showRulesOnStartup &&
+                !(isAdmin && isAdminMode) &&
+                currentCall == null &&
+                incoming == null
+            ) {
+                AlertDialog(
+                    onDismissRequest = { startupRulesDismissed = true },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            BrandLogoAvatar(brandingConfig = brandingConfig, size = 36.dp)
+                            Text(
+                                text = "${brandingConfig.appName.ifBlank { "လိုတရ" }} စည်းကမ်းချက်များ",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = brandingConfig.rulesText,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (brandingConfig.maxContactMainAdminKs > 0L) {
+                                HorizontalDivider()
+                                Surface(
+                                    color = Color(0xFFFEF3C7),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "Main Admin ဆက်သွယ်ရန် ကန့်သတ်ပမာဏ: ${formatKs(brandingConfig.maxContactMainAdminKs)}",
+                                            color = InkDark,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        if (brandingConfig.mainAdminContactNote.isNotBlank()) {
+                                            Text(
+                                                text = brandingConfig.mainAdminContactNote,
+                                                color = InkDark,
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { startupRulesDismissed = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                            modifier = Modifier.testTag("startup_rules_accept_button")
+                        ) {
+                            Text("သဘောတူပြီး ဝင်ရောက်မည်", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                )
+            }
         }
+    }
     }
 }
 

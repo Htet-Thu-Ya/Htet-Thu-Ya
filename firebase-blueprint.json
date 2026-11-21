@@ -15,6 +15,7 @@
         "isOnline": { "type": "boolean", "description": "Real-time customer online presence flag" },
         "lastSeenAt": { "type": "string", "format": "date-time", "description": "Last seen timestamp" },
         "isLocked": { "type": "boolean", "description": "Admin lock status preventing new orders/withdrawals" },
+        "isHidden": { "type": "boolean", "description": "Admin hide toggle for concealing customer details" },
         "forceLogoutAtMs": { "type": "integer", "description": "Force logout threshold epoch ms" },
         "securityPinHash": { "type": "string", "description": "Optional customer wallet/account PIN hash" },
         "lastRoundId": { "type": "string", "description": "Last settled mini-game round ID for atomic verification" },
@@ -51,6 +52,9 @@
         "inviteCodeUsed": { "type": "string" },
         "pinHash": { "type": "string" },
         "forceLogoutAtMs": { "type": "integer" },
+        "contactPhone": { "type": "string" },
+        "contactMessaging": { "type": "string" },
+        "contactNote": { "type": "string" },
         "permissions": { "type": "object" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -141,6 +145,9 @@
         "status": { "type": "string", "enum": ["pending", "accepted", "won", "lost", "rejected"] },
         "adminNote": { "type": "string" },
         "settledBy": { "type": "string" },
+        "isHidden": { "type": "boolean" },
+        "matchKickoffMs": { "type": "integer" },
+        "scanAtMs": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -179,6 +186,7 @@
         "ratePercent": { "type": "number" },
         "rateMode": { "type": "string", "enum": ["none", "bonus", "fee"] },
         "netAmountKs": { "type": "integer" },
+        "isHidden": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -186,7 +194,7 @@
     },
     "PaymentAccount": {
       "title": "PaymentAccount",
-      "description": "Payment gateway / wallet accounts managed exclusively by Main Admin.",
+      "description": "Payment gateway / wallet accounts managed by Main Admin or dedicated Second Admins.",
       "type": "object",
       "properties": {
         "providerName": { "type": "string" },
@@ -195,14 +203,33 @@
         "note": { "type": "string" },
         "active": { "type": "boolean" },
         "createdBy": { "type": "string" },
+        "ownerAdminId": { "type": "string" },
+        "ownerAdminName": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["providerName", "accountName", "accountNumber", "note", "active", "createdBy", "createdAt", "updatedAt"]
     },
+    "SupportAgentProfile": {
+      "title": "SupportAgentProfile",
+      "description": "Public customer-facing contact and payment channel directory for Main Admin and Second Admins.",
+      "type": "object",
+      "properties": {
+        "adminUid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "admin"] },
+        "phone": { "type": "string" },
+        "messagingHandle": { "type": "string" },
+        "paymentSummary": { "type": "string" },
+        "note": { "type": "string" },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adminUid", "displayName", "role", "phone", "messagingHandle", "paymentSummary", "note", "active", "updatedAt"]
+    },
     "AuditLogEntry": {
       "title": "AuditLogEntry",
-      "description": "Append-only immutable audit history for Main Admin and Second Admin actions.",
+      "description": "Audit history for Main Admin and Second Admin actions (Main Admin may prune logs).",
       "type": "object",
       "properties": {
         "actorId": { "type": "string" },
@@ -219,7 +246,7 @@
     },
     "LedgerTransaction": {
       "title": "LedgerTransaction",
-      "description": "Immutable financial ledger record for customer wallet.",
+      "description": "Financial ledger record for customer wallet (editable/deletable by Main Admin).",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -228,6 +255,7 @@
         "amountKs": { "type": "integer" },
         "title": { "type": "string" },
         "balanceAfterKs": { "type": "integer" },
+        "isHidden": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -249,12 +277,13 @@
     },
     "BoardConfig": {
       "title": "BoardConfig",
-      "description": "Admin-configurable automatic daily fixtures and live result sync flags.",
+      "description": "Admin-configurable automatic daily fixtures, league filters, and live result sync flags.",
       "type": "object",
       "properties": {
         "autoSyncDailyMatches": { "type": "boolean" },
         "autoSyncLiveResults": { "type": "boolean" },
         "lastSyncedDate": { "type": "string" },
+        "allowedLeagues": { "type": "array" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -262,12 +291,13 @@
     },
     "BettingConfig": {
       "title": "BettingConfig",
-      "description": "Admin-configurable winning commission percentage and auto-settlement flags.",
+      "description": "Admin-configurable winning commission percentage, auto-accept, and auto-settlement flags.",
       "type": "object",
       "properties": {
         "winCommissionPercent": { "type": "number" },
         "winCommissionBasis": { "type": "string", "enum": ["payout", "profit"] },
         "autoSettleOrders": { "type": "boolean" },
+        "autoAcceptOrders": { "type": "boolean" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -290,7 +320,7 @@
     },
     "SystemGameConfig": {
       "title": "SystemGameConfig",
-      "description": "Main Admin game toggles, payout rates, stake limits, dual approval threshold, bonus rules, and maintenance mode.",
+      "description": "Main Admin game toggles, payout rates, limits, 2D/3D hide flags, and maintenance mode.",
       "type": "object",
       "properties": {
         "enabledGames": { "type": "array" },
@@ -304,6 +334,8 @@
         "bonusPromoText": { "type": "string" },
         "maintenanceMode": { "type": "boolean" },
         "maintenanceMessage": { "type": "string" },
+        "hideTwoD": { "type": "boolean" },
+        "hideThreeD": { "type": "boolean" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -322,6 +354,47 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["requireAdminPin", "ipWhitelistEnabled", "allowedIps", "globalForceLogoutAtMs", "updatedBy", "updatedAt"]
+    },
+    "BrandingConfig": {
+      "title": "BrandingConfig",
+      "description": "Main Admin dynamic APK name, logo style, theme preset, startup rules, and main-admin contact threshold.",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string" },
+        "logoVariant": { "type": "string" },
+        "customLogoUrl": { "type": "string" },
+        "themePreset": { "type": "string" },
+        "showRulesOnStartup": { "type": "boolean" },
+        "rulesText": { "type": "string" },
+        "maxContactMainAdminKs": { "type": "integer" },
+        "mainAdminContactNote": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["appName", "logoVariant", "customLogoUrl", "themePreset", "showRulesOnStartup", "rulesText", "maxContactMainAdminKs", "mainAdminContactNote", "updatedBy", "updatedAt"]
+    },
+    "MiniGameControlConfig": {
+      "title": "MiniGameControlConfig",
+      "description": "Main Admin controls for Dice & 6-Animal odds multipliers, daily outcome quotas, and customer win/loss directives.",
+      "type": "object",
+      "properties": {
+        "diceStandardMult": { "type": "number" },
+        "diceTripleMult": { "type": "number" },
+        "diceExactMult": { "type": "number" },
+        "sixAnimalsMult": { "type": "number" },
+        "diceAllowedTotals": { "type": "array" },
+        "diceMaxBigPerDay": { "type": "integer" },
+        "diceMaxSmallPerDay": { "type": "integer" },
+        "diceMaxOddPerDay": { "type": "integer" },
+        "diceMaxEvenPerDay": { "type": "integer" },
+        "diceTotalDailyQuotas": { "type": "object" },
+        "animalDailyQuotas": { "type": "object" },
+        "globalDirective": { "type": "string" },
+        "userDirectives": { "type": "object" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["diceStandardMult", "diceTripleMult", "diceExactMult", "sixAnimalsMult", "diceAllowedTotals", "diceMaxBigPerDay", "diceMaxSmallPerDay", "diceMaxOddPerDay", "diceMaxEvenPerDay", "diceTotalDailyQuotas", "animalDailyQuotas", "globalDirective", "userDirectives", "updatedBy", "updatedAt"]
     },
     "DirectChatMessage": {
       "title": "DirectChatMessage",
@@ -438,11 +511,15 @@
     },
     "/payment_accounts/{accountId}": {
       "schema": { "$ref": "#/entities/PaymentAccount" },
-      "description": "Payment wallets and bank gateways managed by Main Admin."
+      "description": "Payment wallets and bank gateways managed by Main Admin or dedicated Second Admins."
+    },
+    "/support_agents/{adminUid}": {
+      "schema": { "$ref": "#/entities/SupportAgentProfile" },
+      "description": "Customer-facing Second Admin & Main Admin contact info and payment channels."
     },
     "/audit_logs/{logId}": {
       "schema": { "$ref": "#/entities/AuditLogEntry" },
-      "description": "Immutable audit log for all Main Admin and Second Admin actions."
+      "description": "Audit log for all Main Admin and Second Admin actions."
     },
     "/transactions/{txId}": {
       "schema": { "$ref": "#/entities/LedgerTransaction" },
@@ -454,11 +531,11 @@
     },
     "/app_settings/board_config": {
       "schema": { "$ref": "#/entities/BoardConfig" },
-      "description": "Daily match and live result sync configuration."
+      "description": "Daily match, league filtering, and live result sync configuration."
     },
     "/app_settings/betting_config": {
       "schema": { "$ref": "#/entities/BettingConfig" },
-      "description": "Winning commission and auto-settlement configuration."
+      "description": "Winning commission, auto-accept, and auto-settlement configuration."
     },
     "/app_settings/app_update": {
       "schema": { "$ref": "#/entities/AppUpdateConfig" },
@@ -466,11 +543,19 @@
     },
     "/app_settings/system_config": {
       "schema": { "$ref": "#/entities/SystemGameConfig" },
-      "description": "Game toggles, payout multipliers, limits, bonus rules, dual-approval threshold, and maintenance mode."
+      "description": "Game toggles, payout multipliers, limits, 2D/3D hide flags, bonus rules, dual-approval threshold, and maintenance mode."
     },
     "/app_settings/security_config": {
       "schema": { "$ref": "#/entities/SecurityConfig" },
       "description": "2FA PIN enforcement, IP whitelist, and global force logout settings."
+    },
+    "/app_settings/branding_config": {
+      "schema": { "$ref": "#/entities/BrandingConfig" },
+      "description": "Main Admin customizable APK branding, startup rules, and high-value Main Admin contact threshold."
+    },
+    "/app_settings/mini_game_control": {
+      "schema": { "$ref": "#/entities/MiniGameControlConfig" },
+      "description": "Main Admin customizable Dice & 6-Animal payout multipliers, daily quotas, and outcome directives."
     },
     "/direct_messages/{msgId}": {
       "schema": { "$ref": "#/entities/DirectChatMessage" },

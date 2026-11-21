@@ -35,6 +35,8 @@ data class UserAccount(
     val lastSeenAt: Timestamp? = null,
     @get:PropertyName("isLocked") @PropertyName("isLocked")
     val isLocked: Boolean = false,
+    @get:PropertyName("isHidden") @PropertyName("isHidden")
+    val isHidden: Boolean = false,
     val forceLogoutAtMs: Long = 0L,
     val securityPinHash: String = "",
     val lastRoundId: String = "",
@@ -143,6 +145,9 @@ data class AdminMember(
     val inviteCodeUsed: String = "",
     val pinHash: String = "",
     val forceLogoutAtMs: Long = 0L,
+    val contactPhone: String = "",
+    val contactMessaging: String = "",
+    val contactNote: String = "",
     val permissions: Map<String, Boolean> = emptyMap(),
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -232,6 +237,10 @@ data class BetOrder(
     val status: String = "pending",
     val adminNote: String = "",
     val settledBy: String = "",
+    @get:PropertyName("isHidden") @PropertyName("isHidden")
+    val isHidden: Boolean = false,
+    val matchKickoffMs: Long = 0L,
+    val scanAtMs: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -266,6 +275,8 @@ data class WalletRequest(
     val ratePercent: Double = 0.0,
     val rateMode: String = "none",
     val netAmountKs: Long = 0L,
+    @get:PropertyName("isHidden") @PropertyName("isHidden")
+    val isHidden: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -280,7 +291,24 @@ data class PaymentAccount(
     val note: String = "",
     val active: Boolean = true,
     val createdBy: String = "",
+    val ownerAdminId: String = "",
+    val ownerAdminName: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class SupportAgentProfile(
+    @DocumentId val id: String = "",
+    val adminUid: String = "",
+    val displayName: String = "",
+    val role: String = "admin",
+    val phone: String = "",
+    val messagingHandle: String = "",
+    val paymentSummary: String = "",
+    val note: String = "",
+    val active: Boolean = true,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
@@ -309,6 +337,8 @@ data class LedgerTransaction(
     val amountKs: Long = 0L,
     val title: String = "",
     val balanceAfterKs: Long = 0L,
+    @get:PropertyName("isHidden") @PropertyName("isHidden")
+    val isHidden: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -350,6 +380,7 @@ data class BoardConfig(
     val autoSyncDailyMatches: Boolean = false,
     val autoSyncLiveResults: Boolean = false,
     val lastSyncedDate: String = "",
+    val allowedLeagues: List<String> = emptyList(),
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -360,6 +391,7 @@ data class BettingConfig(
     val winCommissionPercent: Double = 0.0,
     val winCommissionBasis: String = "payout",
     val autoSettleOrders: Boolean = false,
+    val autoAcceptOrders: Boolean = false,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -395,6 +427,8 @@ data class SystemGameConfig(
     val bonusPromoText: String = "",
     val maintenanceMode: Boolean = false,
     val maintenanceMessage: String = "စနစ်ပြုပြင်ထိန်းသိမ်းမှု ပြုလုပ်နေပါသည် — ခေတ္တစောင့်ဆိုင်းပေးပါ။",
+    val hideTwoD: Boolean = false,
+    val hideThreeD: Boolean = false,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -408,6 +442,48 @@ data class SecurityConfig(
     val ipWhitelistEnabled: Boolean = false,
     val allowedIps: List<String> = emptyList(),
     val globalForceLogoutAtMs: Long = 0L,
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class BrandingConfig(
+    val appName: String = "လိုတရ",
+    val logoVariant: String = "crest", // "crest", "gold_badge", "emerald_shield", "custom_url"
+    val customLogoUrl: String = "",
+    val themePreset: String = "emerald_gold", // "emerald_gold", "royal_blue", "crimson_gold", "obsidian_amber"
+    val showRulesOnStartup: Boolean = true,
+    val rulesText: String = DEFAULT_RULES_TEXT,
+    val maxContactMainAdminKs: Long = 500_000L,
+    val mainAdminContactNote: String = "သတ်မှတ်ငွေပမာဏထက် ကျော်လွန်သော ငွေသွင်း/ငွေထုတ်/လောင်းကြေးများအတွက် Main Admin နှင့် တိုက်ရိုက်ဆက်သွယ်ပေးပါ။",
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    companion object {
+        const val DEFAULT_RULES_TEXT =
+            "၁။ လောင်းကြေးအော်ဒါများကို ပွဲမစမီ အတည်ပြုပေးမည်ဖြစ်ပြီး ပွဲစပြီးနောက် စနစ်မှ အလိုအလျောက် စကန်ဖတ် စစ်ဆေးပါမည်။\n" +
+            "၂။ ငွေသွင်း/ငွေထုတ် ပြုလုပ်ရာတွင် မှန်ကန်သော Reference ID နှင့် ငွေပမာဏကိုသာ တင်သွင်းပါ။\n" +
+            "၃။ သတ်မှတ်ထားသော အများဆုံးငွေပမာဏထက် ကျော်လွန်ပါက Main Admin ထံ တိုက်ရိုက်ဆက်သွယ်၍ အတည်ပြုချက် ရယူရပါမည်။"
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class MiniGameControlConfig(
+    val diceStandardMult: Double = 1.95,
+    val diceTripleMult: Double = 24.0,
+    val diceExactMult: Double = 6.0,
+    val sixAnimalsMult: Double = 2.0,
+    val diceAllowedTotals: List<Int> = emptyList(),
+    val diceMaxBigPerDay: Long = 0L,
+    val diceMaxSmallPerDay: Long = 0L,
+    val diceMaxOddPerDay: Long = 0L,
+    val diceMaxEvenPerDay: Long = 0L,
+    val diceTotalDailyQuotas: Map<String, Long> = emptyMap(),
+    val animalDailyQuotas: Map<String, Long> = emptyMap(),
+    val globalDirective: String = "auto", // "auto", "force_win", "force_loss"
+    val userDirectives: Map<String, String> = emptyMap(), // userId -> "auto" | "force_win" | "force_loss"
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -68,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,17 +93,24 @@ import com.example.data.model.AuditLogEntry
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
 import com.example.data.model.BoardConfig
+import com.example.data.model.BrandingConfig
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
+import com.example.data.model.LedgerTransaction
 import com.example.data.model.LotteryDraw
+import com.example.data.model.MiniGameControlConfig
+import com.example.data.model.MiniGameRound
 import com.example.data.model.PaymentAccount
 import com.example.data.model.SecurityConfig
 import com.example.data.model.SportMatch
+import com.example.data.model.SupportAgentProfile
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
+import com.example.data.network.FootballFeedService
+import com.example.ui.components.BrandLogoAvatar
 import com.example.ui.components.LoTaYaBrandLogo
 import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
@@ -124,9 +134,12 @@ private enum class AdminTabKey {
     SETTLEMENT,
     WALLET,
     BOARD,
+    MINI_GAMES,
     CUSTOMERS,
     FINANCE,
     SUB_ADMINS,
+    MY_PROFILE,
+    BRANDING,
     SYSTEM_SETTINGS,
     SECURITY,
     AUDIT_LOGS,
@@ -137,6 +150,7 @@ private enum class AdminTabKey {
 @Composable
 fun AdminDashboardScreen(
     currentUserId: String,
+    defaultDisplayName: String = "Admin",
     isOwnerAdmin: Boolean = true,
     permissions: AdminPermissions = AdminPermissions.ALL_GRANTED,
     allOrdersState: UiState<List<BetOrder>>,
@@ -150,13 +164,18 @@ fun AdminDashboardScreen(
     groupMessagesState: UiState<List<GroupChatMessage>>,
     appReviewsState: UiState<List<AppQualityReview>>,
     auditLogsState: UiState<List<AuditLogEntry>> = UiState.Success(emptyList()),
+    allMiniGameRoundsState: UiState<List<MiniGameRound>> = UiState.Success(emptyList()),
+    allTransactionsState: UiState<List<LedgerTransaction>> = UiState.Success(emptyList()),
     paymentAccounts: List<PaymentAccount> = emptyList(),
+    supportAgents: List<SupportAgentProfile> = emptyList(),
     appUpdateConfig: AppUpdateConfig?,
     walletConfig: WalletConfig,
     boardConfig: BoardConfig,
     bettingConfig: BettingConfig,
     systemGameConfig: SystemGameConfig = SystemGameConfig(),
     securityConfig: SecurityConfig = SecurityConfig(),
+    brandingConfig: BrandingConfig = BrandingConfig(),
+    miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
     currentPublicIp: String? = null,
     busy: Boolean,
     onSwitchToCustomer: () -> Unit,
@@ -167,13 +186,23 @@ fun AdminDashboardScreen(
     onRejectOrder: (BetOrder, String) -> Unit,
     onDeleteOrder: (String) -> Unit,
     onClearCompletedOrders: (List<String>) -> Unit,
+    onToggleHideOrder: (BetOrder) -> Unit = {},
+    onEditOrder: (String, List<String>, String, Long, Double, Long, String, String) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onProcessWalletRequest: (WalletRequest, Boolean, String) -> Unit,
     onDeleteWalletRequest: (String) -> Unit,
+    onEditWalletRequest: (String, Long, Long, String, String, String, String, Boolean) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onClearProcessedWalletRequests: (List<String>) -> Unit,
+    onEditTransaction: (String, String, Long, String, Boolean) -> Unit = { _, _, _, _, _ -> },
+    onDeleteTransaction: (String) -> Unit = {},
     onSaveWalletConfig: (Double, String, Double, String) -> Unit,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
+    onToggleAutoAcceptOrders: (Boolean) -> Unit = {},
     onSaveSystemGameConfig: (SystemGameConfig) -> Unit = {},
     onSaveSecurityConfig: (SecurityConfig) -> Unit = {},
+    onSaveBrandingConfig: (BrandingConfig) -> Unit = {},
+    onSaveMiniGameControlConfig: (MiniGameControlConfig) -> Unit = {},
+    onSetCustomerMiniGameDirective: (String, String, String) -> Unit = { _, _, _ -> },
+    onSaveSupportAgentProfile: (SupportAgentProfile) -> Unit = {},
     onRefreshPublicIp: () -> Unit = {},
     onTriggerGlobalForceLogout: () -> Unit = {},
     onSavePaymentAccount: (id: String?, providerName: String, accountName: String, accountNumber: String, note: String, active: Boolean) -> Unit = { _, _, _, _, _, _ -> },
@@ -192,8 +221,11 @@ fun AdminDashboardScreen(
     onSyncLiveResultsNow: () -> Unit,
     onToggleAutoDailyMatches: (Boolean) -> Unit,
     onToggleAutoLiveResults: (Boolean) -> Unit,
+    onSaveAllowedLeagues: (List<String>) -> Unit = {},
     onCreateAdminInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
     onToggleAdminInvite: (String, Boolean) -> Unit,
+    onEditAdminInvite: (String, String, String, Boolean, String, String?, AdminPermissions) -> Unit = { _, _, _, _, _, _, _ -> },
+    onDeleteAdminInvite: (String) -> Unit = {},
     onUpdateAdminPermissions: (String, String, AdminPermissions) -> Unit = { _, _, _ -> },
     onSetAdminStatus: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onResetAdminPin: (String, String, String) -> Unit = { _, _, _ -> },
@@ -202,7 +234,10 @@ fun AdminDashboardScreen(
     onAdjustUserBalance: (String, Long, String) -> Unit,
     onGiftRewardPoints: (String, String, Long, String) -> Unit,
     onToggleLockUser: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onToggleHideUser: (UserAccount) -> Unit = {},
     onForceLogoutUser: (String, String) -> Unit = { _, _ -> },
+    onDeleteAuditLog: (String) -> Unit = {},
+    onClearAllAuditLogs: (List<String>) -> Unit = {},
     onSendAdminDirectMessage: (String, String) -> Unit,
     onDeleteDirectMessage: (String) -> Unit,
     onSendGroupMessage: (String) -> Unit,
@@ -223,12 +258,19 @@ fun AdminDashboardScreen(
             if (isOwnerAdmin || permissions.canManageBoard) {
                 add(AdminTabKey.BOARD)
             }
+            if (isOwnerAdmin) {
+                add(AdminTabKey.MINI_GAMES)
+            }
             if (isOwnerAdmin || permissions.canViewUsers) {
                 add(AdminTabKey.CUSTOMERS)
             }
             if (isOwnerAdmin) {
                 add(AdminTabKey.FINANCE)
                 add(AdminTabKey.SUB_ADMINS)
+            }
+            add(AdminTabKey.MY_PROFILE)
+            if (isOwnerAdmin) {
+                add(AdminTabKey.BRANDING)
                 add(AdminTabKey.SYSTEM_SETTINGS)
                 add(AdminTabKey.SECURITY)
             }
@@ -267,6 +309,8 @@ fun AdminDashboardScreen(
     val groupMsgs = (groupMessagesState as? UiState.Success)?.data ?: emptyList()
     val reviews = (appReviewsState as? UiState.Success)?.data ?: emptyList()
     val auditLogs = (auditLogsState as? UiState.Success)?.data ?: emptyList()
+    val miniGameRounds = (allMiniGameRoundsState as? UiState.Success)?.data ?: emptyList()
+    val allTransactions = (allTransactionsState as? UiState.Success)?.data ?: emptyList()
     val usersById = remember(users) { users.associateBy { it.userId } }
 
     val pendingOrderCount = orders.count { it.status == "pending" }
@@ -294,12 +338,12 @@ fun AdminDashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        LoTaYaBrandLogo(size = 40.dp)
+                        BrandLogoAvatar(brandingConfig = brandingConfig, size = 40.dp)
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    "လိုတရ Admin",
+                                    "${brandingConfig.appName.ifBlank { "လိုတရ" }} Admin",
                                     color = ChampionshipGold,
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
@@ -377,9 +421,12 @@ fun AdminDashboardScreen(
                         AdminTabKey.SETTLEMENT -> "စာရင်းချုပ်" to "admin_tab_settlement"
                         AdminTabKey.WALLET -> "ငွေသွင်း/ထုတ် ($pendingWalletCount)" to "admin_tab_wallet"
                         AdminTabKey.BOARD -> "ပွဲစဉ် / ထီ" to "admin_tab_board"
+                        AdminTabKey.MINI_GAMES -> "ဂိမ်းခန်းထိန်းချုပ်" to "admin_tab_mini_games"
                         AdminTabKey.CUSTOMERS -> "Customer (${users.size})" to "admin_tab_customers"
                         AdminTabKey.FINANCE -> "ဘဏ္ဍာရေး/Bank" to "admin_tab_finance"
                         AdminTabKey.SUB_ADMINS -> "Second Admin" to "admin_tab_sub_admins"
+                        AdminTabKey.MY_PROFILE -> "မိမိ Profile/Bank" to "admin_tab_my_profile"
+                        AdminTabKey.BRANDING -> "Logo / App Brand" to "admin_tab_branding"
                         AdminTabKey.SYSTEM_SETTINGS -> "ဂိမ်း/စနစ်" to "admin_tab_system_settings"
                         AdminTabKey.SECURITY -> "လုံခြုံရေး" to "admin_tab_security"
                         AdminTabKey.AUDIT_LOGS -> "Audit Log (${auditLogs.size})" to "admin_tab_audit_logs"
@@ -404,9 +451,11 @@ fun AdminDashboardScreen(
                         orders = orders,
                         usersById = usersById,
                         bettingConfig = bettingConfig,
+                        isOwnerAdmin = isOwnerAdmin,
                         canEditGameConfig = isOwnerAdmin || permissions.canEditGameConfig,
                         busy = busy,
                         onSaveBettingConfig = onSaveBettingConfig,
+                        onToggleAutoAcceptOrders = onToggleAutoAcceptOrders,
                         onAutoSettleNow = onAutoSettleNow,
                         onAutoSettleCustomer = onAutoSettleCustomer,
                         onAutoSettleOrder = onAutoSettleOrder,
@@ -416,12 +465,15 @@ fun AdminDashboardScreen(
                         onLose = { onSettleLoss(it, "စာရင်းပိတ်ပြီး") },
                         onReject = { onRejectOrder(it, "ပယ်ဖျက်ပြီး - ငွေပြန်အမ်းပြီး") },
                         onDeleteOrder = onDeleteOrder,
-                        onClearCompletedOrders = onClearCompletedOrders
+                        onClearCompletedOrders = onClearCompletedOrders,
+                        onToggleHideOrder = onToggleHideOrder,
+                        onEditOrder = onEditOrder
                     )
                     AdminTabKey.SETTLEMENT -> AdminSettlementTab(
                         orders = orders,
                         usersById = usersById,
                         busy = busy,
+                        isOwnerAdmin = isOwnerAdmin,
                         onAutoSettleAll = onAutoSettleNow,
                         onAutoSettleCustomer = onAutoSettleCustomer,
                         onInspectCustomer = { uid -> inspectingUserId = uid },
@@ -430,7 +482,9 @@ fun AdminDashboardScreen(
                         onRequestSettleWin = { order -> settlingWinOrder = order },
                         onSettleLoss = { onSettleLoss(it, "စာရင်းပိတ်ပြီး") },
                         onRejectOrder = { onRejectOrder(it, "ပယ်ဖျက်ပြီး - ငွေပြန်အမ်းပြီး") },
-                        onDeleteOrder = onDeleteOrder
+                        onDeleteOrder = onDeleteOrder,
+                        onToggleHideOrder = onToggleHideOrder,
+                        onEditOrder = onEditOrder
                     )
                     AdminTabKey.WALLET -> AdminWalletRequestsTab(
                         requests = walletReqs,
@@ -460,7 +514,16 @@ fun AdminDashboardScreen(
                         onSyncDailyMatchesNow = onSyncDailyMatchesNow,
                         onSyncLiveResultsNow = onSyncLiveResultsNow,
                         onToggleAutoDailyMatches = onToggleAutoDailyMatches,
-                        onToggleAutoLiveResults = onToggleAutoLiveResults
+                        onToggleAutoLiveResults = onToggleAutoLiveResults,
+                        onSaveAllowedLeagues = onSaveAllowedLeagues
+                    )
+                    AdminTabKey.MINI_GAMES -> AdminMiniGameControlTab(
+                        config = miniGameControlConfig,
+                        rounds = miniGameRounds,
+                        users = users,
+                        busy = busy,
+                        onSaveConfig = onSaveMiniGameControlConfig,
+                        onSetCustomerDirective = onSetCustomerMiniGameDirective
                     )
                     AdminTabKey.CUSTOMERS -> AdminCustomersTab(
                         users = users,
@@ -477,6 +540,7 @@ fun AdminDashboardScreen(
                         onToggleLockUser = { u ->
                             onToggleLockUser(u.userId, u.displayName.ifBlank { "Member" }, !u.isLocked)
                         },
+                        onToggleHideUser = onToggleHideUser,
                         onForceLogoutUser = { u ->
                             onForceLogoutUser(u.userId, u.displayName.ifBlank { "Member" })
                         },
@@ -492,22 +556,47 @@ fun AdminDashboardScreen(
                         users = users,
                         orders = orders,
                         walletRequests = walletReqs,
+                        transactions = allTransactions,
                         paymentAccounts = paymentAccounts,
+                        isOwnerAdmin = isOwnerAdmin,
                         busy = busy,
                         onSavePaymentAccount = onSavePaymentAccount,
-                        onDeletePaymentAccount = onDeletePaymentAccount
+                        onDeletePaymentAccount = onDeletePaymentAccount,
+                        onEditWalletRequest = onEditWalletRequest,
+                        onDeleteWalletRequest = onDeleteWalletRequest,
+                        onEditTransaction = onEditTransaction,
+                        onDeleteTransaction = onDeleteTransaction
                     )
                     AdminTabKey.SUB_ADMINS -> AdminSubAdminsTab(
                         currentUserId = currentUserId,
                         admins = admins,
                         invites = invites,
+                        supportAgents = supportAgents,
                         onCreateInvite = onCreateAdminInvite,
                         onToggleInvite = onToggleAdminInvite,
+                        onEditInvite = onEditAdminInvite,
+                        onDeleteInvite = onDeleteAdminInvite,
                         onUpdateAdminPermissions = onUpdateAdminPermissions,
                         onSetAdminStatus = onSetAdminStatus,
                         onResetAdminPin = onResetAdminPin,
                         onForceLogoutAdmin = onForceLogoutAdmin,
                         onRemoveAdmin = onRemoveAdminMember
+                    )
+                    AdminTabKey.MY_PROFILE -> AdminAgentSelfProfileTab(
+                        currentUserId = currentUserId,
+                        isOwnerAdmin = isOwnerAdmin,
+                        defaultDisplayName = defaultDisplayName,
+                        supportAgents = supportAgents,
+                        paymentAccounts = paymentAccounts,
+                        busy = busy,
+                        onSaveSupportAgentProfile = onSaveSupportAgentProfile,
+                        onSavePaymentAccount = onSavePaymentAccount,
+                        onDeletePaymentAccount = onDeletePaymentAccount
+                    )
+                    AdminTabKey.BRANDING -> AdminBrandingTab(
+                        brandingConfig = brandingConfig,
+                        busy = busy,
+                        onSaveBrandingConfig = onSaveBrandingConfig
                     )
                     AdminTabKey.SYSTEM_SETTINGS -> AdminSystemSettingsTab(
                         config = systemGameConfig,
@@ -524,7 +613,10 @@ fun AdminDashboardScreen(
                     )
                     AdminTabKey.AUDIT_LOGS -> AdminAuditLogsTab(
                         logs = auditLogs,
-                        isOwnerOrCanViewAll = isOwnerAdmin || permissions.canViewAllLogs
+                        isOwnerOrCanViewAll = isOwnerAdmin || permissions.canViewAllLogs,
+                        isOwnerAdmin = isOwnerAdmin,
+                        onDeleteAuditLog = onDeleteAuditLog,
+                        onClearAllAuditLogs = onClearAllAuditLogs
                     )
                     AdminTabKey.CHAT -> AdminChatTab(
                         currentUserId = currentUserId,
@@ -647,9 +739,11 @@ private fun AdminOrdersTab(
     orders: List<BetOrder>,
     usersById: Map<String, UserAccount>,
     bettingConfig: BettingConfig,
+    isOwnerAdmin: Boolean,
     canEditGameConfig: Boolean,
     busy: Boolean,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
+    onToggleAutoAcceptOrders: (Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
     onAutoSettleCustomer: (String, String) -> Unit,
     onAutoSettleOrder: (BetOrder) -> Unit,
@@ -659,13 +753,18 @@ private fun AdminOrdersTab(
     onLose: (BetOrder) -> Unit,
     onReject: (BetOrder) -> Unit,
     onDeleteOrder: (String) -> Unit,
-    onClearCompletedOrders: (List<String>) -> Unit
+    onClearCompletedOrders: (List<String>) -> Unit,
+    onToggleHideOrder: (BetOrder) -> Unit,
+    onEditOrder: (String, List<String>, String, Long, Double, Long, String, String) -> Unit
 ) {
     var filter by remember { mutableStateOf("pending") }
     var groupByCustomer by remember { mutableStateOf(true) }
+    var showHiddenOrders by remember { mutableStateOf(false) }
     var showCommissionSettings by remember { mutableStateOf(false) }
+    var editingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
+    val collapsedCustomers = remember { mutableStateMapOf<String, Boolean>() }
 
     var commissionPctText by remember { mutableStateOf(bettingConfig.winCommissionPercent.toString()) }
     var commissionBasis by remember { mutableStateOf(bettingConfig.winCommissionBasis) }
@@ -681,16 +780,21 @@ private fun AdminOrdersTab(
         autoSettleEnabled = bettingConfig.autoSettleOrders
     }
 
-    val settledIds = remember(orders) {
-        orders.filter { it.status in listOf("won", "lost", "rejected") }.map { it.id }
+    val hiddenCount = remember(orders) { orders.count { it.isHidden } }
+    val baseOrders = remember(orders, showHiddenOrders) {
+        if (showHiddenOrders) orders else orders.filter { !it.isHidden }
     }
 
-    val filtered = remember(orders, filter) {
+    val settledIds = remember(baseOrders) {
+        baseOrders.filter { it.status in listOf("won", "lost", "rejected") }.map { it.id }
+    }
+
+    val filtered = remember(baseOrders, filter) {
         when (filter) {
-            "pending" -> orders.filter { it.status == "pending" }
-            "accepted" -> orders.filter { it.status == "accepted" }
-            "settled" -> orders.filter { it.status in listOf("won", "lost", "rejected") }
-            else -> orders
+            "pending" -> baseOrders.filter { it.status == "pending" }
+            "accepted" -> baseOrders.filter { it.status == "accepted" }
+            "settled" -> baseOrders.filter { it.status in listOf("won", "lost", "rejected") }
+            else -> baseOrders
         }
     }
 
@@ -848,21 +952,65 @@ private fun AdminOrdersTab(
         }
 
         item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                border = BorderStroke(1.dp, PitchEmeraldDark.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            "အော်ဒါ အလိုအလျောက် လက်ခံစနစ် (Auto-Accept)",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            if (bettingConfig.autoAcceptOrders) "Customer တင်လိုက်သည်နှင့် ချက်ချင်း အတည်ပြုပါမည်"
+                            else "Admin မှ ကိုယ်တိုင်စစ်ဆေး လက်ခံမည့်စနစ်",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = bettingConfig.autoAcceptOrders,
+                        onCheckedChange = onToggleAutoAcceptOrders,
+                        enabled = !busy,
+                        modifier = Modifier.testTag("auto_accept_orders_switch")
+                    )
+                }
+            }
+        }
+
+        item {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
-                    "pending" to "အသစ် (${orders.count { it.status == "pending" }})",
-                    "accepted" to "လက်ခံပြီး (${orders.count { it.status == "accepted" }})",
+                    "pending" to "အသစ် (${baseOrders.count { it.status == "pending" }})",
+                    "accepted" to "လက်ခံပြီး (${baseOrders.count { it.status == "accepted" }})",
                     "settled" to "ပြီးဆုံး (${settledIds.size})",
-                    "all" to "အားလုံး (${orders.size})"
+                    "all" to "အားလုံး (${baseOrders.size})"
                 ).forEach { (key, label) ->
                     FilterChip(
                         selected = filter == key,
                         onClick = { filter = key },
                         label = { Text(label) },
                         modifier = Modifier.testTag("admin_orders_filter_$key")
+                    )
+                }
+                if (hiddenCount > 0 || showHiddenOrders) {
+                    FilterChip(
+                        selected = showHiddenOrders,
+                        onClick = { showHiddenOrders = !showHiddenOrders },
+                        label = { Text(if (showHiddenOrders) "Hide ထားသည်များပါပြ ($hiddenCount)" else "Hide ($hiddenCount)") },
+                        modifier = Modifier.testTag("admin_orders_toggle_hidden")
                     )
                 }
             }
@@ -917,6 +1065,7 @@ private fun AdminOrdersTab(
                 val totalStake = customerOrders.sumOf { it.stakeKs }
                 val hasActiveForUser = customerOrders.any { it.status in listOf("pending", "accepted") }
 
+                val isCollapsed = collapsedCustomers[uid] == true
                 item(key = "header_$uid") {
                     val allOrdersForUser = remember(orders, uid) { orders.filter { it.userId == uid } }
                     val custSummary = remember(uid, userAccount, allOrdersForUser) {
@@ -928,7 +1077,7 @@ private fun AdminOrdersTab(
                         border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.45f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onInspectCustomer(uid) }
+                            .clickable { collapsedCustomers[uid] = !isCollapsed }
                             .testTag("customer_order_group_$uid")
                     ) {
                         Column(
@@ -969,11 +1118,23 @@ private fun AdminOrdersTab(
                                         )
                                     }
                                 }
-                                OutlinedButton(onClick = { onInspectCustomer(uid) }) {
-                                    Text("အသေးစိတ်", color = ChampionshipGold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedButton(onClick = { onInspectCustomer(uid) }) {
+                                        Text("အသေးစိတ်", color = ChampionshipGold)
+                                    }
+                                    IconButton(
+                                        onClick = { collapsedCustomers[uid] = !isCollapsed },
+                                        modifier = Modifier.testTag("toggle_collapse_customer_orders_$uid")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                            contentDescription = if (isCollapsed) "Expand" else "Hide",
+                                            tint = ChampionshipGold
+                                        )
+                                    }
                                 }
                             }
-                            if (hasActiveForUser) {
+                            if (hasActiveForUser && !isCollapsed) {
                                 Button(
                                     onClick = { onAutoSettleCustomer(uid, custName) },
                                     enabled = !busy,
@@ -994,18 +1155,23 @@ private fun AdminOrdersTab(
                     }
                 }
 
-                items(customerOrders, key = { it.id }) { order ->
-                    OrderSlipCard(
-                        order = order,
-                        isAdminView = true,
-                        busy = busy,
-                        onAccept = onAccept,
-                        onAutoSettleOrder = onAutoSettleOrder,
-                        onSettleWin = onRequestSettleWin,
-                        onSettleLoss = onLose,
-                        onReject = onReject,
-                        onDeleteOrder = { target -> deletingOrder = target }
-                    )
+                if (!isCollapsed) {
+                    items(customerOrders, key = { it.id }) { order ->
+                        OrderSlipCard(
+                            order = order,
+                            isAdminView = true,
+                            busy = busy,
+                            canDeleteAnyOrder = isOwnerAdmin,
+                            onAccept = onAccept,
+                            onAutoSettleOrder = onAutoSettleOrder,
+                            onSettleWin = onRequestSettleWin,
+                            onSettleLoss = onLose,
+                            onReject = onReject,
+                            onDeleteOrder = { target -> deletingOrder = target },
+                            onToggleHideOrder = onToggleHideOrder,
+                            onEditOrder = { target -> editingOrder = target }
+                        )
+                    }
                 }
             }
         } else {
@@ -1014,20 +1180,35 @@ private fun AdminOrdersTab(
                     order = order,
                     isAdminView = true,
                     busy = busy,
+                    canDeleteAnyOrder = isOwnerAdmin,
                     onAccept = onAccept,
                     onAutoSettleOrder = onAutoSettleOrder,
                     onSettleWin = onRequestSettleWin,
                     onSettleLoss = onLose,
                     onReject = onReject,
-                    onDeleteOrder = { target -> deletingOrder = target }
+                    onDeleteOrder = { target -> deletingOrder = target },
+                    onToggleHideOrder = onToggleHideOrder,
+                    onEditOrder = { target -> editingOrder = target }
                 )
             }
         }
     }
 
+    editingOrder?.let { target ->
+        EditOrderDialog(
+            order = target,
+            onDismiss = { editingOrder = null },
+            onSave = { selections, round, stake, mult, actual, status, note ->
+                val id = target.id
+                editingOrder = null
+                onEditOrder(id, selections, round, stake, mult, actual, status, note)
+            }
+        )
+    }
+
     deletingOrder?.let { target ->
         ConfirmDeleteDialog(
-            title = "ပြီးဆုံးအော်ဒါ ဖျက်မည်လား?",
+            title = if (target.status in listOf("won", "lost", "rejected")) "ပြီးဆုံးအော်ဒါ ဖျက်မည်လား?" else "အော်ဒါ ဖျက်မည်လား?",
             message = "${target.customerName} (${formatKs(target.stakeKs)}) အော်ဒါမှတ်တမ်းကို ဖျက်ပစ်ပါမည်။",
             onDismiss = { deletingOrder = null },
             onConfirm = {
@@ -1390,6 +1571,7 @@ private fun AdminWalletRequestsTab(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AdminBoardTab(
     matches: List<SportMatch>,
@@ -1406,7 +1588,8 @@ private fun AdminBoardTab(
     onSyncDailyMatchesNow: () -> Unit,
     onSyncLiveResultsNow: () -> Unit,
     onToggleAutoDailyMatches: (Boolean) -> Unit,
-    onToggleAutoLiveResults: (Boolean) -> Unit
+    onToggleAutoLiveResults: (Boolean) -> Unit,
+    onSaveAllowedLeagues: (List<String>) -> Unit = {}
 ) {
     var showAddMatch by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
@@ -1417,6 +1600,9 @@ private fun AdminBoardTab(
     var showAutoSyncCard by remember { mutableStateOf(false) }
     var showDrawsSection by remember { mutableStateOf(true) }
     var showMatchesSection by remember { mutableStateOf(true) }
+    var selectedLeagues by remember(boardConfig.allowedLeagues) {
+        mutableStateOf(boardConfig.allowedLeagues.toSet())
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
@@ -1529,6 +1715,39 @@ private fun AdminBoardTab(
                                 onCheckedChange = onToggleAutoLiveResults,
                                 modifier = Modifier.testTag("auto_live_results_switch")
                             )
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+                        Text(
+                            text = if (selectedLeagues.isEmpty()) "ဖွင့်လှစ်မည့် ဖလား/လိဂ်: အားလုံး (All)"
+                            else "ရွေးချယ်ထားသော လိဂ် (${selectedLeagues.size})",
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            FilterChip(
+                                selected = selectedLeagues.isEmpty(),
+                                onClick = { selectedLeagues = emptySet() },
+                                label = { Text("အားလုံး (All)") }
+                            )
+                            FootballFeedService.DEFAULT_LEAGUE_OPTIONS.forEach { leagueName ->
+                                val picked = selectedLeagues.contains(leagueName)
+                                FilterChip(
+                                    selected = picked,
+                                    onClick = {
+                                        selectedLeagues = if (picked) selectedLeagues - leagueName else selectedLeagues + leagueName
+                                    },
+                                    label = { Text(leagueName) }
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = { onSaveAllowedLeagues(selectedLeagues.toList()) },
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                            modifier = Modifier.fillMaxWidth().testTag("save_allowed_leagues_button")
+                        ) {
+                            Text("ဖလား/လိဂ် ရွေးချယ်မှု သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
                         }
                         OutlinedButton(
                             onClick = onSeedSampleBoard,
@@ -1810,18 +2029,22 @@ private fun AdminCustomersTab(
     onOpenAdjustBalance: (UserAccount) -> Unit,
     onOpenGiftPoints: (UserAccount) -> Unit,
     onToggleLockUser: (UserAccount) -> Unit,
+    onToggleHideUser: (UserAccount) -> Unit,
     onForceLogoutUser: (UserAccount) -> Unit,
     onOpenChatWithCustomer: (UserAccount) -> Unit,
     onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var showHiddenUsers by remember { mutableStateOf(false) }
 
     val ordersByUser = remember(orders) { orders.groupBy { it.userId } }
+    val hiddenCount = remember(users) { users.count { it.isHidden } }
 
-    val filteredUsers = remember(users, searchQuery) {
+    val filteredUsers = remember(users, searchQuery, showHiddenUsers) {
+        val visibleList = if (showHiddenUsers) users else users.filter { !it.isHidden }
         val q = searchQuery.trim().lowercase()
-        if (q.isBlank()) users
-        else users.filter {
+        if (q.isBlank()) visibleList
+        else visibleList.filter {
             it.displayName.lowercase().contains(q) || it.email.lowercase().contains(q)
         }
     }
@@ -1848,11 +2071,26 @@ private fun AdminCustomersTab(
         }
         item {
             val onlineCount = remember(users) { users.count { it.isOnline } }
-            Text(
-                "APK ဝင်ရောက်ထားသော Customer များ (${filteredUsers.size}) • Online: $onlineCount",
-                color = ChampionshipGold,
-                style = MaterialTheme.typography.titleMedium
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "APK ဝင်ရောက်ထားသော Customer များ (${filteredUsers.size}) • Online: $onlineCount",
+                    color = ChampionshipGold,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (hiddenCount > 0 || showHiddenUsers) {
+                    FilterChip(
+                        selected = showHiddenUsers,
+                        onClick = { showHiddenUsers = !showHiddenUsers },
+                        label = { Text(if (showHiddenUsers) "Hide ပါပြ ($hiddenCount)" else "Hide ($hiddenCount)") },
+                        modifier = Modifier.testTag("toggle_hidden_users_filter")
+                    )
+                }
+            }
         }
         if (filteredUsers.isEmpty()) {
             item {
@@ -1902,6 +2140,16 @@ private fun AdminCustomersTab(
                                                 )
                                             }
                                         }
+                                        if (user.isHidden) {
+                                            Surface(color = Color(0xFFD97706), shape = RoundedCornerShape(4.dp)) {
+                                                Text(
+                                                    "HIDDEN",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
@@ -1921,20 +2169,32 @@ private fun AdminCustomersTab(
                                     }
                                 }
                             }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    formatKs(user.balanceKs),
-                                    color = PitchEmeraldDark,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    "${user.rewardPoints} Pts",
-                                    color = InkDark,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { onToggleHideUser(user) },
+                                    modifier = Modifier.testTag("toggle_hide_user_${user.userId}")
+                                ) {
+                                    Icon(
+                                        imageVector = if (user.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (user.isHidden) "Show Customer" else "Hide Customer",
+                                        tint = InkMuted
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        formatKs(user.balanceKs),
+                                        color = PitchEmeraldDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "${user.rewardPoints} Pts",
+                                        color = InkDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
                         val netText = when {

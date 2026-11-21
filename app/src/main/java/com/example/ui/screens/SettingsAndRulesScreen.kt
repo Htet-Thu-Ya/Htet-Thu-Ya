@@ -58,6 +58,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
 import com.example.data.model.AppLanguage
+import com.example.data.model.BrandingConfig
+import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UserAccount
 import com.example.ui.components.SubScreenTopBar
@@ -77,6 +79,8 @@ fun SettingsAndRulesScreen(
     displayName: String,
     currentLanguage: AppLanguage,
     systemGameConfig: SystemGameConfig,
+    brandingConfig: BrandingConfig = BrandingConfig(),
+    miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
     onSelectLanguage: (AppLanguage) -> Unit,
     onUpdateSecurityPin: (String, () -> Unit) -> Unit,
     onBack: () -> Unit
@@ -163,14 +167,19 @@ fun SettingsAndRulesScreen(
                 ) {
                     Text(
                         "• အနည်းဆုံး ထိုးကြေး: ${formatKs(systemGameConfig.minStakeKs)}\n" +
-                            "• အများဆုံး ထိုးကြေး: ${formatKs(systemGameConfig.maxStakeKs)}",
+                            "• အများဆုံး ထိုးကြေး: ${formatKs(systemGameConfig.maxStakeKs)}\n" +
+                            "• Main Admin တိုက်ရိုက် ဆက်သွယ်ရန် ကန့်သတ်: ${formatKs(brandingConfig.maxContactMainAdminKs)}",
                         fontWeight = FontWeight.SemiBold,
                         color = PitchEmeraldDark
                     )
+                    if (brandingConfig.rulesText.isNotBlank()) {
+                        Text(brandingConfig.rulesText)
+                    }
                     Text("• ၂လုံးထီ (2D): ${systemGameConfig.twoDPayoutMultiplier.toInt()}x (Live SET Index 12:01 / 4:30)")
                     Text("• ၃လုံးထီ (3D): ${systemGameConfig.threeDPayoutMultiplier.toInt()}x")
-                    Text("• အံစာတုံး (Dice): Big/Small/Odd/Even ${systemGameConfig.dicePayoutMultiplier}x • Exact 8x • Triple 24x")
-                    Text("• ၆ကောင်ဂျင် (6 Animals): ၁ ကောင်တူ 2x • ၂ ကောင်တူ 3x • ၃ ကောင်တူ 4x")
+                    Text("• အံစာတုံး (Dice): Big/Small/Odd/Even ${miniGameControlConfig.diceStandardMult}x • Exact ${miniGameControlConfig.diceExactMult}x • Triple ${miniGameControlConfig.diceTripleMult}x")
+                    val bonus = (miniGameControlConfig.sixAnimalsMult - 1.0).coerceAtLeast(0.2)
+                    Text("• ၆ကောင်ဂျင် (6 Animals): 1တူ ${miniGameControlConfig.sixAnimalsMult}x • 2တူ ${1.0 + bonus * 2}x • 3တူ ${1.0 + bonus * 3}x")
                     Text("• ဘောလုံးပွဲစဉ် (မောင်း / ဘော်ဒီ/ဂိုးပေါင်း): 90 mins + injury time ရလဒ်အပေါ် တွက်ချက်သည်။")
                     Text("• ငွေထုတ် ${formatKs(systemGameConfig.dualApprovalThresholdKs)} နှင့်အထက်ကို Main Admin ထပ်ဆင့် အတည်ပြုပေးပါမည်။")
                 }
@@ -234,10 +243,10 @@ fun SettingsAndRulesScreen(
     if (showTeamThemeDialog) {
         AlertDialog(
             onDismissRequest = { showTeamThemeDialog = false },
-            title = { Text("လိုတရ • Account & App Info") },
+            title = { Text("${brandingConfig.appName.ifBlank { "လိုတရ" }} • Account & App Info") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("App: လိုတရ v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})", fontWeight = FontWeight.Bold)
+                    Text("App: ${brandingConfig.appName.ifBlank { "လိုတရ" }} v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})", fontWeight = FontWeight.Bold)
                     Text("Member: ${account?.displayName ?: displayName}")
                     if (account?.email?.isNotBlank() == true) {
                         Text("Email: ${account.email}", color = PitchEmeraldDark)

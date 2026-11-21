@@ -77,12 +77,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.betting.KyayFormatter
+import com.example.data.model.BoardConfig
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.components.TeamLogoAvatar
+import com.example.ui.components.formatEpochDateTime
+import com.example.ui.components.formatKickoffCountdown
 import com.example.ui.components.formatKs
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchBg
@@ -93,6 +96,8 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmeraldDark
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -110,6 +115,45 @@ private val BoardCellSelectedBg = Color(0xFF16A34A)
 private val BoardCellDefaultBg = Color(0xFFFDFDFD)
 private val BoardBorderGray = Color(0xFFD5DCD8)
 
+private fun parseMatchKickoffMs(match: SportMatch): Long {
+    val label = match.kickoffLabel.trim()
+    val dateStr = match.matchDate.trim()
+    val timeMatch = Regex("""(\d{1,2}):(\d{2})(?:\s*(AM|PM))?""", RegexOption.IGNORE_CASE).find(label)
+        ?: return 0L
+    var hour = timeMatch.groupValues[1].toIntOrNull() ?: return 0L
+    val minute = timeMatch.groupValues[2].toIntOrNull() ?: 0
+    val amPm = timeMatch.groupValues[3].uppercase()
+    if (amPm == "PM" && hour < 12) hour += 12
+    else if (amPm == "AM" && hour == 12) hour = 0
+
+    val cal = Calendar.getInstance()
+    val fullDateMatch = Regex("""(\d{4})-(\d{2})-(\d{2})""").find(dateStr)
+        ?: Regex("""(\d{4})-(\d{2})-(\d{2})""").find(label)
+    if (fullDateMatch != null) {
+        val y = fullDateMatch.groupValues[1].toInt()
+        val m = fullDateMatch.groupValues[2].toInt() - 1
+        val d = fullDateMatch.groupValues[3].toInt()
+        cal.set(y, m, d, hour, minute, 0)
+    } else {
+        val dmyMatch = Regex("""(\d{1,2})-(\d{1,2})-(\d{4})""").find(label)
+        if (dmyMatch != null) {
+            val d = dmyMatch.groupValues[1].toInt()
+            val m = dmyMatch.groupValues[2].toInt() - 1
+            val y = dmyMatch.groupValues[3].toInt()
+            cal.set(y, m, d, hour, minute, 0)
+        } else {
+            if (label.contains("tomorrow", ignoreCase = true) || label.contains("မနက်ဖြန်")) {
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+            cal.set(Calendar.HOUR_OF_DAY, hour)
+            cal.set(Calendar.MINUTE, minute)
+            cal.set(Calendar.SECOND, 0)
+        }
+    }
+    cal.set(Calendar.MILLISECOND, 0)
+    return cal.timeInMillis
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SportsOrderScreen(
@@ -117,6 +161,7 @@ fun SportsOrderScreen(
     matchesState: UiState<List<SportMatch>>,
     balanceKs: Long,
     systemGameConfig: SystemGameConfig = SystemGameConfig(),
+    boardConfig: BoardConfig = BoardConfig(),
     busy: Boolean,
     onBack: () -> Unit,
     onSubmitOrder: (
@@ -126,7 +171,9 @@ fun SportsOrderScreen(
         pickKeys: List<String>,
         drawRound: String,
         stakeKs: Long,
-        multiplier: Double
+        multiplier: Double,
+        matchKickoffMs: Long,
+        scanAtMs: Long
     ) -> Unit
 ) {
     val selectedPicks = remember { mutableStateMapOf<String, MatchPick>() }
@@ -135,9 +182,16 @@ fun SportsOrderScreen(
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
 
-    val openMatches = when (matchesState) {
-        is UiState.Success -> matchesState.data.filter { it.status == "open" }
-        else -> emptyList()
+    val openMatches = remember(matchesState, boardConfig.allowedLeagues) {
+        val allOpen = when (matchesState) {
+            is UiState.Success -> matchesState.data.filter { it.status == "open" }
+            else -> emptyList()
+        }
+        val allowed = boardConfig.allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }
+        if (allowed.isEmpty()) allOpen
+        else allOpen.filter { m ->
+            allowed.any { lg -> m.league.equals(lg, ignoreCase = true) || m.league.contains(lg, ignoreCase = true) }
+        }
     }
 
     val availableLeagues = remember(openMatches) {
@@ -162,6 +216,16 @@ fun SportsOrderScreen(
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
     val potentialGross = if (selectedPicks.isEmpty()) 0L else (parsedStake * combinedMultiplier).roundToLong()
     val potentialProfit = (potentialGross - parsedStake).coerceAtLeast(0L)
+    val earliestKickoffMs = remember(selectedPicks.keys.toList(), openMatches) {
+        val pickedIds = selectedPicks.keys
+        openMatches.filter { it.id in pickedIds }
+            .map { parseMatchKickoffMs(it) }
+            .filter { it > 0L }
+            .minOrNull() ?: 0L
+    }
+    val scheduledScanAtMs = remember(earliestKickoffMs) {
+        if (earliestKickoffMs > 0L) earliestKickoffMs + (135L * 60_000L) else 0L
+    }
     val minSelections = if (isParlay) 2 else 1
     val minAllowedStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxAllowedStake = systemGameConfig.maxStakeKs.coerceAtLeast(minAllowedStake)
@@ -267,6 +331,15 @@ fun SportsOrderScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    if (earliestKickoffMs > 0L) {
+                        Text(
+                            text = "${formatKickoffCountdown(earliestKickoffMs)} • စကန်ချိန်: ${formatEpochDateTime(scheduledScanAtMs)}",
+                            color = Color(0xFF93C5FD),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
                     // Screenshot-faithful bottom bar: လောင်းငွေ | White Box | Bright Green Pill
                     Row(
@@ -322,7 +395,9 @@ fun SportsOrderScreen(
                                     ordered.map { it.pickKey },
                                     if (isParlay) "မောင်း (${ordered.size} ပွဲ)" else "ဘော်ဒီ/ဂိုးပေါင်း",
                                     parsedStake,
-                                    combinedMultiplier
+                                    combinedMultiplier,
+                                    earliestKickoffMs,
+                                    scheduledScanAtMs
                                 )
                             },
                             enabled = canSubmit,

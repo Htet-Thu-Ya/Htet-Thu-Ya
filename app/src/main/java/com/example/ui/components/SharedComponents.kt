@@ -22,8 +22,12 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -60,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import com.example.R
 import com.example.data.model.BetOrder
+import com.example.data.model.BrandingConfig
 import com.example.ui.theme.CinzelFontFamily
 import com.example.ui.theme.PadaukFontFamily
 import com.example.ui.theme.AdminCrimson
@@ -82,6 +87,7 @@ import com.example.ui.theme.SkyInfoSoft
 import com.google.firebase.Timestamp
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 fun formatKs(amount: Long): String {
@@ -95,6 +101,27 @@ fun formatTimestamp(ts: Timestamp?): String {
     return fmt.format(ts.toDate())
 }
 
+fun formatEpochDateTime(epochMs: Long): String {
+    if (epochMs <= 0L) return "-"
+    val fmt = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault())
+    return fmt.format(Date(epochMs))
+}
+
+fun formatKickoffCountdown(matchKickoffMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+    if (matchKickoffMs <= 0L) return ""
+    val diffMs = matchKickoffMs - nowMs
+    if (diffMs <= 0L) return "ပွဲစတင်နေပြီ / ပြီးစီး"
+    val totalMinutes = diffMs / 60_000L
+    val days = totalMinutes / (24L * 60L)
+    val hours = (totalMinutes % (24L * 60L)) / 60L
+    val mins = totalMinutes % 60L
+    return when {
+        days > 0L -> "ပွဲစဖို့ $days ရက် $hours နာရီ လို"
+        hours > 0L -> "ပွဲစဖို့ $hours နာရီ $mins မိနစ် လို"
+        else -> "ပွဲစဖို့ ${mins.coerceAtLeast(1L)} မိနစ် လို"
+    }
+}
+
 fun orderTypeBurmese(type: String): String = when (type) {
     "parlay" -> "မောင်း"
     "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
@@ -103,6 +130,53 @@ fun orderTypeBurmese(type: String): String = when (type) {
     "dice" -> "အံစာတုံး"
     "six_animals" -> "၆ကောင်ဂျင်"
     else -> type
+}
+
+@Composable
+fun BrandLogoAvatar(
+    brandingConfig: BrandingConfig = BrandingConfig(),
+    size: Dp = 44.dp,
+    modifier: Modifier = Modifier
+) {
+    val shape = when (brandingConfig.logoVariant) {
+        "gold_badge" -> CircleShape
+        "emerald_shield" -> RoundedCornerShape(size * 0.36f)
+        else -> RoundedCornerShape(size * 0.24f)
+    }
+    val borderColor = when (brandingConfig.logoVariant) {
+        "emerald_shield" -> PitchEmerald
+        "gold_badge" -> ChampionshipGold
+        else -> ChampionshipGold
+    }
+    val borderWidth = if (brandingConfig.logoVariant == "gold_badge") 2.5.dp else 1.5.dp
+
+    if (brandingConfig.logoVariant == "custom_url" && brandingConfig.customLogoUrl.isNotBlank()) {
+        SubcomposeAsyncImage(
+            model = brandingConfig.customLogoUrl,
+            contentDescription = "${brandingConfig.appName} Logo",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(shape)
+                .border(borderWidth, borderColor, shape),
+            loading = {
+                LoTaYaBrandLogo(size = size, modifier = modifier)
+            },
+            error = {
+                LoTaYaBrandLogo(size = size, modifier = modifier)
+            }
+        )
+    } else {
+        Image(
+            painter = painterResource(id = R.drawable.lotaya_logo),
+            contentDescription = "${brandingConfig.appName} Logo",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(shape)
+                .border(borderWidth, borderColor, shape)
+        )
+    }
 }
 
 @Composable
@@ -237,12 +311,13 @@ fun OnlineStatusDot(
 fun SubScreenTopBar(
     title: String,
     onBack: () -> Unit,
-    containerColor: Color = DeepPitchBg
+    containerColor: Color = DeepPitchBg,
+    brandingConfig: BrandingConfig = BrandingConfig()
 ) {
     TopAppBar(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LoTaYaBrandLogo(size = 30.dp)
+                BrandLogoAvatar(brandingConfig = brandingConfig, size = 30.dp)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     text = title,
@@ -307,20 +382,23 @@ fun OrderSlipCard(
     order: BetOrder,
     isAdminView: Boolean = false,
     busy: Boolean = false,
+    canDeleteAnyOrder: Boolean = false,
     onAccept: ((BetOrder) -> Unit)? = null,
     onAutoSettleOrder: ((BetOrder) -> Unit)? = null,
     onSettleWin: ((BetOrder) -> Unit)? = null,
     onSettleLoss: ((BetOrder) -> Unit)? = null,
     onReject: ((BetOrder) -> Unit)? = null,
-    onDeleteOrder: ((BetOrder) -> Unit)? = null
+    onDeleteOrder: ((BetOrder) -> Unit)? = null,
+    onToggleHideOrder: ((BetOrder) -> Unit)? = null,
+    onEditOrder: ((BetOrder) -> Unit)? = null
 ) {
     val isCompleted = order.status in listOf("won", "lost", "rejected")
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("order_card_${order.id}"),
-        colors = CardDefaults.cardColors(containerColor = PearlCard),
-        border = BorderStroke(1.dp, PearlCardBorder),
+        colors = CardDefaults.cardColors(containerColor = if (order.isHidden && isAdminView) Color(0xFFF3F4F6) else PearlCard),
+        border = BorderStroke(1.dp, if (order.isHidden && isAdminView) AmberPending else PearlCardBorder),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -353,16 +431,51 @@ fun OrderSlipCard(
                         )
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (isAdminView && order.isHidden) {
+                        Surface(color = AmberPendingSoft, shape = RoundedCornerShape(6.dp)) {
+                            Text(
+                                "HIDDEN",
+                                color = AmberPending,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                     StatusBadge(order.status)
-                    if (isCompleted && onDeleteOrder != null) {
+                    if (isAdminView && onToggleHideOrder != null) {
+                        IconButton(
+                            onClick = { onToggleHideOrder(order) },
+                            modifier = Modifier.testTag("toggle_hide_order_${order.id}")
+                        ) {
+                            Icon(
+                                imageVector = if (order.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (order.isHidden) "Show Order" else "Hide Order",
+                                tint = InkMuted
+                            )
+                        }
+                    }
+                    if (isAdminView && onEditOrder != null) {
+                        IconButton(
+                            onClick = { onEditOrder(order) },
+                            modifier = Modifier.testTag("edit_order_${order.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Order",
+                                tint = PitchEmeraldDark
+                            )
+                        }
+                    }
+                    if ((isCompleted || canDeleteAnyOrder) && onDeleteOrder != null) {
                         IconButton(
                             onClick = { onDeleteOrder(order) },
                             modifier = Modifier.testTag("delete_order_${order.id}")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
-                                contentDescription = "Delete Completed Order",
+                                contentDescription = "Delete Order",
                                 tint = AdminCrimson
                             )
                         }
@@ -451,12 +564,43 @@ fun OrderSlipCard(
                 )
             }
 
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = formatTimestamp(order.createdAt),
-                color = InkMuted,
-                style = MaterialTheme.typography.labelMedium
-            )
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Schedule, contentDescription = null, tint = InkMuted, modifier = Modifier.size(14.dp))
+                Text(
+                    text = "လောင်းချိန်: ${formatTimestamp(order.createdAt)}",
+                    color = InkMuted,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            if (order.matchKickoffMs > 0L || order.scanAtMs > 0L) {
+                Spacer(Modifier.height(4.dp))
+                Surface(
+                    color = SkyInfoSoft,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (order.matchKickoffMs > 0L) {
+                            val countdown = formatKickoffCountdown(order.matchKickoffMs)
+                            Text(
+                                text = "ပွဲစချိန်: ${formatEpochDateTime(order.matchKickoffMs)} • $countdown",
+                                color = SkyInfo,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (order.scanAtMs > 0L) {
+                            Text(
+                                text = "စကန်မည့်အချိန်: ${formatEpochDateTime(order.scanAtMs)}",
+                                color = PitchEmeraldDark,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
 
             if (isAdminView && (order.status == "pending" || order.status == "accepted")) {
                 Spacer(Modifier.height(10.dp))
