@@ -1296,6 +1296,7 @@ test("Locked user blocked from betting/wallet, online presence update allowed, a
 
   const roundRef = aliceDb.collection("mini_game_rounds").doc("rnd_1");
   const userRef = aliceDb.collection("users").doc(ALICE_UID);
+  const winTxRef = aliceDb.collection("transactions").doc("tx_rnd_1");
   const batch = aliceDb.batch();
   batch.set(roundRef, {
     userId: ALICE_UID,
@@ -1313,7 +1314,47 @@ test("Locked user blocked from betting/wallet, online presence update allowed, a
     lastRoundId: "rnd_1",
     updatedAt: pastDate(1000),
   });
+  batch.set(winTxRef, {
+    userId: ALICE_UID,
+    txType: "mini_game_win",
+    direction: "credit",
+    amountKs: 1950,
+    title: "အံစာတုံး အနိုင် (ကြီး (Big) • 4 + 5 + 3 = 12)",
+    balanceAfterKs: 5950,
+    createdAt: pastDate(1000),
+    updatedAt: pastDate(1000),
+  });
   await assertSucceeds(batch.commit());
+
+  // Losing 6-animals 3-doc atomic batch (stake 1000, payout 0 -> balance -1000, totalWon unchanged)
+  const lossBatch = aliceDb.batch();
+  lossBatch.set(aliceDb.collection("mini_game_rounds").doc("rnd_2"), {
+    userId: ALICE_UID,
+    customerName: "Alice",
+    gameType: "six_animals",
+    betLabel: "သမင် (Deer)",
+    outcomeLabel: "ကျား • ဆင် • ငါး",
+    stakeKs: 1000,
+    payoutKs: 0,
+    createdAt: pastDate(900),
+  });
+  lossBatch.update(userRef, {
+    balanceKs: 4950,
+    totalWonKs: 1950,
+    lastRoundId: "rnd_2",
+    updatedAt: pastDate(900),
+  });
+  lossBatch.set(aliceDb.collection("transactions").doc("tx_rnd_2"), {
+    userId: ALICE_UID,
+    txType: "mini_game_stake",
+    direction: "debit",
+    amountKs: 1000,
+    title: "၆ကောင်ဂျင် (သမင် (Deer) • ကျား • ဆင် • ငါး)",
+    balanceAfterKs: 4950,
+    createdAt: pastDate(900),
+    updatedAt: pastDate(900),
+  });
+  await assertSucceeds(lossBatch.commit());
 
   // Fake balance win mismatch on mini-game batch MUST fail
   const fakeBatch = aliceDb.batch();

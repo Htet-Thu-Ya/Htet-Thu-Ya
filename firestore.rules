@@ -54,11 +54,16 @@ service cloud.firestore {
       );
     }
 
+    function hasPermInAdminDoc(data, permKey) {
+      return data.get('status', 'active') == 'active' && (
+        data.role == 'owner' ||
+        ('permissions' in data && data.permissions.get(permKey, false) == true)
+      );
+    }
+
     function hasAdminPerm(permKey) {
-      return isOwnerAdmin() || (
-        isActiveAdmin() &&
-        'permissions' in adminDoc() &&
-        adminDoc().permissions.get(permKey, false) == true
+      return isBootstrappedAdmin() || (
+        hasAdminDoc() && hasPermInAdminDoc(adminDoc(), permKey)
       );
     }
 
@@ -452,6 +457,58 @@ service cloud.firestore {
 
     // --- COLLECTIONS ---
 
+    function matchesMiniGameRound(d, prev, uid, roundData) {
+      return roundData.userId == uid &&
+             (d.balanceKs - prev.get('balanceKs', 0)) == (roundData.payoutKs - roundData.stakeKs) &&
+             d.totalWonKs == (prev.get('totalWonKs', 0) + roundData.payoutKs);
+    }
+
+    function isOwnerSelfUserUpdate(d, prev, changed) {
+      return changed.hasOnly(['displayName', 'email', 'isOnline', 'lastSeenAt', 'securityPinHash', 'updatedAt']) ||
+             (prev.get('isLocked', false) == false && (
+               (changed.hasOnly(['balanceKs', 'activeStakeKs', 'updatedAt']) &&
+                d.balanceKs < prev.get('balanceKs', 0) &&
+                (prev.get('balanceKs', 0) - d.balanceKs) == (d.activeStakeKs - prev.get('activeStakeKs', 0))) ||
+               (changed.hasOnly(['balanceKs', 'rewardPoints', 'updatedAt']) &&
+                d.rewardPoints < prev.get('rewardPoints', 0) &&
+                (prev.get('rewardPoints', 0) - d.rewardPoints) >= 10 &&
+                (d.balanceKs - prev.get('balanceKs', 0)) == ((prev.get('rewardPoints', 0) - d.rewardPoints) * 10)) ||
+               (changed.hasOnly(['balanceKs', 'updatedAt']) &&
+                d.balanceKs < prev.get('balanceKs', 0) &&
+                (prev.get('balanceKs', 0) - d.balanceKs) >= 500) ||
+               (changed.hasOnly(['balanceKs', 'totalWonKs', 'lastRoundId', 'updatedAt']) &&
+                'lastRoundId' in d &&
+                d.lastRoundId is string &&
+                isValidId(d.lastRoundId) &&
+                d.lastRoundId != prev.get('lastRoundId', '') &&
+                existsAfter(/databases/$(database)/documents/mini_game_rounds/$(d.lastRoundId)) &&
+                matchesMiniGameRound(d, prev, request.auth.uid, getAfter(/databases/$(database)/documents/mini_game_rounds/$(d.lastRoundId)).data))
+             ));
+    }
+
+    function canSecondAdminUpdateUser(adm, changed) {
+      return adm.get('status', 'active') == 'active' && (
+        adm.role == 'owner' ||
+        ('permissions' in adm && (
+          (changed.hasOnly(['isLocked', 'isHidden', 'updatedAt']) && adm.permissions.get('canLockUsers', false) == true) ||
+          (changed.hasOnly(['balanceKs', 'updatedAt']) && adm.permissions.get('canApproveWallet', false) == true) ||
+          (changed.hasOnly(['balanceKs', 'activeStakeKs', 'totalWonKs', 'rewardPoints', 'updatedAt']) && adm.permissions.get('canManageOrders', false) == true) ||
+          (changed.hasOnly(['balanceKs', 'rewardPoints', 'updatedAt']) && adm.permissions.get('canAdjustBalance', false) == true)
+        ))
+      );
+    }
+
+    function canAdminUpdateUser(changed) {
+      return isBootstrappedAdmin() || (
+        hasAdminDoc() && canSecondAdminUpdateUser(adminDoc(), changed)
+      );
+    }
+
+    function canUpdateUserDoc(userId, d, prev, changed) {
+      return (request.auth.uid == userId && isOwnerSelfUserUpdate(d, prev, changed)) ||
+             canAdminUpdateUser(changed);
+    }
+
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isActiveAdmin());
       allow list: if isActiveAdmin();
@@ -474,54 +531,8 @@ service cloud.firestore {
                        isValidId(userId) &&
                        isValidUserAccount(incoming()) &&
                        incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt && (
-                         // Tier 1a: Main Admin full management (adjust, force logout, lock, hide, etc.)
-                         isOwnerAdmin() ||
-                         // Tier 1b: Active Second Admin with permitted scopes
-                         (hasAdminPerm('canLockUsers') &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['isLocked', 'isHidden', 'updatedAt'])) ||
-                         (hasAdminPerm('canApproveWallet') &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'updatedAt'])) ||
-                         (hasAdminPerm('canManageOrders') &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'activeStakeKs', 'totalWonKs', 'rewardPoints', 'updatedAt'])) ||
-                         (hasAdminPerm('canAdjustBalance') &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'rewardPoints', 'updatedAt'])) ||
-                         // Tier 2a: Owner profile rename / email / presence / PIN sync
-                         (request.auth.uid == userId &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'isOnline', 'lastSeenAt', 'securityPinHash', 'updatedAt'])) ||
-                         // Tier 2b: Owner placing an order (must not be locked; conservation check)
-                         (request.auth.uid == userId &&
-                          existing().get('isLocked', false) == false &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'activeStakeKs', 'updatedAt']) &&
-                          incoming().balanceKs < existing().balanceKs &&
-                          (existing().balanceKs - incoming().balanceKs) == (incoming().activeStakeKs - existing().activeStakeKs)) ||
-                         // Tier 2c: Owner exchanging rewardPoints -> balanceKs (1 point = 10 Ks, min 10 points)
-                         (request.auth.uid == userId &&
-                          existing().get('isLocked', false) == false &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'rewardPoints', 'updatedAt']) &&
-                          incoming().rewardPoints < existing().rewardPoints &&
-                          (existing().rewardPoints - incoming().rewardPoints) >= 10 &&
-                          (incoming().balanceKs - existing().balanceKs) == ((existing().rewardPoints - incoming().rewardPoints) * 10)) ||
-                         // Tier 2d: Owner requesting cash-out withdrawal
-                         (request.auth.uid == userId &&
-                          existing().get('isLocked', false) == false &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'updatedAt']) &&
-                          incoming().balanceKs < existing().balanceKs &&
-                          (existing().balanceKs - incoming().balanceKs) >= 500) ||
-                         // Tier 2e: Owner playing verified mini-game round (Dice / 6-Animal) atomically
-                         (request.auth.uid == userId &&
-                          existing().get('isLocked', false) == false &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['balanceKs', 'totalWonKs', 'lastRoundId', 'updatedAt']) &&
-                          incoming().lastRoundId is string &&
-                          isValidId(incoming().lastRoundId) &&
-                          incoming().lastRoundId != existing().get('lastRoundId', '') &&
-                          existsAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)) &&
-                          getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.userId == request.auth.uid &&
-                          (incoming().balanceKs - existing().balanceKs) ==
-                            (getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.payoutKs -
-                             getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.stakeKs) &&
-                          incoming().totalWonKs == (existing().totalWonKs + getAfter(/databases/$(database)/documents/mini_game_rounds/$(incoming().lastRoundId)).data.payoutKs))
-                       );
+                       incoming().createdAt == existing().createdAt &&
+                       canUpdateUserDoc(userId, incoming(), existing(), incoming().diff(existing()).affectedKeys());
 
       allow delete: if false;
     }
@@ -677,9 +688,9 @@ service cloud.firestore {
       allow list: if isSignedIn() && (isActiveAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() &&
                        isValidId(roundId) &&
+                       incoming().userId == request.auth.uid &&
                        isValidMiniGameRound(incoming()) &&
-                       isUserNotLocked(request.auth.uid) &&
-                       incoming().userId == request.auth.uid;
+                       isUserNotLocked(request.auth.uid);
       allow update, delete: if false;
     }
 
@@ -776,9 +787,9 @@ service cloud.firestore {
                        isValidTransaction(incoming()) &&
                        incoming().keys().hasAll(['userId', 'txType', 'direction', 'amountKs', 'title', 'balanceAfterKs', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'txType', 'direction', 'amountKs', 'title', 'balanceAfterKs', 'isHidden', 'createdAt', 'updatedAt']) && (
-                         isActiveAdmin() ||
                          (incoming().userId == request.auth.uid &&
-                          incoming().txType in ['order_stake', 'point_exchange', 'withdraw', 'mini_game_stake', 'mini_game_win'])
+                          incoming().txType in ['order_stake', 'point_exchange', 'withdraw', 'mini_game_stake', 'mini_game_win']) ||
+                         isActiveAdmin()
                        );
       allow update: if isOwnerAdmin() &&
                        isValidId(txId) &&
