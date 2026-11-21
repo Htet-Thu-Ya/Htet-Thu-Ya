@@ -77,23 +77,25 @@ jobs:
         run: gradle assembleDebug --no-daemon
 
       - name: Prepare APK artifact
-        run: cp app/build/outputs/apk/debug/app-debug.apk HtetThuYa.apk
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk LoTaYa.apk
+          cp app/build/outputs/apk/debug/app-debug.apk HtetThuYa.apk
 
       - name: Upload APK workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HtetThuYa-APK
-          path: HtetThuYa.apk
+          name: LoTaYa-APK
+          path: LoTaYa.apk
 
       - name: Publish APK to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view latest >/dev/null 2>&1; then
-            gh release upload latest HtetThuYa.apk --clobber
+            gh release upload latest LoTaYa.apk HtetThuYa.apk --clobber
           else
-            gh release create latest HtetThuYa.apk \
-              --title "Htet Thu Ya APK" \
-              --notes "Direct Android APK download for Htet Thu Ya (Customer & Admin)." \
+            gh release create latest LoTaYa.apk HtetThuYa.apk \
+              --title "Lo Ta Ya (လိုတရ) APK" \
+              --notes "Direct Android APK download for Lo Ta Ya (Customer & Admin)." \
               --latest
           fi
