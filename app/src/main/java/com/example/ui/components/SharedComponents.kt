@@ -125,6 +125,8 @@ fun formatKickoffCountdown(matchKickoffMs: Long, nowMs: Long = System.currentTim
 fun orderTypeBurmese(type: String): String = when (type) {
     "parlay" -> "မောင်း"
     "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
+    "one_express" -> "One Express ကြေး"
+    "five_five_five" -> "555 ကြေး"
     "three_d" -> "သုံးလုံးထီ"
     "two_d" -> "နှစ်လုံးထီ (2D)"
     "dice" -> "အံစာတုံး"
@@ -573,7 +575,7 @@ fun OrderSlipCard(
                     style = MaterialTheme.typography.labelMedium
                 )
             }
-            if (order.matchKickoffMs > 0L || order.scanAtMs > 0L) {
+            if (order.matchKickoffMs > 0L || order.matchKickoffText.isNotBlank() || order.scanAtMs > 0L) {
                 Spacer(Modifier.height(4.dp))
                 Surface(
                     color = SkyInfoSoft,
@@ -581,6 +583,14 @@ fun OrderSlipCard(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (order.matchKickoffText.isNotBlank()) {
+                            Text(
+                                text = "ပွဲကန်မည့်အချိန်: ${order.matchKickoffText}",
+                                color = SkyInfo,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         if (order.matchKickoffMs > 0L) {
                             val countdown = formatKickoffCountdown(order.matchKickoffMs)
                             Text(

@@ -196,6 +196,10 @@ data class SportMatch(
     val externalId: String = "",
     val matchDate: String = "",
     val liveClock: String = "",
+    val boardSource: String = "standard", // "standard", "one_express", "five_five_five"
+    val oneExpressKyay: String = "",
+    val fiveFiveFiveKyay: String = "",
+    val autoUpdatedAtMs: Long = 0L,
     val createdBy: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -223,7 +227,7 @@ data class BetOrder(
     @DocumentId val id: String = "",
     val userId: String = "",
     val customerName: String = "",
-    val orderType: String = "body_goal", // "parlay", "body_goal", "three_d", "two_d"
+    val orderType: String = "body_goal", // "parlay", "body_goal", "one_express", "five_five_five", "three_d", "two_d"
     val selections: List<String> = emptyList(),
     val matchIds: List<String> = emptyList(),
     val pickKeys: List<String> = emptyList(),
@@ -240,6 +244,7 @@ data class BetOrder(
     @get:PropertyName("isHidden") @PropertyName("isHidden")
     val isHidden: Boolean = false,
     val matchKickoffMs: Long = 0L,
+    val matchKickoffText: String = "",
     val scanAtMs: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -275,6 +280,7 @@ data class WalletRequest(
     val ratePercent: Double = 0.0,
     val rateMode: String = "none",
     val netAmountKs: Long = 0L,
+    val receiptImageBase64: String = "",
     @get:PropertyName("isHidden") @PropertyName("isHidden")
     val isHidden: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
@@ -379,6 +385,8 @@ data class WalletConfig(
 data class BoardConfig(
     val autoSyncDailyMatches: Boolean = false,
     val autoSyncLiveResults: Boolean = false,
+    val autoSyncOneExpress: Boolean = false,
+    val autoSyncFiveFiveFive: Boolean = false,
     val lastSyncedDate: String = "",
     val allowedLeagues: List<String> = emptyList(),
     val updatedBy: String = "",
@@ -429,10 +437,22 @@ data class SystemGameConfig(
     val maintenanceMessage: String = "စနစ်ပြုပြင်ထိန်းသိမ်းမှု ပြုလုပ်နေပါသည် — ခေတ္တစောင့်ဆိုင်းပေးပါ။",
     val hideTwoD: Boolean = false,
     val hideThreeD: Boolean = false,
+    val footballPaused: Boolean = false,
+    val footballReopenAtMs: Long = 0L,
+    val gamesPaused: Boolean = false,
+    val gamesReopenAtMs: Long = 0L,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun isGameEnabled(gameKey: String): Boolean = enabledGames.isEmpty() || enabledGames.contains(gameKey)
+
+    fun isFootballPausedNow(nowMs: Long = System.currentTimeMillis()): Boolean {
+        return footballPaused && (footballReopenAtMs <= 0L || nowMs < footballReopenAtMs)
+    }
+
+    fun isGamesPausedNow(nowMs: Long = System.currentTimeMillis()): Boolean {
+        return gamesPaused && (gamesReopenAtMs <= 0L || nowMs < gamesReopenAtMs)
+    }
 }
 
 @Keep

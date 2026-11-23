@@ -58,6 +58,7 @@ import com.example.data.betting.SettlementCalculator
 import com.example.data.betting.SettlementRange
 import com.example.data.model.BetOrder
 import com.example.data.model.UserAccount
+import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.OrderSlipCard
 import com.example.ui.components.formatKs
 import com.example.ui.theme.AdminCrimson
@@ -104,6 +105,7 @@ fun AdminSettlementTab(
     var range by remember { mutableStateOf(SettlementRange.TODAY) }
     var searchQuery by remember { mutableStateOf("") }
     var showSummaryCard by remember { mutableStateOf(true) }
+    var showCustomerList by remember { mutableStateOf(true) }
     var showHiddenOrders by remember { mutableStateOf(false) }
     var editingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
@@ -347,14 +349,16 @@ fun AdminSettlementTab(
         }
 
         item {
-            Text(
-                text = "Customer တစ်ဦးချင်းစီ အနိုင်/အရှုံး နှင့် လောင်းကြေး (${filteredCustomers.size})",
-                color = ChampionshipGold,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            HideBarSectionHeader(
+                title = "Customer တစ်ဦးချင်းစီ အနိုင်/အရှုံး ဇယား",
+                countBadge = "${filteredCustomers.size} ဦး",
+                isVisible = showCustomerList,
+                onToggle = { showCustomerList = !showCustomerList },
+                testTag = "hide_bar_admin_settlement_customers"
             )
         }
 
+        if (showCustomerList) {
         if (filteredCustomers.isEmpty()) {
             item {
                 Text(
@@ -537,6 +541,7 @@ fun AdminSettlementTab(
                     }
                 }
             }
+        }
         }
     }
 

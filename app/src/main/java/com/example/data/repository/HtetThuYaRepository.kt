@@ -652,13 +652,14 @@ class HtetThuYaRepository(
         pickKeys: List<String> = emptyList(),
         autoAccept: Boolean = false,
         matchKickoffMs: Long = 0L,
-        scanAtMs: Long = 0L
+        scanAtMs: Long = 0L,
+        matchKickoffText: String = ""
     ): Result<String> {
         val orderId = "ord_${UUID.randomUUID().toString().replace("-", "").take(16)}"
         val orderPath = "orders/$orderId"
         return try {
             val uid = requireUserId()
-            require(orderType in listOf("parlay", "body_goal", "three_d", "two_d")) { "Invalid order type" }
+            require(orderType in listOf("parlay", "body_goal", "one_express", "five_five_five", "three_d", "two_d")) { "Invalid order type" }
             require(selections.isNotEmpty() && selections.size <= 30) { "Select 1 to 30 picks" }
             require(stakeKs in 100L..10_000_000L) { "Stake must be between 100 and 10,000,000 Ks" }
             require(multiplier in 1.0..1000.0) { "Invalid multiplier" }
@@ -668,6 +669,7 @@ class HtetThuYaRepository(
             val safeMatchIds = matchIds.take(15).map { it.take(128) }
             val safePickKeys = pickKeys.take(15).map { it.take(20) }
             val safeRound = drawRound.take(60)
+            val safeKickoffText = matchKickoffText.trim().take(160)
             val potentialPayout = (stakeKs * multiplier).roundToLong().coerceAtLeast(stakeKs)
 
             val userRef = db.collection("users").document(uid)
@@ -714,6 +716,7 @@ class HtetThuYaRepository(
                         "settledBy" to "",
                         "isHidden" to false,
                         "matchKickoffMs" to matchKickoffMs.coerceAtLeast(0L),
+                        "matchKickoffText" to safeKickoffText,
                         "scanAtMs" to scanAtMs.coerceAtLeast(0L),
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -749,7 +752,8 @@ class HtetThuYaRepository(
         amountKs: Long,
         channel: String,
         referenceNote: String,
-        walletConfig: WalletConfig = WalletConfig()
+        walletConfig: WalletConfig = WalletConfig(),
+        receiptImageBase64: String = ""
     ): Result<Unit> {
         val reqId = "wr_${UUID.randomUUID().toString().replace("-", "").take(16)}"
         val reqPath = "wallet_requests/$reqId"
@@ -762,6 +766,7 @@ class HtetThuYaRepository(
             require(safeChannel.isNotBlank()) { "ငွေပေးချေမှုနည်းလမ်း ရွေးချယ်ပါ" }
             require(safeRef.isNotBlank()) { "အထောက်အထား / ဖုန်းနံပါတ် ထည့်သွင်းပါ" }
             val safeName = customerName.trim().ifBlank { "Member" }.take(60)
+            val safeReceipt = receiptImageBase64.trim().take(180_000)
 
             val ratePercent = if (requestType == "topup") walletConfig.depositPercent else walletConfig.withdrawPercent
             val rateMode = if (ratePercent <= 0.0) "none" else if (requestType == "topup") walletConfig.depositMode else walletConfig.withdrawMode
@@ -775,6 +780,7 @@ class HtetThuYaRepository(
                 "amountKs" to amountKs,
                 "channel" to safeChannel,
                 "referenceNote" to safeRef,
+                "receiptImageBase64" to safeReceipt,
                 "status" to "pending",
                 "adminNote" to "",
                 "processedBy" to "",
@@ -1550,27 +1556,43 @@ class HtetThuYaRepository(
         handicapLine: String,
         goalLine: String,
         bodyOdds: Double,
-        goalOdds: Double
+        goalOdds: Double,
+        boardSource: String = "standard",
+        oneExpressKyay: String = "",
+        fiveFiveFiveKyay: String = ""
     ): Result<Unit> {
         val matchId = "m_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val path = "matches/$matchId"
         return try {
             val adminUid = requireUserId()
             require(league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank()) { "အသင်းနှင့် လိဂ်အမည် ဖြည့်စွက်ပါ" }
+            val safeSource = boardSource.takeIf { it in listOf("standard", "one_express", "five_five_five") } ?: "standard"
+            val safeHandicap = handicapLine.trim().ifBlank { "Home -0.5" }.take(40)
+            val safeGoal = goalLine.trim().ifBlank { "2.5" }.take(20)
+            val resolvedOneExp = oneExpressKyay.trim().ifBlank {
+                if (safeSource == "one_express") com.example.data.betting.KyayFormatter.formatOneExpressKyay(safeHandicap, safeGoal) else ""
+            }.take(60)
+            val resolved555 = fiveFiveFiveKyay.trim().ifBlank {
+                if (safeSource == "five_five_five") com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(safeHandicap, safeGoal) else ""
+            }.take(60)
             db.collection("matches").document(matchId).set(
                 mapOf(
                     "league" to league.trim().take(60),
                     "homeTeam" to homeTeam.trim().take(60),
                     "awayTeam" to awayTeam.trim().take(60),
                     "kickoffLabel" to kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40),
-                    "handicapLine" to handicapLine.trim().ifBlank { "Home -0.5" }.take(40),
-                    "goalLine" to goalLine.trim().ifBlank { "2.5" }.take(20),
+                    "handicapLine" to safeHandicap,
+                    "goalLine" to safeGoal,
                     "bodyOdds" to bodyOdds.coerceIn(1.05, 50.0),
                     "goalOdds" to goalOdds.coerceIn(1.05, 50.0),
                     "status" to "open",
                     "homeScore" to 0L,
                     "awayScore" to 0L,
                     "visibility" to "public",
+                    "boardSource" to safeSource,
+                    "oneExpressKyay" to resolvedOneExp,
+                    "fiveFiveFiveKyay" to resolved555,
+                    "autoUpdatedAtMs" to System.currentTimeMillis(),
                     "createdBy" to adminUid,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -1597,7 +1619,9 @@ class HtetThuYaRepository(
         goalOdds: Double,
         status: String,
         homeScore: Long,
-        awayScore: Long
+        awayScore: Long,
+        oneExpressKyay: String? = null,
+        fiveFiveFiveKyay: String? = null
     ): Result<Unit> {
         val path = "matches/$matchId"
         return try {
@@ -1605,22 +1629,28 @@ class HtetThuYaRepository(
             require(matchId.isNotBlank() && ID_REGEX.matches(matchId)) { "Invalid match ID" }
             require(league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank()) { "အသင်းနှင့် လိဂ်အမည် ဖြည့်စွက်ပါ" }
             require(status in listOf("open", "closed", "finished"))
-            db.collection("matches").document(matchId).update(
-                mapOf(
-                    "league" to league.trim().take(60),
-                    "homeTeam" to homeTeam.trim().take(60),
-                    "awayTeam" to awayTeam.trim().take(60),
-                    "kickoffLabel" to kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40),
-                    "handicapLine" to handicapLine.trim().ifBlank { "Home -0.5" }.take(40),
-                    "goalLine" to goalLine.trim().ifBlank { "2.5" }.take(20),
-                    "bodyOdds" to bodyOdds.coerceIn(1.0, 50.0),
-                    "goalOdds" to goalOdds.coerceIn(1.0, 50.0),
-                    "status" to status,
-                    "homeScore" to homeScore.coerceIn(0L, 99L),
-                    "awayScore" to awayScore.coerceIn(0L, 99L),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val fields = mutableMapOf<String, Any>(
+                "league" to league.trim().take(60),
+                "homeTeam" to homeTeam.trim().take(60),
+                "awayTeam" to awayTeam.trim().take(60),
+                "kickoffLabel" to kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40),
+                "handicapLine" to handicapLine.trim().ifBlank { "Home -0.5" }.take(40),
+                "goalLine" to goalLine.trim().ifBlank { "2.5" }.take(20),
+                "bodyOdds" to bodyOdds.coerceIn(1.0, 50.0),
+                "goalOdds" to goalOdds.coerceIn(1.0, 50.0),
+                "status" to status,
+                "homeScore" to homeScore.coerceIn(0L, 99L),
+                "awayScore" to awayScore.coerceIn(0L, 99L),
+                "autoUpdatedAtMs" to System.currentTimeMillis(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (oneExpressKyay != null) {
+                fields["oneExpressKyay"] = oneExpressKyay.trim().take(60)
+            }
+            if (fiveFiveFiveKyay != null) {
+                fields["fiveFiveFiveKyay"] = fiveFiveFiveKyay.trim().take(60)
+            }
+            db.collection("matches").document(matchId).update(fields).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -2041,6 +2071,10 @@ class HtetThuYaRepository(
                     "maintenanceMessage" to config.maintenanceMessage.trim().take(300),
                     "hideTwoD" to config.hideTwoD,
                     "hideThreeD" to config.hideThreeD,
+                    "footballPaused" to config.footballPaused,
+                    "footballReopenAtMs" to config.footballReopenAtMs.coerceAtLeast(0L),
+                    "gamesPaused" to config.gamesPaused,
+                    "gamesReopenAtMs" to config.gamesReopenAtMs.coerceAtLeast(0L),
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2258,7 +2292,9 @@ class HtetThuYaRepository(
         autoSyncDailyMatches: Boolean,
         autoSyncLiveResults: Boolean,
         lastSyncedDate: String,
-        allowedLeagues: List<String> = emptyList()
+        allowedLeagues: List<String> = emptyList(),
+        autoSyncOneExpress: Boolean = false,
+        autoSyncFiveFiveFive: Boolean = false
     ): Result<Unit> {
         val path = "app_settings/board_config"
         return try {
@@ -2269,6 +2305,8 @@ class HtetThuYaRepository(
                     "autoSyncLiveResults" to autoSyncLiveResults,
                     "lastSyncedDate" to lastSyncedDate.take(20),
                     "allowedLeagues" to allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(30),
+                    "autoSyncOneExpress" to autoSyncOneExpress,
+                    "autoSyncFiveFiveFive" to autoSyncFiveFiveFive,
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2600,7 +2638,8 @@ class HtetThuYaRepository(
         referenceNote: String,
         status: String,
         adminNote: String,
-        isHidden: Boolean
+        isHidden: Boolean,
+        receiptImageBase64: String? = null
     ): Result<Unit> {
         val path = "wallet_requests/$reqId"
         return try {
@@ -2611,19 +2650,21 @@ class HtetThuYaRepository(
             val safeNet = netAmountKs.coerceIn(0L, 100_000_000L)
             val safeChannel = channel.trim().ifBlank { "Wallet" }.take(40)
             val safeRef = referenceNote.trim().ifBlank { "-" }.take(120)
-            db.collection("wallet_requests").document(reqId).update(
-                mapOf(
-                    "amountKs" to safeAmount,
-                    "netAmountKs" to safeNet,
-                    "channel" to safeChannel,
-                    "referenceNote" to safeRef,
-                    "status" to status,
-                    "adminNote" to adminNote.trim().take(200),
-                    "processedBy" to adminUid,
-                    "isHidden" to isHidden,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val fields = mutableMapOf<String, Any>(
+                "amountKs" to safeAmount,
+                "netAmountKs" to safeNet,
+                "channel" to safeChannel,
+                "referenceNote" to safeRef,
+                "status" to status,
+                "adminNote" to adminNote.trim().take(200),
+                "processedBy" to adminUid,
+                "isHidden" to isHidden,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (receiptImageBase64 != null) {
+                fields["receiptImageBase64"] = receiptImageBase64.trim().take(180_000)
+            }
+            db.collection("wallet_requests").document(reqId).update(fields).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -2879,6 +2920,7 @@ class HtetThuYaRepository(
             val existingSnap = db.collection("matches").get().await()
             val existingById = existingSnap.documents.associateBy { it.id }
 
+            val nowMs = System.currentTimeMillis()
             var syncedCount = 0
             fixtures.chunked(200).forEach { chunk ->
                 val batch = db.batch()
@@ -2907,6 +2949,10 @@ class HtetThuYaRepository(
                                 "externalId" to fix.externalId,
                                 "matchDate" to fix.matchDate,
                                 "liveClock" to fix.liveClock,
+                                "boardSource" to "standard",
+                                "oneExpressKyay" to "",
+                                "fiveFiveFiveKyay" to "",
+                                "autoUpdatedAtMs" to nowMs,
                                 "createdBy" to adminUid,
                                 "createdAt" to FieldValue.serverTimestamp(),
                                 "updatedAt" to FieldValue.serverTimestamp()
@@ -2925,6 +2971,7 @@ class HtetThuYaRepository(
                                 "awayScore" to fix.awayScore,
                                 "liveClock" to fix.liveClock,
                                 "matchDate" to fix.matchDate,
+                                "autoUpdatedAtMs" to nowMs,
                                 "updatedAt" to FieldValue.serverTimestamp()
                             )
                         )
@@ -2941,6 +2988,122 @@ class HtetThuYaRepository(
                         "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
                         "lastSyncedDate" to feedService.todayDateIso(),
                         "allowedLeagues" to currentConfig.allowedLeagues.take(30),
+                        "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
+                        "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
+                        "updatedBy" to adminUid,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(syncedCount)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun syncBoardMatchesFromFeed(
+        boardSource: String,
+        feedService: FootballFeedService,
+        dayOffsets: List<Int> = listOf(0, 1),
+        currentConfig: BoardConfig? = null
+    ): Result<Int> {
+        val path = "matches/sync_$boardSource"
+        return try {
+            val adminUid = requireUserId()
+            require(boardSource in listOf("one_express", "five_five_five")) { "Unsupported board source" }
+            val allowedLeagues = currentConfig?.allowedLeagues.orEmpty()
+            val feedResult = feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
+            val fixtures = feedResult.getOrElse { throw it }
+            if (fixtures.isEmpty()) {
+                return Result.success(0)
+            }
+            val existingSnap = db.collection("matches").get().await()
+            val existingById = existingSnap.documents.associateBy { it.id }
+
+            val docPrefix = if (boardSource == "one_express") "ext_oneexp_" else "ext_555_"
+            val nowMs = System.currentTimeMillis()
+            var syncedCount = 0
+            fixtures.chunked(200).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { fix ->
+                    val docId = "${docPrefix}${fix.externalId}".replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(80)
+                    val docRef = db.collection("matches").document(docId)
+                    val prev = existingById[docId]
+                    val oneExpKyay = if (boardSource == "one_express") {
+                        com.example.data.betting.KyayFormatter.formatOneExpressKyay(fix.handicapLine, fix.goalLine)
+                    } else ""
+                    val fffKyay = if (boardSource == "five_five_five") {
+                        com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(fix.handicapLine, fix.goalLine)
+                    } else ""
+                    if (prev == null || !prev.exists()) {
+                        batch.set(
+                            docRef,
+                            mapOf(
+                                "league" to fix.league,
+                                "homeTeam" to fix.homeTeam,
+                                "awayTeam" to fix.awayTeam,
+                                "homeLogoUrl" to fix.homeLogoUrl,
+                                "awayLogoUrl" to fix.awayLogoUrl,
+                                "kickoffLabel" to fix.kickoffLabel,
+                                "handicapLine" to fix.handicapLine,
+                                "goalLine" to fix.goalLine,
+                                "bodyOdds" to fix.bodyOdds,
+                                "goalOdds" to fix.goalOdds,
+                                "status" to fix.status,
+                                "homeScore" to fix.homeScore,
+                                "awayScore" to fix.awayScore,
+                                "visibility" to "public",
+                                "externalId" to fix.externalId,
+                                "matchDate" to fix.matchDate,
+                                "liveClock" to fix.liveClock,
+                                "boardSource" to boardSource,
+                                "oneExpressKyay" to oneExpKyay,
+                                "fiveFiveFiveKyay" to fffKyay,
+                                "autoUpdatedAtMs" to nowMs,
+                                "createdBy" to adminUid,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                        syncedCount++
+                    } else {
+                        val updateFields = mutableMapOf<String, Any>(
+                            "homeLogoUrl" to fix.homeLogoUrl,
+                            "awayLogoUrl" to fix.awayLogoUrl,
+                            "kickoffLabel" to fix.kickoffLabel,
+                            "status" to fix.status,
+                            "homeScore" to fix.homeScore,
+                            "awayScore" to fix.awayScore,
+                            "liveClock" to fix.liveClock,
+                            "matchDate" to fix.matchDate,
+                            "autoUpdatedAtMs" to nowMs,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                        if (boardSource == "one_express" && prev.getString("oneExpressKyay").isNullOrBlank()) {
+                            updateFields["oneExpressKyay"] = oneExpKyay
+                        }
+                        if (boardSource == "five_five_five" && prev.getString("fiveFiveFiveKyay").isNullOrBlank()) {
+                            updateFields["fiveFiveFiveKyay"] = fffKyay
+                        }
+                        batch.update(docRef, updateFields)
+                        syncedCount++
+                    }
+                }
+                batch.commit().await()
+            }
+
+            if (currentConfig != null) {
+                db.collection("app_settings").document("board_config").set(
+                    mapOf(
+                        "autoSyncDailyMatches" to currentConfig.autoSyncDailyMatches,
+                        "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
+                        "lastSyncedDate" to feedService.todayDateIso(),
+                        "allowedLeagues" to currentConfig.allowedLeagues.take(30),
+                        "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
+                        "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3510,6 +3673,8 @@ class HtetThuYaRepository(
     private fun orderTypeLabel(orderType: String): String = when (orderType) {
         "parlay" -> "မောင်း"
         "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
+        "one_express" -> "One Express ကြေး"
+        "five_five_five" -> "555 ကြေး"
         "two_d" -> "၂လုံးထီ"
         "three_d" -> "သုံးလုံးထီ"
         else -> orderType

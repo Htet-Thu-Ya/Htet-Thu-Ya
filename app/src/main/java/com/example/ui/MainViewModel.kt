@@ -472,10 +472,19 @@ class MainViewModel(
                     if (admin && !autoSyncedSession) {
                         autoSyncedSession = true
                         val today = feedService.todayDateIso()
-                        if (cfg.autoSyncDailyMatches && cfg.lastSyncedDate != today && currentAdminPermissions.value.canManageBoard) {
-                            repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cfg)
-                        } else if (cfg.autoSyncLiveResults && currentAdminPermissions.value.canManageBoard) {
-                            repository.syncLiveMatchResults(feedService)
+                        val canManageBoard = currentAdminPermissions.value.canManageBoard
+                        if (canManageBoard) {
+                            if (cfg.autoSyncDailyMatches && cfg.lastSyncedDate != today) {
+                                repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cfg)
+                            } else if (cfg.autoSyncLiveResults) {
+                                repository.syncLiveMatchResults(feedService)
+                            }
+                            if (cfg.autoSyncOneExpress && cfg.lastSyncedDate != today) {
+                                repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cfg)
+                            }
+                            if (cfg.autoSyncFiveFiveFive && cfg.lastSyncedDate != today) {
+                                repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cfg)
+                            }
                         }
                     }
                 }
@@ -708,6 +717,19 @@ class MainViewModel(
 
     // --- CUSTOMER ORDERS & MINI-GAMES ---
 
+    private fun formatAutoReopenNotice(reopenAtMs: Long, prefix: String): String {
+        if (reopenAtMs <= 0L) return "$prefix ခေတ္တပိတ်ထားပါသည်"
+        val remSec = ((reopenAtMs - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L)
+        val hrs = remSec / 3600L
+        val mins = (remSec % 3600L) / 60L
+        val secs = remSec % 60L
+        val hhmm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Yangon")
+        }.format(java.util.Date(reopenAtMs))
+        val countdown = if (hrs > 0) "${hrs}နာရီ ${mins}မိနစ်" else "${mins}မိနစ် ${secs}စက္ကန့်"
+        return "$prefix ခေတ္တပိတ်ထားပါသည် ($hhmm တွင် အလိုအလျောက် ပြန်ဖွင့်မည် • $countdown ကျန်)"
+    }
+
     fun placeOrder(
         orderType: String,
         selections: List<String>,
@@ -718,11 +740,23 @@ class MainViewModel(
         pickKeys: List<String> = emptyList(),
         matchKickoffMs: Long = 0L,
         scanAtMs: Long = 0L,
+        matchKickoffText: String = "",
         onSuccess: () -> Unit = {}
     ) {
         val sys = systemGameConfig.value
+        val nowMs = System.currentTimeMillis()
         if (sys.maintenanceMode) {
             emitMessage(sys.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" })
+            return
+        }
+        val isFootballOrder = orderType in listOf("parlay", "body_goal", "one_express", "five_five_five")
+        if (isFootballOrder && sys.isFootballPausedNow(nowMs)) {
+            emitMessage(formatAutoReopenNotice(sys.footballReopenAtMs, "ဘောလုံးပွဲ လောင်းကြေး"))
+            return
+        }
+        val isLotteryOrder = orderType in listOf("two_d", "three_d")
+        if (isLotteryOrder && sys.isGamesPausedNow(nowMs)) {
+            emitMessage(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းနှင့် ထီကစားခွင့်"))
             return
         }
         val acc = (userAccount.value as? UiState.Success)?.data
@@ -753,7 +787,8 @@ class MainViewModel(
                 pickKeys = pickKeys,
                 autoAccept = autoAcc,
                 matchKickoffMs = matchKickoffMs,
-                scanAtMs = scanAtMs
+                scanAtMs = scanAtMs,
+                matchKickoffText = matchKickoffText
             )
             if (res.isSuccess) onSuccess()
             res.map { }
@@ -785,8 +820,13 @@ class MainViewModel(
         onResult: (Result<Pair<List<Int>, MiniGameRound>>) -> Unit
     ) {
         val sys = systemGameConfig.value
+        val nowMs = System.currentTimeMillis()
         if (sys.maintenanceMode || !sys.isGameEnabled("dice")) {
             onResult(Result.failure(IllegalStateException("အံစာတုံးဂိမ်း ခေတ္တပိတ်ထားပါသည်")))
+            return
+        }
+        if (sys.isGamesPausedNow(nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းကစားခွင့်"))))
             return
         }
         viewModelScope.launch {
@@ -900,8 +940,13 @@ class MainViewModel(
         onResult: (Result<Pair<List<Int>, MiniGameRound>>) -> Unit
     ) {
         val sys = systemGameConfig.value
+        val nowMs = System.currentTimeMillis()
         if (sys.maintenanceMode || !sys.isGameEnabled("six_animals")) {
             onResult(Result.failure(IllegalStateException("၆ကောင်ဂျင် ခေတ္တပိတ်ထားပါသည်")))
+            return
+        }
+        if (sys.isGamesPausedNow(nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းကစားခွင့်"))))
             return
         }
         viewModelScope.launch {
@@ -994,6 +1039,7 @@ class MainViewModel(
         amountKs: Long,
         channel: String,
         referenceNote: String,
+        receiptImageBase64: String = "",
         onSuccess: () -> Unit = {}
     ) {
         val acc = (userAccount.value as? UiState.Success)?.data
@@ -1003,7 +1049,15 @@ class MainViewModel(
         }
         runAction("တောင်းဆိုမှု ပေးပို့ပြီးပါပြီ") {
             val name = acc?.displayName ?: displayName
-            val res = repository.submitWalletRequest(name, requestType, amountKs, channel, referenceNote, walletConfig.value)
+            val res = repository.submitWalletRequest(
+                customerName = name,
+                requestType = requestType,
+                amountKs = amountKs,
+                channel = channel,
+                referenceNote = referenceNote,
+                walletConfig = walletConfig.value,
+                receiptImageBase64 = receiptImageBase64
+            )
             if (res.isSuccess) onSuccess()
             res
         }
@@ -1312,7 +1366,14 @@ class MainViewModel(
         else "အလိုအလျောက်ပွဲစဉ်ထည့်ခြင်း ပိတ်ပြီးပါပြီ"
     ) {
         val cur = boardConfig.value
-        val res = repository.saveBoardConfig(enabled, cur.autoSyncLiveResults, cur.lastSyncedDate, cur.allowedLeagues)
+        val res = repository.saveBoardConfig(
+            autoSyncDailyMatches = enabled,
+            autoSyncLiveResults = cur.autoSyncLiveResults,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = cur.allowedLeagues,
+            autoSyncOneExpress = cur.autoSyncOneExpress,
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+        )
         if (res.isSuccess && enabled) {
             repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cur.copy(autoSyncDailyMatches = true))
         }
@@ -1324,16 +1385,68 @@ class MainViewModel(
         else "တိုက်ရိုက်ရလဒ် အလိုအလျောက်ချိတ်ဆက်ခြင်း ပိတ်ပြီးပါပြီ"
     ) {
         val cur = boardConfig.value
-        val res = repository.saveBoardConfig(cur.autoSyncDailyMatches, enabled, cur.lastSyncedDate, cur.allowedLeagues)
+        val res = repository.saveBoardConfig(
+            autoSyncDailyMatches = cur.autoSyncDailyMatches,
+            autoSyncLiveResults = enabled,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = cur.allowedLeagues,
+            autoSyncOneExpress = cur.autoSyncOneExpress,
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+        )
         if (res.isSuccess && enabled) {
             repository.syncLiveMatchResults(feedService)
         }
         res
     }
 
+    fun toggleAutoSyncOneExpress(enabled: Boolean) = runAction(
+        if (enabled) "One Express အလိုအလျောက် ကြေးထည့်စနစ် ဖွင့်ပြီးပါပြီ"
+        else "One Express အလိုအလျောက် ကြေးထည့်စနစ် ပိတ်ပြီးပါပြီ"
+    ) {
+        val cur = boardConfig.value
+        val res = repository.saveBoardConfig(
+            autoSyncDailyMatches = cur.autoSyncDailyMatches,
+            autoSyncLiveResults = cur.autoSyncLiveResults,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = cur.allowedLeagues,
+            autoSyncOneExpress = enabled,
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+        )
+        if (res.isSuccess && enabled) {
+            repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cur.copy(autoSyncOneExpress = true))
+        }
+        res
+    }
+
+    fun toggleAutoSync555(enabled: Boolean) = runAction(
+        if (enabled) "555 အလိုအလျောက် ကြေးထည့်စနစ် ဖွင့်ပြီးပါပြီ"
+        else "555 အလိုအလျောက် ကြေးထည့်စနစ် ပိတ်ပြီးပါပြီ"
+    ) {
+        val cur = boardConfig.value
+        val res = repository.saveBoardConfig(
+            autoSyncDailyMatches = cur.autoSyncDailyMatches,
+            autoSyncLiveResults = cur.autoSyncLiveResults,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = cur.allowedLeagues,
+            autoSyncOneExpress = cur.autoSyncOneExpress,
+            autoSyncFiveFiveFive = enabled
+        )
+        if (res.isSuccess && enabled) {
+            repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cur.copy(autoSyncFiveFiveFive = true))
+        }
+        res
+    }
+
     fun saveAllowedLeagues(leagues: List<String>) = runAction("ဖွင့်လှစ်မည့် ဘောလုံးဖလား/လိဂ် စာရင်း သိမ်းဆည်းပြီးပါပြီ") {
         val cur = boardConfig.value
-        val res = repository.saveBoardConfig(cur.autoSyncDailyMatches, cur.autoSyncLiveResults, cur.lastSyncedDate, leagues)
+        val res = repository.saveBoardConfig(
+            autoSyncDailyMatches = cur.autoSyncDailyMatches,
+            autoSyncLiveResults = cur.autoSyncLiveResults,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = leagues,
+            autoSyncOneExpress = cur.autoSyncOneExpress,
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+        )
         if (res.isSuccess) {
             logAuditAsync("Updated allowed leagues", "board", "board_config", "", "${leagues.size} leagues")
         }
@@ -1355,6 +1468,50 @@ class MainViewModel(
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
                     _events.emit(err.localizedMessage ?: "ပွဲစဉ်ဆွဲယူမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun syncOneExpressMatchesNow() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), boardConfig.value)
+                res.onSuccess { count ->
+                    if (count > 0) {
+                        _events.emit("One Express ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced One Express board", "board", "one_express", "", "Count=$count")
+                    } else {
+                        _events.emit("One Express အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                    }
+                    refreshLiveFootballFeed()
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "One Express ပွဲကြေးဆွဲယူမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun sync555MatchesNow() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), boardConfig.value)
+                res.onSuccess { count ->
+                    if (count > 0) {
+                        _events.emit("555 ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced 555 board", "board", "five_five_five", "", "Count=$count")
+                    } else {
+                        _events.emit("555 အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                    }
+                    refreshLiveFootballFeed()
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "555 ပွဲကြေးဆွဲယူမှု မအောင်မြင်ပါ")
                 }
             } finally {
                 _busy.value = false
@@ -1396,11 +1553,26 @@ class MainViewModel(
         goalLine: String,
         bodyOdds: Double,
         goalOdds: Double,
+        boardSource: String = "standard",
+        oneExpressKyay: String = "",
+        fiveFiveFiveKyay: String = "",
         onSuccess: () -> Unit = {}
     ) = runAction("ပွဲစဉ်အသစ် ထည့်သွင်းပြီးပါပြီ") {
-        val res = repository.saveNewMatch(league, homeTeam, awayTeam, kickoffLabel, handicapLine, goalLine, bodyOdds, goalOdds)
+        val res = repository.saveNewMatch(
+            league = league,
+            homeTeam = homeTeam,
+            awayTeam = awayTeam,
+            kickoffLabel = kickoffLabel,
+            handicapLine = handicapLine,
+            goalLine = goalLine,
+            bodyOdds = bodyOdds,
+            goalOdds = goalOdds,
+            boardSource = boardSource,
+            oneExpressKyay = oneExpressKyay,
+            fiveFiveFiveKyay = fiveFiveFiveKyay
+        )
         if (res.isSuccess) {
-            logAuditAsync("Added football match", "board", "", "$homeTeam vs $awayTeam", league)
+            logAuditAsync("Added football match", "board", "", "$homeTeam vs $awayTeam", "$league ($boardSource)")
             onSuccess()
         }
         res
@@ -1418,7 +1590,9 @@ class MainViewModel(
         goalOdds: Double,
         status: String,
         homeScore: Long,
-        awayScore: Long
+        awayScore: Long,
+        oneExpressKyay: String? = null,
+        fiveFiveFiveKyay: String? = null
     ) {
         viewModelScope.launch {
             _busy.value = true
@@ -1435,7 +1609,9 @@ class MainViewModel(
                     goalOdds = goalOdds,
                     status = status,
                     homeScore = homeScore,
-                    awayScore = awayScore
+                    awayScore = awayScore,
+                    oneExpressKyay = oneExpressKyay,
+                    fiveFiveFiveKyay = fiveFiveFiveKyay
                 )
                 res.onSuccess {
                     logAuditAsync("Updated match", "board", matchId, "$homeTeam vs $awayTeam", "$status ($homeScore-$awayScore)")
@@ -1606,9 +1782,20 @@ class MainViewModel(
         referenceNote: String,
         status: String,
         adminNote: String,
-        isHidden: Boolean
+        isHidden: Boolean,
+        receiptImageBase64: String? = null
     ) = runAction("ငွေသွင်း/ထုတ် မှတ်တမ်း ပြင်ဆင်ပြီးပါပြီ") {
-        val res = repository.editWalletRequest(reqId, amountKs, netAmountKs, channel, referenceNote, status, adminNote, isHidden)
+        val res = repository.editWalletRequest(
+            reqId = reqId,
+            amountKs = amountKs,
+            netAmountKs = netAmountKs,
+            channel = channel,
+            referenceNote = referenceNote,
+            status = status,
+            adminNote = adminNote,
+            isHidden = isHidden,
+            receiptImageBase64 = receiptImageBase64
+        )
         if (res.isSuccess) logAuditAsync("Edited wallet request", "wallet", reqId, "", "$amountKs Ks ($status)")
         res
     }

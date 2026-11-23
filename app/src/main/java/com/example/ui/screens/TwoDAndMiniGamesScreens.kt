@@ -53,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,8 @@ import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
+import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
@@ -89,6 +92,7 @@ import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmerald
 import com.example.ui.theme.PitchEmeraldDark
+import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -109,10 +113,20 @@ fun TwoDLotteryScreen(
         multiplier: Double
     ) -> Unit
 ) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+
     val selectedNumbers = remember { mutableStateListOf<String>() }
     var manualInput by remember { mutableStateOf("") }
     var includeReverse by remember { mutableStateOf(false) }
     var stakePerNumberInput by remember { mutableStateOf("500") }
+    var showTwoDGrid by remember { mutableStateOf(true) }
 
     val openDraw = when (drawsState) {
         is UiState.Success -> drawsState.data.firstOrNull { it.status == "open" && it.drawType == "2d" }
@@ -125,6 +139,7 @@ fun TwoDLotteryScreen(
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
 
     val canSubmit = !busy &&
+        !isGamesPaused &&
         openDraw != null &&
         selectedNumbers.isNotEmpty() &&
         stakePerNumber >= 100L &&
@@ -147,6 +162,19 @@ fun TwoDLotteryScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (isGamesPaused) {
+                item {
+                    PauseStatusBannerCard(
+                        title = if (systemGameConfig.maintenanceMode) {
+                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                        } else {
+                            "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        },
+                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
             // Live Thai Stock 2D Card
             item {
                 Card(
@@ -334,62 +362,74 @@ fun TwoDLotteryScreen(
                 }
             }
 
-            // Interactive 00-99 Grid
+            // Hide Bar + Interactive 00-99 Grid
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
-                    colors = CardDefaults.cardColors(containerColor = PearlCard),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                HideBarSectionHeader(
+                    title = "00 - 99 ဂဏန်းဇယားကွက်",
+                    countBadge = "${selectedNumbers.size} ကွက်ရွေး",
+                    isVisible = showTwoDGrid,
+                    onToggle = { showTwoDGrid = !showTwoDGrid },
+                    testTag = "hide_bar_two_d_grid",
+                    modifier = Modifier.widthIn(max = 600.dp)
+                )
+            }
+            if (showTwoDGrid) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                        colors = CardDefaults.cardColors(containerColor = PearlCard),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text(
-                            "00 - 99 ဇယားကွက် (နှိပ်၍ ရွေးချယ်ပါ)",
-                            color = InkDark,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        rows00To99.forEach { rowNums ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                rowNums.forEach { num ->
-                                    val isSel = selectedNumbers.contains(num)
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSel) PitchEmeraldDark else Color(0xFFE7ECE9))
-                                            .border(
-                                                width = if (isSel) 1.5.dp else 0.5.dp,
-                                                color = if (isSel) ChampionshipGold else PearlCardBorder,
-                                                shape = RoundedCornerShape(6.dp)
-                                            )
-                                            .clickable {
-                                                if (isSel) selectedNumbers.remove(num)
-                                                else {
-                                                    selectedNumbers.add(num)
-                                                    if (includeReverse) {
-                                                        val rev = num.reversed()
-                                                        if (!selectedNumbers.contains(rev)) selectedNumbers.add(rev)
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "00 - 99 ဇယားကွက် (နှိပ်၍ ရွေးချယ်ပါ)",
+                                color = InkDark,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            rows00To99.forEach { rowNums ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    rowNums.forEach { num ->
+                                        val isSel = selectedNumbers.contains(num)
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(36.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(if (isSel) PitchEmeraldDark else Color(0xFFE7ECE9))
+                                                .border(
+                                                    width = if (isSel) 1.5.dp else 0.5.dp,
+                                                    color = if (isSel) ChampionshipGold else PearlCardBorder,
+                                                    shape = RoundedCornerShape(6.dp)
+                                                )
+                                                .clickable {
+                                                    if (isSel) selectedNumbers.remove(num)
+                                                    else {
+                                                        selectedNumbers.add(num)
+                                                        if (includeReverse) {
+                                                            val rev = num.reversed()
+                                                            if (!selectedNumbers.contains(rev)) selectedNumbers.add(rev)
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            .testTag("two_d_cell_$num"),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = num,
-                                            color = if (isSel) Color.White else InkDark,
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
-                                        )
+                                                .testTag("two_d_cell_$num"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = num,
+                                                color = if (isSel) Color.White else InkDark,
+                                                fontFamily = JetBrainsMonoFontFamily,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -492,11 +532,21 @@ fun DiceGameScreen(
     onBack: () -> Unit,
     onPlayDice: (betOption: String, exactNumber: Int, stakeKs: Long, onResult: (List<Int>, MiniGameRound) -> Unit) -> Unit
 ) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+
     var selectedOption by remember { mutableStateOf("BIG") }
     var exactNumber by remember { mutableIntStateOf(11) }
     var stakeInput by remember { mutableStateOf("1000") }
     var lastDice by remember { mutableStateOf(listOf(4, 5, 2)) }
     var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
+    var showDiceHistory by remember { mutableStateOf(true) }
 
     val allowedTotals = remember(miniGameControlConfig.diceAllowedTotals) {
         miniGameControlConfig.diceAllowedTotals.filter { it in 3..18 }.distinct().sorted()
@@ -510,7 +560,7 @@ fun DiceGameScreen(
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
-    val canPlay = !busy && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+    val canPlay = !busy && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
 
     val stdMult = miniGameControlConfig.diceStandardMult
     val tripleMult = miniGameControlConfig.diceTripleMult
@@ -536,6 +586,19 @@ fun DiceGameScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            if (isGamesPaused) {
+                item {
+                    PauseStatusBannerCard(
+                        title = if (systemGameConfig.maintenanceMode) {
+                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                        } else {
+                            "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        },
+                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
@@ -712,15 +775,19 @@ fun DiceGameScreen(
 
             if (diceHistory.isNotEmpty()) {
                 item {
-                    Text(
-                        "လတ်တလော မှတ်တမ်း (${diceHistory.size})",
-                        color = ChampionshipGold,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp)
+                    HideBarSectionHeader(
+                        title = "အံစာတုံး လတ်တလော မှတ်တမ်း",
+                        countBadge = "${diceHistory.size}",
+                        isVisible = showDiceHistory,
+                        onToggle = { showDiceHistory = !showDiceHistory },
+                        testTag = "hide_bar_dice_history",
+                        modifier = Modifier.widthIn(max = 600.dp)
                     )
                 }
-                items(diceHistory.take(15), key = { it.id }) { round ->
-                    MiniGameRoundCard(round)
+                if (showDiceHistory) {
+                    items(diceHistory.take(15), key = { it.id }) { round ->
+                        MiniGameRoundCard(round)
+                    }
                 }
             }
         }
@@ -798,15 +865,25 @@ fun SixAnimalsGameScreen(
         onResult: (List<Int>, MiniGameRound) -> Unit
     ) -> Unit
 ) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+
     var selectedAnimalIndex by remember { mutableIntStateOf(0) }
     var stakeInput by remember { mutableStateOf("1000") }
     var lastRolledIndices by remember { mutableStateOf(listOf(0, 2, 5)) }
     var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
+    var showAnimalHistory by remember { mutableStateOf(true) }
 
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
-    val canPlay = !busy && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+    val canPlay = !busy && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
 
     val singleMult = miniGameControlConfig.sixAnimalsMult.coerceAtLeast(1.2)
     val bonus = (singleMult - 1.0).coerceAtLeast(0.2)
@@ -827,6 +904,19 @@ fun SixAnimalsGameScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            if (isGamesPaused) {
+                item {
+                    PauseStatusBannerCard(
+                        title = if (systemGameConfig.maintenanceMode) {
+                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                        } else {
+                            "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        },
+                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
@@ -999,15 +1089,19 @@ fun SixAnimalsGameScreen(
 
             if (animalHistory.isNotEmpty()) {
                 item {
-                    Text(
-                        "လတ်တလော မှတ်တမ်း (${animalHistory.size})",
-                        color = ChampionshipGold,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp)
+                    HideBarSectionHeader(
+                        title = "၆ကောင်ဂျင် လတ်တလော မှတ်တမ်း",
+                        countBadge = "${animalHistory.size}",
+                        isVisible = showAnimalHistory,
+                        onToggle = { showAnimalHistory = !showAnimalHistory },
+                        testTag = "hide_bar_six_animals_history",
+                        modifier = Modifier.widthIn(max = 600.dp)
                     )
                 }
-                items(animalHistory.take(15), key = { it.id }) { round ->
-                    MiniGameRoundCard(round)
+                if (showAnimalHistory) {
+                    items(animalHistory.take(15), key = { it.id }) { round ->
+                        MiniGameRoundCard(round)
+                    }
                 }
             }
         }

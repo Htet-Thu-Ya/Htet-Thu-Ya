@@ -100,6 +100,10 @@
         "externalId": { "type": "string" },
         "matchDate": { "type": "string" },
         "liveClock": { "type": "string" },
+        "boardSource": { "type": "string", "enum": ["standard", "one_express", "five_five_five"] },
+        "oneExpressKyay": { "type": "string" },
+        "fiveFiveFiveKyay": { "type": "string" },
+        "autoUpdatedAtMs": { "type": "integer" },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -131,7 +135,7 @@
       "properties": {
         "userId": { "type": "string" },
         "customerName": { "type": "string" },
-        "orderType": { "type": "string", "enum": ["parlay", "body_goal", "three_d", "two_d"] },
+        "orderType": { "type": "string", "enum": ["parlay", "body_goal", "one_express", "five_five_five", "three_d", "two_d"] },
         "selections": { "type": "array" },
         "matchIds": { "type": "array" },
         "pickKeys": { "type": "array" },
@@ -147,6 +151,7 @@
         "settledBy": { "type": "string" },
         "isHidden": { "type": "boolean" },
         "matchKickoffMs": { "type": "integer" },
+        "matchKickoffText": { "type": "string" },
         "scanAtMs": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -180,6 +185,7 @@
         "amountKs": { "type": "integer" },
         "channel": { "type": "string" },
         "referenceNote": { "type": "string" },
+        "receiptImageBase64": { "type": "string" },
         "status": { "type": "string", "enum": ["pending", "awaiting_main_approval", "approved", "rejected"] },
         "adminNote": { "type": "string" },
         "processedBy": { "type": "string" },
@@ -284,6 +290,8 @@
         "autoSyncLiveResults": { "type": "boolean" },
         "lastSyncedDate": { "type": "string" },
         "allowedLeagues": { "type": "array" },
+        "autoSyncOneExpress": { "type": "boolean" },
+        "autoSyncFiveFiveFive": { "type": "boolean" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -336,6 +344,10 @@
         "maintenanceMessage": { "type": "string" },
         "hideTwoD": { "type": "boolean" },
         "hideThreeD": { "type": "boolean" },
+        "footballPaused": { "type": "boolean" },
+        "footballReopenAtMs": { "type": "integer" },
+        "gamesPaused": { "type": "boolean" },
+        "gamesReopenAtMs": { "type": "integer" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

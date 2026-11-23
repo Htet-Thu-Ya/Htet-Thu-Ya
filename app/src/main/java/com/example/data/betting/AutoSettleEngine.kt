@@ -39,7 +39,7 @@ object AutoSettleEngine {
         return when (order.orderType) {
             "three_d" -> evaluateLottery(order, draws, digitCount = 3, label = "3D")
             "two_d" -> evaluateLottery(order, draws, digitCount = 2, label = "2D")
-            "body_goal", "parlay" -> evaluateSports(order, matchesById)
+            "body_goal", "parlay", "one_express", "five_five_five" -> evaluateSports(order, matchesById)
             else -> AutoSettleDecision.NotReady
         }
     }

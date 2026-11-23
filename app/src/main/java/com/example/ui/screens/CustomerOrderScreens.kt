@@ -58,7 +58,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,8 +84,11 @@ import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
+import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.components.TeamLogoAvatar
+import com.example.ui.components.buildOrderKickoffSummaryText
 import com.example.ui.components.formatEpochDateTime
 import com.example.ui.components.formatKickoffCountdown
 import com.example.ui.components.formatKs
@@ -96,7 +101,7 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmeraldDark
-import java.text.SimpleDateFormat
+import kotlinx.coroutines.delay
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.roundToLong
@@ -173,18 +178,31 @@ fun SportsOrderScreen(
         stakeKs: Long,
         multiplier: Double,
         matchKickoffMs: Long,
-        scanAtMs: Long
+        scanAtMs: Long,
+        matchKickoffText: String
     ) -> Unit
 ) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isFootballPaused = systemGameConfig.maintenanceMode || systemGameConfig.isFootballPausedNow(nowMs)
+
     val selectedPicks = remember { mutableStateMapOf<String, MatchPick>() }
     var stakeInput by remember { mutableStateOf("1000") }
     var selectedLeagueFilter by remember { mutableStateOf<String?>(null) }
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
+    var showSportsTable by remember { mutableStateOf(true) }
 
     val openMatches = remember(matchesState, boardConfig.allowedLeagues) {
         val allOpen = when (matchesState) {
-            is UiState.Success -> matchesState.data.filter { it.status == "open" }
+            is UiState.Success -> matchesState.data.filter {
+                it.status == "open" && (it.boardSource.isBlank() || it.boardSource == "standard")
+            }
             else -> emptyList()
         }
         val allowed = boardConfig.allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }
@@ -230,6 +248,7 @@ fun SportsOrderScreen(
     val minAllowedStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxAllowedStake = systemGameConfig.maxStakeKs.coerceAtLeast(minAllowedStake)
     val canSubmit = !busy &&
+        !isFootballPaused &&
         selectedPicks.size >= minSelections &&
         parsedStake in minAllowedStake..maxAllowedStake &&
         parsedStake <= balanceKs
@@ -388,6 +407,8 @@ fun SportsOrderScreen(
                         Button(
                             onClick = {
                                 val ordered = selectedPicks.values.toList()
+                                val pickedMatches = openMatches.filter { it.id in selectedPicks.keys }
+                                val kickoffSummary = buildOrderKickoffSummaryText(pickedMatches)
                                 onSubmitOrder(
                                     if (isParlay) "parlay" else "body_goal",
                                     ordered.map { it.label },
@@ -397,7 +418,8 @@ fun SportsOrderScreen(
                                     parsedStake,
                                     combinedMultiplier,
                                     earliestKickoffMs,
-                                    scheduledScanAtMs
+                                    scheduledScanAtMs,
+                                    kickoffSummary
                                 )
                             },
                             enabled = canSubmit,
@@ -508,48 +530,78 @@ fun SportsOrderScreen(
                                 .widthIn(max = 620.dp),
                             contentPadding = PaddingValues(bottom = 16.dp)
                         ) {
-                            groupedByLeague.forEach { (leagueName, leagueMatches) ->
-                                item(key = "league_hdr_$leagueName") {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color(0xFFE2E8E5))
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = BoardGreenAccent,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = leagueName,
-                                            color = InkDark,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                            if (isFootballPaused) {
+                                item(key = "football_pause_banner") {
+                                    Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                        PauseStatusBannerCard(
+                                            title = if (systemGameConfig.maintenanceMode) {
+                                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                                            } else {
+                                                "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
+                                            },
+                                            reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.footballReopenAtMs,
+                                            nowMs = nowMs
                                         )
                                     }
                                 }
-
-                                items(leagueMatches, key = { it.id }) { match ->
-                                    val currentPick = selectedPicks[match.id]
-                                    ScreenshotMatchRowCard(
-                                        match = match,
-                                        selectedPickKey = currentPick?.pickKey,
-                                        onShowInfo = { infoMatch = match },
-                                        onSelect = { label, odds, pickKey ->
-                                            if (currentPick?.pickKey == pickKey) {
-                                                selectedPicks.remove(match.id)
-                                            } else {
-                                                if (!isParlay) selectedPicks.clear()
-                                                selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
-                                            }
-                                        }
+                            }
+                            item(key = "hide_bar_sports_table") {
+                                Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                    HideBarSectionHeader(
+                                        title = if (isParlay) "မောင်း ပွဲစဉ်ဇယား" else "ဘော်ဒီ/ဂိုးပေါင်း ပွဲစဉ်ဇယား",
+                                        countBadge = "${filteredMatches.size} ပွဲ",
+                                        isVisible = showSportsTable,
+                                        onToggle = { showSportsTable = !showSportsTable },
+                                        testTag = "hide_bar_sports_matches_table"
                                     )
+                                }
+                            }
+                            if (showSportsTable) {
+                                groupedByLeague.forEach { (leagueName, leagueMatches) ->
+                                    item(key = "league_hdr_$leagueName") {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color(0xFFE2E8E5))
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = null,
+                                                tint = BoardGreenAccent,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = leagueName,
+                                                color = InkDark,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    items(leagueMatches, key = { it.id }) { match ->
+                                        val currentPick = selectedPicks[match.id]
+                                        ScreenshotMatchRowCard(
+                                            match = match,
+                                            selectedPickKey = currentPick?.pickKey,
+                                            onShowInfo = { infoMatch = match },
+                                            onSelect = { label, odds, pickKey ->
+                                                if (!isFootballPaused) {
+                                                    if (currentPick?.pickKey == pickKey) {
+                                                        selectedPicks.remove(match.id)
+                                                    } else {
+                                                        if (!isParlay) selectedPicks.clear()
+                                                        selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -882,6 +934,15 @@ fun ThreeDLotteryScreen(
         multiplier: Double
     ) -> Unit
 ) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+
     var digitsInput by remember { mutableStateOf("") }
     var includeReverse by remember { mutableStateOf(false) }
     var stakePerNumberInput by remember { mutableStateOf("500") }
@@ -903,6 +964,7 @@ fun ThreeDLotteryScreen(
     val minAllowedStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxAllowedStake = systemGameConfig.maxStakeKs.coerceAtLeast(minAllowedStake)
     val canSubmit = !busy &&
+        !isGamesPaused &&
         openDraw != null &&
         numbersToBet.isNotEmpty() &&
         stakePerNumber >= 100L &&
@@ -923,6 +985,19 @@ fun ThreeDLotteryScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            if (isGamesPaused) {
+                item {
+                    PauseStatusBannerCard(
+                        title = if (systemGameConfig.maintenanceMode) {
+                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                        } else {
+                            "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        },
+                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),

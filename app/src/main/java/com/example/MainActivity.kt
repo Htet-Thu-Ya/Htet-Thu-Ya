@@ -84,6 +84,7 @@ import com.example.ui.screens.ChatHubScreen
 import com.example.ui.screens.CustomerHomeScreen
 import com.example.ui.screens.CustomerRoute
 import com.example.ui.screens.DiceGameScreen
+import com.example.ui.screens.ExpressOddsOrderScreen
 import com.example.ui.screens.IncomingCallDialog
 import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.OrdersHistoryScreen
@@ -443,8 +444,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
                             onAutoSettleCustomer = vm::autoSettleCustomerOrdersNow,
                             onAutoSettleOrder = vm::autoSettleSingleOrderNow,
-                            onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds ->
-                                vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds)
+                            onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay ->
+                                vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay)
                             },
                             onUpdateMatchDetails = vm::updateMatchDetails,
                             onDeleteMatch = vm::deleteMatch,
@@ -456,6 +457,10 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
                             onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
                             onToggleAutoLiveResults = vm::toggleAutoSyncLiveResults,
+                            onSyncOneExpressNow = vm::syncOneExpressMatchesNow,
+                            onSync555Now = vm::sync555MatchesNow,
+                            onToggleAutoOneExpress = vm::toggleAutoSyncOneExpress,
+                            onToggleAuto555 = vm::toggleAutoSync555,
                             onSaveAllowedLeagues = vm::saveAllowedLeagues,
                             onCreateAdminInvite = { label, email, pin, perms ->
                                 vm.createAdminInvite(label, email, pin, perms)
@@ -538,8 +543,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             boardConfig = boardConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs ->
-                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs, kickoffText) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -556,8 +561,44 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             boardConfig = boardConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs ->
-                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs, kickoffText) {
+                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                        popUpTo(ROUTE_HOME)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.ONE_EXPRESS.name) {
+                        ExpressOddsOrderScreen(
+                            boardMode = "one_express",
+                            matchesState = matchesState,
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            boardConfig = boardConfig,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onSubmitOrder = { type, sel, mIds, stake, mult, pKeys, kickoffMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, "One Express", stake, mult, pKeys, kickoffMs, 0L, kickoffText) {
+                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                        popUpTo(ROUTE_HOME)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.FIVE_FIVE_FIVE.name) {
+                        ExpressOddsOrderScreen(
+                            boardMode = "five_five_five",
+                            matchesState = matchesState,
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            boardConfig = boardConfig,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onSubmitOrder = { type, sel, mIds, stake, mult, pKeys, kickoffMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, "555 Odds", stake, mult, pKeys, kickoffMs, 0L, kickoffText) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -666,8 +707,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             paymentAccounts = paymentAccounts,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitWalletRequest = { type, amt, ch, ref ->
-                                vm.submitWalletRequest(type, amt, ch, ref)
+                            onSubmitWalletRequest = { type, amt, ch, ref, receiptB64 ->
+                                vm.submitWalletRequest(type, amt, ch, ref, receiptB64)
                             }
                         )
                     }

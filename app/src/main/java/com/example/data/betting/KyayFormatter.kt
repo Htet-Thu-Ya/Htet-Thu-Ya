@@ -224,4 +224,49 @@ object KyayFormatter {
             else -> "Home"
         }
     }
+
+    fun formatOneExpressKyay(
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double = 1.92,
+        goalOdds: Double = 1.90
+    ): String {
+        val cleanH = toMyanmarKyaySpec(handicapLine)
+        val cleanG = goalLine.trim().ifBlank { "2.5" }
+        val oddsLbl = formatCleanDecimal(bodyOdds)
+        val gOddsLbl = formatCleanDecimal(goalOdds)
+        return "1X: $cleanH ($oddsLbl) | G $cleanG ($gOddsLbl)".take(60)
+    }
+
+    fun formatFiveFiveFiveKyay(
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double = 1.92,
+        goalOdds: Double = 1.90
+    ): String {
+        val cleanH = toMyanmarKyaySpec(handicapLine)
+        val cleanG = goalLine.trim().ifBlank { "2.5" }
+        val oddsLbl = formatCleanDecimal(bodyOdds)
+        return "555: $cleanH | ဂိုး $cleanG ($oddsLbl)".take(60)
+    }
+
+    private fun toMyanmarKyaySpec(handicapLine: String): String {
+        val raw = handicapLine.trim().ifBlank { "Home -0.5" }
+        val isAway = raw.startsWith("Away", ignoreCase = true)
+        val prefix = if (isAway) "A" else "H"
+        val body = raw
+            .replace("Home", "", ignoreCase = true)
+            .replace("Away", "", ignoreCase = true)
+            .trim()
+            .removePrefix("-")
+            .removePrefix("+")
+            .trim()
+            .ifBlank { "0.5" }
+        return when (body) {
+            "0", "0.0" -> "$prefix="
+            "0.25", "0/0.5" -> "$prefix 0+50"
+            "0.75", "0.5/1" -> "$prefix 1-50"
+            else -> "$prefix-$body"
+        }
+    }
 }

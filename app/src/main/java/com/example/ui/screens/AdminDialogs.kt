@@ -82,11 +82,20 @@ import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.ui.platform.LocalContext
+import com.example.data.betting.KyayFormatter
+import com.example.ui.components.FullScreenReceiptDialog
 import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
+import com.example.ui.components.ReceiptImageThumbnail
 import com.example.ui.components.StatusBadge
+import com.example.ui.components.encodeUriToReceiptBase64
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.AdminCrimson
@@ -102,6 +111,7 @@ import com.example.ui.theme.PitchEmeraldDark
 
 @Composable
 fun AddMatchDialog(
+    boardMode: String = "standard",
     onDismiss: () -> Unit,
     onSave: (
         league: String,
@@ -111,7 +121,9 @@ fun AddMatchDialog(
         handicapLine: String,
         goalLine: String,
         bodyOdds: Double,
-        goalOdds: Double
+        goalOdds: Double,
+        oneExpressKyay: String,
+        fiveFiveFiveKyay: String
     ) -> Unit
 ) {
     var league by remember { mutableStateOf("Premier League") }
@@ -122,10 +134,28 @@ fun AddMatchDialog(
     var goalLine by remember { mutableStateOf("2.5") }
     var bodyOdds by remember { mutableStateOf("1.92") }
     var goalOdds by remember { mutableStateOf("1.90") }
+    var oneExpKyay by remember {
+        mutableStateOf(
+            if (boardMode == "one_express") KyayFormatter.formatOneExpressKyay("Home -0.5", "2.5") else ""
+        )
+    }
+    var fffKyay by remember {
+        mutableStateOf(
+            if (boardMode == "five_five_five") KyayFormatter.formatFiveFiveFiveKyay("Home -0.5", "2.5") else ""
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("ပွဲစဉ်အသစ် ထည့်သွင်းရန်") },
+        title = {
+            Text(
+                when (boardMode) {
+                    "one_express" -> "One Express ပွဲစဉ်အသစ် ထည့်ရန်"
+                    "five_five_five" -> "555 ပွဲစဉ်အသစ် ထည့်ရန်"
+                    else -> "ပွဲစဉ်အသစ် ထည့်သွင်းရန်"
+                }
+            )
+        },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -137,6 +167,22 @@ fun AddMatchDialog(
                 OutlinedTextField(value = kickoff, onValueChange = { kickoff = it }, label = { Text("ကန်ချိန်") }, singleLine = true)
                 OutlinedTextField(value = handicap, onValueChange = { handicap = it }, label = { Text("ဘော်ဒီ ကြေး") }, singleLine = true)
                 OutlinedTextField(value = goalLine, onValueChange = { goalLine = it }, label = { Text("ဂိုးပေါင်း") }, singleLine = true)
+                if (boardMode == "one_express") {
+                    OutlinedTextField(
+                        value = oneExpKyay,
+                        onValueChange = { oneExpKyay = it },
+                        label = { Text("One Express ကြေး Label") },
+                        singleLine = true
+                    )
+                }
+                if (boardMode == "five_five_five") {
+                    OutlinedTextField(
+                        value = fffKyay,
+                        onValueChange = { fffKyay = it },
+                        label = { Text("555 ကြေး Label") },
+                        singleLine = true
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = bodyOdds,
@@ -168,7 +214,9 @@ fun AddMatchDialog(
                         handicap,
                         goalLine,
                         bodyOdds.toDoubleOrNull() ?: 1.90,
-                        goalOdds.toDoubleOrNull() ?: 1.90
+                        goalOdds.toDoubleOrNull() ?: 1.90,
+                        oneExpKyay,
+                        fffKyay
                     )
                 },
                 enabled = league.isNotBlank() && home.isNotBlank() && away.isNotBlank()
@@ -185,6 +233,7 @@ fun AddMatchDialog(
 @Composable
 fun EditMatchResultDialog(
     match: SportMatch,
+    boardMode: String = match.boardSource,
     onDismiss: () -> Unit,
     onUpdate: (
         league: String,
@@ -197,7 +246,9 @@ fun EditMatchResultDialog(
         goalOdds: Double,
         status: String,
         homeScore: Long,
-        awayScore: Long
+        awayScore: Long,
+        oneExpressKyay: String?,
+        fiveFiveFiveKyay: String?
     ) -> Unit,
     onRequestDelete: () -> Unit
 ) {
@@ -212,6 +263,8 @@ fun EditMatchResultDialog(
     var status by remember(match.id) { mutableStateOf(match.status) }
     var homeScore by remember(match.id) { mutableStateOf(match.homeScore.toString()) }
     var awayScore by remember(match.id) { mutableStateOf(match.awayScore.toString()) }
+    var oneExpKyay by remember(match.id) { mutableStateOf(match.oneExpressKyay) }
+    var fffKyay by remember(match.id) { mutableStateOf(match.fiveFiveFiveKyay) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -254,6 +307,22 @@ fun EditMatchResultDialog(
                 OutlinedTextField(value = kickoffLabel, onValueChange = { kickoffLabel = it }, label = { Text("ကန်ချိန်") }, singleLine = true)
                 OutlinedTextField(value = handicapLine, onValueChange = { handicapLine = it }, label = { Text("ဘော်ဒီ ကြေး") }, singleLine = true)
                 OutlinedTextField(value = goalLine, onValueChange = { goalLine = it }, label = { Text("ဂိုးပေါင်း") }, singleLine = true)
+                if (boardMode == "one_express" || match.boardSource == "one_express") {
+                    OutlinedTextField(
+                        value = oneExpKyay,
+                        onValueChange = { oneExpKyay = it },
+                        label = { Text("One Express ကြေး Label") },
+                        singleLine = true
+                    )
+                }
+                if (boardMode == "five_five_five" || match.boardSource == "five_five_five") {
+                    OutlinedTextField(
+                        value = fffKyay,
+                        onValueChange = { fffKyay = it },
+                        label = { Text("555 ကြေး Label") },
+                        singleLine = true
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = bodyOdds,
@@ -294,7 +363,9 @@ fun EditMatchResultDialog(
                         goalOdds.toDoubleOrNull() ?: match.goalOdds,
                         status,
                         homeScore.toLongOrNull() ?: 0L,
-                        awayScore.toLongOrNull() ?: 0L
+                        awayScore.toLongOrNull() ?: 0L,
+                        if (boardMode == "one_express" || match.boardSource == "one_express") oneExpKyay else null,
+                        if (boardMode == "five_five_five" || match.boardSource == "five_five_five") fffKyay else null
                     )
                 },
                 enabled = league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank(),
@@ -765,6 +836,15 @@ fun AdminCustomerDetailDialog(
 ) {
     var detailTab by remember { mutableIntStateOf(0) }
     var showAccountSummary by remember { mutableStateOf(true) }
+    var previewReceiptBase64 by remember { mutableStateOf<String?>(null) }
+
+    previewReceiptBase64?.let { b64 ->
+        FullScreenReceiptDialog(
+            base64 = b64,
+            title = "${user.displayName} • ငွေလွှဲပြေစာ",
+            onDismiss = { previewReceiptBase64 = null }
+        )
+    }
     val activeOrders = remember(customerOrders) {
         customerOrders.filter { it.status in listOf("pending", "accepted") }
     }
@@ -1076,13 +1156,29 @@ fun AdminCustomerDetailDialog(
                                                     }
                                                 }
                                             }
-                                            Text(
-                                                formatKs(req.amountKs),
-                                                color = PitchEmeraldDark,
-                                                fontFamily = JetBrainsMonoFontFamily,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text("Ref: ${req.referenceNote} • ${formatTimestamp(req.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        formatKs(req.amountKs),
+                                                        color = PitchEmeraldDark,
+                                                        fontFamily = JetBrainsMonoFontFamily,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text("Ref: ${req.referenceNote} • ${formatTimestamp(req.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                                }
+                                                if (req.receiptImageBase64.isNotBlank()) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    ReceiptImageThumbnail(
+                                                        base64 = req.receiptImageBase64,
+                                                        onClick = { previewReceiptBase64 = req.receiptImageBase64 },
+                                                        size = 54.dp
+                                                    )
+                                                }
+                                            }
                                             val canActOnReq = req.status == "pending" || (isOwnerAdmin && req.status == "awaiting_main_approval")
                                             if (canActOnReq) {
                                                 Spacer(Modifier.height(4.dp))
@@ -1239,9 +1335,11 @@ fun EditWalletRequestDialog(
         referenceNote: String,
         status: String,
         adminNote: String,
-        isHidden: Boolean
+        isHidden: Boolean,
+        receiptImageBase64: String?
     ) -> Unit
 ) {
+    val context = LocalContext.current
     var amountInput by remember(req.id) { mutableStateOf(req.amountKs.toString()) }
     var netInput by remember(req.id) { mutableStateOf(req.netAmountKs.toString()) }
     var channel by remember(req.id) { mutableStateOf(req.channel) }
@@ -1249,6 +1347,26 @@ fun EditWalletRequestDialog(
     var status by remember(req.id) { mutableStateOf(req.status) }
     var adminNote by remember(req.id) { mutableStateOf(req.adminNote) }
     var isHidden by remember(req.id) { mutableStateOf(req.isHidden) }
+    var receiptBase64 by remember(req.id) { mutableStateOf(req.receiptImageBase64) }
+    var showZoomDialog by remember { mutableStateOf(false) }
+
+    val pickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            encodeUriToReceiptBase64(context, uri)?.let { encoded ->
+                receiptBase64 = encoded
+            }
+        }
+    }
+
+    if (showZoomDialog && receiptBase64.isNotBlank()) {
+        FullScreenReceiptDialog(
+            base64 = receiptBase64,
+            title = "${req.customerName} • ငွေလွှဲပြေစာ",
+            onDismiss = { showZoomDialog = false }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1306,6 +1424,51 @@ fun EditWalletRequestDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                HorizontalDivider()
+                Text("ပြေစာ ဓာတ်ပုံ (Admin ပြင်/ဖျက်နိုင်)", fontWeight = FontWeight.Bold)
+                if (receiptBase64.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        ReceiptImageThumbnail(
+                            base64 = receiptBase64,
+                            onClick = { showZoomDialog = true },
+                            size = 68.dp
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    pickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                },
+                                modifier = Modifier.testTag("admin_replace_receipt_button")
+                            ) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("ပုံအသစ်ပြောင်း")
+                            }
+                            TextButton(
+                                onClick = { receiptBase64 = "" },
+                                modifier = Modifier.testTag("admin_clear_receipt_button")
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("ပြေစာပုံ ဖျက်မည်", color = AdminCrimson)
+                            }
+                        }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            pickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_attach_receipt_button")
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Device မှ ပြေစာပုံ ထည့်/ပြင်ရန်")
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1321,7 +1484,16 @@ fun EditWalletRequestDialog(
                 onClick = {
                     val amt = (amountInput.toLongOrNull() ?: req.amountKs).coerceAtLeast(1L)
                     val net = (netInput.toLongOrNull() ?: req.netAmountKs).coerceAtLeast(0L)
-                    onSave(amt, net, channel.trim(), refNote.trim(), status, adminNote.trim(), isHidden)
+                    onSave(
+                        amt,
+                        net,
+                        channel.trim(),
+                        refNote.trim(),
+                        status,
+                        adminNote.trim(),
+                        isHidden,
+                        if (receiptBase64 != req.receiptImageBase64) receiptBase64 else null
+                    )
                 },
                 modifier = Modifier.testTag("confirm_edit_wallet_req_button")
             ) {

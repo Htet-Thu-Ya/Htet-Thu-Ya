@@ -29,6 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Call
@@ -68,8 +70,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -94,10 +98,14 @@ import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
 import com.example.data.network.ApkDownloadHelper
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.example.ui.components.AdminInviteRedeemDialog
 import com.example.ui.components.BrandLogoAvatar
+import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.formatKs
+import com.example.ui.components.formatRemainingReopenCountdown
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.ChampionshipGoldBright
@@ -111,10 +119,13 @@ import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmerald
 import com.example.ui.theme.PitchEmeraldDark
+import com.example.ui.theme.SkyInfo
 
 enum class CustomerRoute {
     PARLAY,
     BODY_GOAL,
+    ONE_EXPRESS,
+    FIVE_FIVE_FIVE,
     TWO_D,
     THREE_D,
     DICE_GAME,
@@ -166,10 +177,22 @@ fun CustomerHomeScreen(
     var directDownloading by remember { mutableStateOf(false) }
     var directDownloadProgress by remember { mutableIntStateOf(0) }
     var directDownloadError by remember { mutableStateOf<String?>(null) }
+    var showWalletCard by remember { mutableStateOf(true) }
+    var showGamesGrid by remember { mutableStateOf(true) }
+    var showApkCard by remember { mutableStateOf(true) }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
 
     val account = (accountState as? UiState.Success)?.data
     val isLocked = account?.isLocked == true
     val isMaintenance = systemGameConfig.maintenanceMode
+    val footballPausedNow = systemGameConfig.isFootballPausedNow(nowMs)
+    val gamesPausedNow = systemGameConfig.isGamesPausedNow(nowMs)
     val isEnglish = appLanguage == AppLanguage.EN
 
     val menuTiles = remember(isEnglish, systemGameConfig.hideTwoD, systemGameConfig.hideThreeD) {
@@ -405,6 +428,26 @@ fun CustomerHomeScreen(
                 }
             }
 
+            if (footballPausedNow && !isMaintenance) {
+                item(span = { GridItemSpan(2) }) {
+                    PauseStatusBannerCard(
+                        title = "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်",
+                        reopenAtMs = systemGameConfig.footballReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
+
+            if (gamesPausedNow && !isMaintenance) {
+                item(span = { GridItemSpan(2) }) {
+                    PauseStatusBannerCard(
+                        title = "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်",
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
+
             if (availableApkUpdate != null) {
                 item(span = { GridItemSpan(2) }) {
                     ApkUpdateBanner(
@@ -414,15 +457,26 @@ fun CustomerHomeScreen(
                 }
             }
 
-            // Summary Wallet Card
             item(span = { GridItemSpan(2) }) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = PearlCard),
-                    border = BorderStroke(1.dp, PearlCardBorder),
-                    shape = RoundedCornerShape(18.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
+                HideBarSectionHeader(
+                    title = if (isEnglish) "Wallet Summary" else "လက်ကျန်ငွေ နှင့် ပွိုင့်အကျဉ်းချုပ်",
+                    countBadge = formatKs(account?.balanceKs ?: 0L),
+                    isVisible = showWalletCard,
+                    onToggle = { showWalletCard = !showWalletCard },
+                    testTag = "hide_bar_customer_wallet"
+                )
+            }
+
+            // Summary Wallet Card
+            if (showWalletCard) {
+                item(span = { GridItemSpan(2) }) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = PearlCard),
+                        border = BorderStroke(1.dp, PearlCardBorder),
+                        shape = RoundedCornerShape(18.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -529,54 +583,180 @@ fun CustomerHomeScreen(
                     }
                 }
             }
+            }
 
-            // Menu Tiles (Sports, 2D, 3D, Mini Games, History, Wallet, Results, Settings)
-            items(menuTiles, key = { it.route.name }) { tile ->
-                val isGameTile = tile.gameKey != null
-                val gameEnabled = tile.gameKey == null || systemGameConfig.isGameEnabled(tile.gameKey)
-                val tileEnabled = (!isGameTile || (!isLocked && !isMaintenance && gameEnabled))
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(114.dp)
-                        .alpha(if (tileEnabled) 1f else 0.45f)
-                        .clickable(enabled = tileEnabled) { onNavigate(tile.route) }
-                        .testTag(tile.testTag),
-                    colors = CardDefaults.cardColors(containerColor = PearlCard),
-                    border = BorderStroke(1.dp, PearlCardBorder),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            // Dedicated separate boxes for One Express & 555 Football Odds
+            item(span = { GridItemSpan(2) }) {
+                val expressEnabled = !isLocked && !isMaintenance && !footballPausedNow
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(
+                    Card(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                            .weight(1f)
+                            .alpha(if (expressEnabled) 1f else 0.45f)
+                            .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS) }
+                            .testTag("menu_one_express"),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3B)),
+                        border = BorderStroke(1.5.dp, SkyInfo),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(tile.badgeColor, CircleShape),
-                            contentAlignment = Alignment.Center
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(
-                                imageVector = tile.icon,
-                                contentDescription = tile.title,
-                                tint = tile.iconTint,
-                                modifier = Modifier.size(26.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = SkyInfo)
+                                Surface(color = SkyInfo.copy(alpha = 0.2f), shape = RoundedCornerShape(6.dp)) {
+                                    Text(
+                                        text = if (footballPausedNow) "ခေတ္တပိတ်" else "Auto ကြေး",
+                                        color = SkyInfo,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "One Express\nဘောလုံးပွဲကြေး",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2
+                            )
+                            Text(
+                                text = if (footballPausedNow && systemGameConfig.footballReopenAtMs > nowMs) {
+                                    formatRemainingReopenCountdown(systemGameConfig.footballReopenAtMs, nowMs).substringAfter("• ")
+                                } else "ပွဲထွက်ကြေး တိုက်ရိုက်ကြည့်/လောင်းရန်",
+                                color = Color(0xFFBAE6FD),
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = if (isGameTile && !gameEnabled) "${tile.title} (ပိတ်)" else tile.title,
-                            color = InkDark,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .alpha(if (expressEnabled) 1f else 0.45f)
+                            .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
+                            .testTag("menu_five_five_five"),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2D2106)),
+                        border = BorderStroke(1.5.dp, ChampionshipGold),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold)
+                                Surface(color = ChampionshipGold.copy(alpha = 0.22f), shape = RoundedCornerShape(6.dp)) {
+                                    Text(
+                                        text = if (footballPausedNow) "ခေတ္တပိတ်" else "555 ကြေး",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "555\nဘောလုံးပွဲကြေး",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2
+                            )
+                            Text(
+                                text = if (footballPausedNow && systemGameConfig.footballReopenAtMs > nowMs) {
+                                    formatRemainingReopenCountdown(systemGameConfig.footballReopenAtMs, nowMs).substringAfter("• ")
+                                } else "555 ဘောလုံးကြေး သီးသန့်အကွက်",
+                                color = Color(0xFFFDE68A),
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            item(span = { GridItemSpan(2) }) {
+                HideBarSectionHeader(
+                    title = if (isEnglish) "Games & Services Grid" else "ပွဲစဉ်များ နှင့် ဝန်ဆောင်မှု ဇယား",
+                    countBadge = "${menuTiles.size}",
+                    isVisible = showGamesGrid,
+                    onToggle = { showGamesGrid = !showGamesGrid },
+                    testTag = "hide_bar_customer_menu_grid"
+                )
+            }
+
+            // Menu Tiles (Sports, 2D, 3D, Mini Games, History, Wallet, Results, Settings)
+            if (showGamesGrid) {
+                items(menuTiles, key = { it.route.name }) { tile ->
+                    val isGameTile = tile.gameKey != null
+                    val isFootballTile = tile.gameKey == "parlay" || tile.gameKey == "body_goal"
+                    val pausedByTimer = if (isFootballTile) footballPausedNow else if (isGameTile) gamesPausedNow else false
+                    val gameEnabled = tile.gameKey == null || (systemGameConfig.isGameEnabled(tile.gameKey) && !pausedByTimer)
+                    val tileEnabled = (!isGameTile || (!isLocked && !isMaintenance && gameEnabled))
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(114.dp)
+                            .alpha(if (tileEnabled) 1f else 0.45f)
+                            .clickable(enabled = tileEnabled) { onNavigate(tile.route) }
+                            .testTag(tile.testTag),
+                        colors = CardDefaults.cardColors(containerColor = PearlCard),
+                        border = BorderStroke(1.dp, PearlCardBorder),
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(tile.badgeColor, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = tile.icon,
+                                    contentDescription = tile.title,
+                                    tint = tile.iconTint,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = when {
+                                    isGameTile && pausedByTimer -> "${tile.title} (ခေတ္တပိတ်)"
+                                    isGameTile && !gameEnabled -> "${tile.title} (ပိတ်)"
+                                    else -> tile.title
+                                },
+                                color = InkDark,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
@@ -692,20 +872,30 @@ fun CustomerHomeScreen(
             }
 
             item(span = { GridItemSpan(2) }) {
-                val resolvedApkUrl = remember(availableApkUpdate, apkDownloadUrl) {
-                    ApkDownloadHelper.toDirectDownloadUrl(
-                        availableApkUpdate?.downloadUrl?.ifBlank { apkDownloadUrl } ?: apkDownloadUrl
-                    ).ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
-                }
-                val appDisplayName = brandingConfig.appName.ifBlank { "လိုတရ" }
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
-                    border = BorderStroke(1.dp, PitchEmerald.copy(alpha = 0.55f)),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("home_direct_apk_card")
-                ) {
+                HideBarSectionHeader(
+                    title = "APK တိုက်ရိုက်ဒေါင်းရန် & မျှဝေရန်",
+                    isVisible = showApkCard,
+                    onToggle = { showApkCard = !showApkCard },
+                    testTag = "hide_bar_customer_apk_card"
+                )
+            }
+
+            if (showApkCard) {
+                item(span = { GridItemSpan(2) }) {
+                    val resolvedApkUrl = remember(availableApkUpdate, apkDownloadUrl) {
+                        ApkDownloadHelper.toDirectDownloadUrl(
+                            availableApkUpdate?.downloadUrl?.ifBlank { apkDownloadUrl } ?: apkDownloadUrl
+                        ).ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+                    }
+                    val appDisplayName = brandingConfig.appName.ifBlank { "လိုတရ" }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                        border = BorderStroke(1.dp, PitchEmerald.copy(alpha = 0.55f)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_direct_apk_card")
+                    ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -829,6 +1019,7 @@ fun CustomerHomeScreen(
                         }
                     }
                 }
+            }
             }
 
             item(span = { GridItemSpan(2) }) {

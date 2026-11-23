@@ -154,6 +154,10 @@ service cloud.firestore {
              (!('externalId' in data) || (data.externalId is string && data.externalId.size() <= 80)) &&
              (!('matchDate' in data) || (data.matchDate is string && data.matchDate.size() <= 20)) &&
              (!('liveClock' in data) || (data.liveClock is string && data.liveClock.size() <= 24)) &&
+             (!('boardSource' in data) || data.boardSource in ['standard', 'one_express', 'five_five_five']) &&
+             (!('oneExpressKyay' in data) || (data.oneExpressKyay is string && data.oneExpressKyay.size() <= 60)) &&
+             (!('fiveFiveFiveKyay' in data) || (data.fiveFiveFiveKyay is string && data.fiveFiveFiveKyay.size() <= 60)) &&
+             (!('autoUpdatedAtMs' in data) || (data.autoUpdatedAtMs is int && data.autoUpdatedAtMs >= 0)) &&
              data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -175,7 +179,7 @@ service cloud.firestore {
     function isValidOrder(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 60 &&
-             data.orderType in ['parlay', 'body_goal', 'three_d', 'two_d'] &&
+             data.orderType in ['parlay', 'body_goal', 'one_express', 'five_five_five', 'three_d', 'two_d'] &&
              data.selections is list && data.selections.size() >= 1 && data.selections.size() <= 30 &&
              (data.selections.size() == 0 || (data.selections[0] is string && data.selections[0].size() <= 120)) &&
              data.matchIds is list && data.matchIds.size() <= 15 &&
@@ -193,6 +197,7 @@ service cloud.firestore {
              data.settledBy is string && data.settledBy.size() <= 128 &&
              (!('isHidden' in data) || data.isHidden is bool) &&
              (!('matchKickoffMs' in data) || (data.matchKickoffMs is int && data.matchKickoffMs >= 0)) &&
+             (!('matchKickoffText' in data) || (data.matchKickoffText is string && data.matchKickoffText.size() <= 160)) &&
              (!('scanAtMs' in data) || (data.scanAtMs is int && data.scanAtMs >= 0)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -224,6 +229,7 @@ service cloud.firestore {
              (!('ratePercent' in data) || (data.ratePercent is number && data.ratePercent >= 0.0 && data.ratePercent <= 100.0)) &&
              (!('rateMode' in data) || data.rateMode in ['none', 'bonus', 'fee']) &&
              (!('netAmountKs' in data) || (data.netAmountKs is int && data.netAmountKs >= 0 && data.netAmountKs <= 100000000)) &&
+             (!('receiptImageBase64' in data) || (data.receiptImageBase64 is string && data.receiptImageBase64.size() <= 180000)) &&
              (!('isHidden' in data) || data.isHidden is bool) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -297,11 +303,13 @@ service cloud.firestore {
 
     function isValidBoardConfig(data) {
       return data.keys().hasAll(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'updatedBy', 'updatedAt']) &&
              data.autoSyncDailyMatches is bool &&
              data.autoSyncLiveResults is bool &&
              data.lastSyncedDate is string && data.lastSyncedDate.size() <= 20 &&
              (!('allowedLeagues' in data) || (data.allowedLeagues is list && data.allowedLeagues.size() <= 30)) &&
+             (!('autoSyncOneExpress' in data) || data.autoSyncOneExpress is bool) &&
+             (!('autoSyncFiveFiveFive' in data) || data.autoSyncFiveFiveFive is bool) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -331,7 +339,7 @@ service cloud.firestore {
 
     function isValidSystemGameConfig(data) {
       return data.keys().hasAll(['enabledGames', 'dualApprovalThresholdKs', 'minStakeKs', 'maxStakeKs', 'twoDPayoutMultiplier', 'threeDPayoutMultiplier', 'dicePayoutMultiplier', 'sixAnimalsPayoutMultiplier', 'bonusPromoText', 'maintenanceMode', 'maintenanceMessage', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['enabledGames', 'dualApprovalThresholdKs', 'minStakeKs', 'maxStakeKs', 'twoDPayoutMultiplier', 'threeDPayoutMultiplier', 'dicePayoutMultiplier', 'sixAnimalsPayoutMultiplier', 'bonusPromoText', 'maintenanceMode', 'maintenanceMessage', 'hideTwoD', 'hideThreeD', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['enabledGames', 'dualApprovalThresholdKs', 'minStakeKs', 'maxStakeKs', 'twoDPayoutMultiplier', 'threeDPayoutMultiplier', 'dicePayoutMultiplier', 'sixAnimalsPayoutMultiplier', 'bonusPromoText', 'maintenanceMode', 'maintenanceMessage', 'hideTwoD', 'hideThreeD', 'footballPaused', 'footballReopenAtMs', 'gamesPaused', 'gamesReopenAtMs', 'updatedBy', 'updatedAt']) &&
              data.enabledGames is list && data.enabledGames.size() <= 12 &&
              data.dualApprovalThresholdKs is int && data.dualApprovalThresholdKs >= 0 && data.dualApprovalThresholdKs <= 100000000 &&
              data.minStakeKs is int && data.minStakeKs >= 100 && data.minStakeKs <= 1000000 &&
@@ -345,6 +353,10 @@ service cloud.firestore {
              data.maintenanceMessage is string && data.maintenanceMessage.size() <= 300 &&
              (!('hideTwoD' in data) || data.hideTwoD is bool) &&
              (!('hideThreeD' in data) || data.hideThreeD is bool) &&
+             (!('footballPaused' in data) || data.footballPaused is bool) &&
+             (!('footballReopenAtMs' in data) || (data.footballReopenAtMs is int && data.footballReopenAtMs >= 0)) &&
+             (!('gamesPaused' in data) || data.gamesPaused is bool) &&
+             (!('gamesReopenAtMs' in data) || (data.gamesReopenAtMs is int && data.gamesReopenAtMs >= 0)) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -622,7 +634,7 @@ service cloud.firestore {
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().keys().hasAll(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'liveClock', 'createdBy', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'liveClock', 'boardSource', 'oneExpressKyay', 'fiveFiveFiveKyay', 'autoUpdatedAtMs', 'createdBy', 'createdAt', 'updatedAt']);
       allow update: if hasAdminPerm('canManageBoard') &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
@@ -665,7 +677,7 @@ service cloud.firestore {
                        incoming().adminNote == '' &&
                        incoming().get('isHidden', false) == false &&
                        incoming().keys().hasAll(['userId', 'customerName', 'orderType', 'selections', 'matchIds', 'drawRound', 'stakeKs', 'multiplier', 'potentialPayoutKs', 'actualPayoutKs', 'status', 'adminNote', 'settledBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'customerName', 'orderType', 'selections', 'matchIds', 'pickKeys', 'drawRound', 'stakeKs', 'multiplier', 'potentialPayoutKs', 'actualPayoutKs', 'commissionPercent', 'commissionKs', 'status', 'adminNote', 'settledBy', 'isHidden', 'matchKickoffMs', 'scanAtMs', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['userId', 'customerName', 'orderType', 'selections', 'matchIds', 'pickKeys', 'drawRound', 'stakeKs', 'multiplier', 'potentialPayoutKs', 'actualPayoutKs', 'commissionPercent', 'commissionKs', 'status', 'adminNote', 'settledBy', 'isHidden', 'matchKickoffMs', 'matchKickoffText', 'scanAtMs', 'createdAt', 'updatedAt']);
       allow update: if isSignedIn() &&
                        isValidId(orderId) &&
                        isValidOrder(incoming()) &&
@@ -707,7 +719,7 @@ service cloud.firestore {
                        incoming().adminNote == '' &&
                        incoming().get('isHidden', false) == false &&
                        incoming().keys().hasAll(['userId', 'customerName', 'requestType', 'amountKs', 'channel', 'referenceNote', 'status', 'adminNote', 'processedBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'customerName', 'requestType', 'amountKs', 'channel', 'referenceNote', 'status', 'adminNote', 'processedBy', 'ratePercent', 'rateMode', 'netAmountKs', 'isHidden', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['userId', 'customerName', 'requestType', 'amountKs', 'channel', 'referenceNote', 'receiptImageBase64', 'status', 'adminNote', 'processedBy', 'ratePercent', 'rateMode', 'netAmountKs', 'isHidden', 'createdAt', 'updatedAt']);
       allow update: if isSignedIn() &&
                        isValidId(requestId) &&
                        isValidWalletRequest(incoming()) &&

@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -61,6 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -86,8 +89,12 @@ import com.example.data.model.SupportAgentProfile
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UserAccount
 import com.example.data.model.WalletRequest
+import com.example.ui.components.FullScreenReceiptDialog
+import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.ReceiptImageThumbnail
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.formatKs
+import com.example.ui.components.formatRemainingReopenCountdown
 import com.example.ui.components.formatTimestamp
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.AmberPending
@@ -99,6 +106,7 @@ import com.example.ui.theme.InkMuted
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PitchEmeraldDark
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -120,8 +128,9 @@ fun AdminFinancialOverviewTab(
         referenceNote: String,
         status: String,
         adminNote: String,
-        isHidden: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _, _ -> },
+        isHidden: Boolean,
+        receiptImageBase64: String?
+    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
     onDeleteWalletRequest: (String) -> Unit = {},
     onEditTransaction: (
         txId: String,
@@ -141,6 +150,7 @@ fun AdminFinancialOverviewTab(
 
     var editingWalletReq by remember { mutableStateOf<WalletRequest?>(null) }
     var deletingWalletReq by remember { mutableStateOf<WalletRequest?>(null) }
+    var zoomingReceiptBase64 by remember { mutableStateOf<String?>(null) }
     var editingTx by remember { mutableStateOf<LedgerTransaction?>(null) }
     var deletingTx by remember { mutableStateOf<LedgerTransaction?>(null) }
 
@@ -422,7 +432,7 @@ fun AdminFinancialOverviewTab(
                                         }
                                         StatusBadge(req.status)
                                         IconButton(onClick = {
-                                            onEditWalletRequest(req.id, req.amountKs, req.netAmountKs, req.channel, req.referenceNote, req.status, req.adminNote, !req.isHidden)
+                                            onEditWalletRequest(req.id, req.amountKs, req.netAmountKs, req.channel, req.referenceNote, req.status, req.adminNote, !req.isHidden, null)
                                         }) {
                                             Icon(if (req.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = "Toggle Hide Wallet Request", tint = InkMuted)
                                         }
@@ -438,6 +448,25 @@ fun AdminFinancialOverviewTab(
                                 }
                                 Text("${formatKs(req.amountKs)} (Net: ${formatKs(req.netAmountKs)}) • ${req.channel}", color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
                                 Text("Ref: ${req.referenceNote} • ${formatTimestamp(req.createdAt)}", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                                if (req.receiptImageBase64.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        ReceiptImageThumbnail(
+                                            base64 = req.receiptImageBase64,
+                                            onClick = { zoomingReceiptBase64 = req.receiptImageBase64 },
+                                            size = 48.dp
+                                        )
+                                        Text(
+                                            text = "ပြေစာဓာတ်ပုံ ကြည့်ရန်",
+                                            color = PitchEmeraldDark,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -527,11 +556,18 @@ fun AdminFinancialOverviewTab(
         EditWalletRequestDialog(
             req = req,
             onDismiss = { editingWalletReq = null },
-            onSave = { amt, net, ch, ref, st, note, hid ->
+            onSave = { amt, net, ch, ref, st, note, hid, receiptB64 ->
                 val id = req.id
                 editingWalletReq = null
-                onEditWalletRequest(id, amt, net, ch, ref, st, note, hid)
+                onEditWalletRequest(id, amt, net, ch, ref, st, note, hid, receiptB64)
             }
+        )
+    }
+
+    zoomingReceiptBase64?.let { b64 ->
+        FullScreenReceiptDialog(
+            base64 = b64,
+            onDismiss = { zoomingReceiptBase64 = null }
         )
     }
 
@@ -1025,6 +1061,7 @@ private fun PermissionCheckboxesBlock(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminSystemSettingsTab(
     config: SystemGameConfig,
@@ -1045,6 +1082,25 @@ fun AdminSystemSettingsTab(
     var hideTwoD by remember { mutableStateOf(config.hideTwoD) }
     var hideThreeD by remember { mutableStateOf(config.hideThreeD) }
 
+    var footballPaused by remember { mutableStateOf(config.footballPaused) }
+    var footballReopenAtMs by remember { mutableLongStateOf(config.footballReopenAtMs) }
+    var footballMinutesInput by remember { mutableStateOf("60") }
+
+    var gamesPaused by remember { mutableStateOf(config.gamesPaused) }
+    var gamesReopenAtMs by remember { mutableLongStateOf(config.gamesReopenAtMs) }
+    var gamesMinutesInput by remember { mutableStateOf("60") }
+
+    var showPauseControls by remember { mutableStateOf(true) }
+    var showBasicSettings by remember { mutableStateOf(true) }
+
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+
     LaunchedEffect(config) {
         enabledGames = config.enabledGames
         dualThreshold = config.dualApprovalThresholdKs.toString()
@@ -1059,6 +1115,34 @@ fun AdminSystemSettingsTab(
         maintenanceMsg = config.maintenanceMessage
         hideTwoD = config.hideTwoD
         hideThreeD = config.hideThreeD
+        footballPaused = config.footballPaused
+        footballReopenAtMs = config.footballReopenAtMs
+        gamesPaused = config.gamesPaused
+        gamesReopenAtMs = config.gamesReopenAtMs
+    }
+
+    fun buildCurrentConfig(): SystemGameConfig {
+        val fbActive = footballPaused && (footballReopenAtMs <= 0L || footballReopenAtMs > System.currentTimeMillis())
+        val gmActive = gamesPaused && (gamesReopenAtMs <= 0L || gamesReopenAtMs > System.currentTimeMillis())
+        return config.copy(
+            enabledGames = enabledGames,
+            dualApprovalThresholdKs = (dualThreshold.toLongOrNull() ?: 300_000L).coerceAtLeast(10_000L),
+            minStakeKs = (minStake.toLongOrNull() ?: 500L).coerceAtLeast(100L),
+            maxStakeKs = (maxStake.toLongOrNull() ?: 5_000_000L).coerceAtLeast(1_000L),
+            twoDPayoutMultiplier = twoDMult.toDoubleOrNull() ?: 80.0,
+            threeDPayoutMultiplier = threeDMult.toDoubleOrNull() ?: 550.0,
+            dicePayoutMultiplier = diceMult.toDoubleOrNull() ?: 1.95,
+            sixAnimalsPayoutMultiplier = animalsMult.toDoubleOrNull() ?: 2.0,
+            bonusPromoText = promoText.trim(),
+            maintenanceMode = maintenanceMode,
+            maintenanceMessage = maintenanceMsg.trim(),
+            hideTwoD = hideTwoD,
+            hideThreeD = hideThreeD,
+            footballPaused = fbActive,
+            footballReopenAtMs = if (fbActive) footballReopenAtMs else 0L,
+            gamesPaused = gmActive,
+            gamesReopenAtMs = if (gmActive) gamesReopenAtMs else 0L
+        )
     }
 
     LazyColumn(
@@ -1066,6 +1150,277 @@ fun AdminSystemSettingsTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            HideBarSectionHeader(
+                title = "ဘောလုံးပွဲ & ဂိမ်း ခေတ္တပိတ် / Auto-Open Timer",
+                countBadge = when {
+                    footballPaused && gamesPaused -> "၂ ခုလုံး ပိတ်"
+                    footballPaused -> "ဘောလုံး ပိတ်"
+                    gamesPaused -> "ဂိမ်း ပိတ်"
+                    else -> "ဖွင့်ထား"
+                },
+                isVisible = showPauseControls,
+                onToggle = { showPauseControls = !showPauseControls },
+                testTag = "hide_bar_admin_pause_controls"
+            )
+        }
+
+        if (showPauseControls) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, AmberPending.copy(alpha = 0.65f)),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PauseCircle, contentDescription = null, tint = AmberPending)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    "ဘောလုံးပွဲ နှင့် ဂိမ်းများ ခေတ္တပိတ် & အချိန်ပြည့် Auto-Open စနစ်",
+                                    color = ChampionshipGold,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "သတ်မှတ်အချိန်ပြည့်သည်နှင့် Customer ထံ အလိုအလျောက် လောင်းကြေးပြန်ပွင့်ပါမည်",
+                                    color = Color(0xFFB4C8BE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+
+                        // 1. Football Pause + Timer
+                        val footballStillPaused = footballPaused && (footballReopenAtMs <= 0L || footballReopenAtMs > nowMs)
+                        Surface(
+                            color = Color(0xFF152921),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            "ဘောလုံးပွဲ (မောင်း/ဘော်ဒီ/One Express/555) ခေတ္တပိတ်မည်",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = if (footballStillPaused) {
+                                                if (footballReopenAtMs > nowMs) {
+                                                    formatRemainingReopenCountdown(footballReopenAtMs, nowMs)
+                                                } else {
+                                                    "ခေတ္တပိတ်ထားသည် (Manual ပြန်ဖွင့်ရန်)"
+                                                }
+                                            } else {
+                                                "လက်ရှိ ဘောလုံးပွဲများ ဖွင့်ထားပါသည်"
+                                            },
+                                            color = if (footballStillPaused) AmberPending else Color(0xFF6EE7B7),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    Switch(
+                                        checked = footballStillPaused,
+                                        onCheckedChange = { checked ->
+                                            footballPaused = checked
+                                            if (!checked) footballReopenAtMs = 0L
+                                        },
+                                        modifier = Modifier.testTag("pause_football_switch")
+                                    )
+                                }
+
+                                Text(
+                                    "အလိုအလျောက် ပြန်ဖွင့်မည့်အချိန် (Auto-Open Timer) ရွေးချယ်ရန်:",
+                                    color = Color(0xFFCDE2D6),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    listOf(
+                                        0L to "အချိန်မရှိ (Manual)",
+                                        15L to "15 မိနစ်",
+                                        30L to "30 မိနစ်",
+                                        60L to "1 နာရီ",
+                                        120L to "2 နာရီ",
+                                        360L to "6 နာရီ",
+                                        720L to "12 နာရီ"
+                                    ).forEach { (mins, lbl) ->
+                                        FilterChip(
+                                            selected = if (mins == 0L) (footballStillPaused && footballReopenAtMs == 0L)
+                                            else false,
+                                            onClick = {
+                                                footballPaused = true
+                                                footballReopenAtMs = if (mins == 0L) 0L else System.currentTimeMillis() + mins * 60_000L
+                                                if (mins > 0L) footballMinutesInput = mins.toString()
+                                            },
+                                            label = { Text(lbl) }
+                                        )
+                                    }
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = footballMinutesInput,
+                                        onValueChange = { footballMinutesInput = it.filter { c -> c.isDigit() }.take(4) },
+                                        label = { Text("စိတ်ကြိုက် (မိနစ်)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            val mins = (footballMinutesInput.toLongOrNull() ?: 0L).coerceAtLeast(1L)
+                                            footballPaused = true
+                                            footballReopenAtMs = System.currentTimeMillis() + mins * 60_000L
+                                        },
+                                        modifier = Modifier.testTag("apply_football_reopen_minutes")
+                                    ) {
+                                        Icon(Icons.Default.Schedule, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Timer ထားမည်", color = ChampionshipGold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Games & Lottery Pause + Timer
+                        val gamesStillPaused = gamesPaused && (gamesReopenAtMs <= 0L || gamesReopenAtMs > nowMs)
+                        Surface(
+                            color = Color(0xFF152921),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            "ဂိမ်းနှင့် ထီ (2D/3D/Dice/6 Animals) ရပ်နားမည်",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = if (gamesStillPaused) {
+                                                if (gamesReopenAtMs > nowMs) {
+                                                    formatRemainingReopenCountdown(gamesReopenAtMs, nowMs)
+                                                } else {
+                                                    "ခေတ္တရပ်နားထားသည် (Manual ပြန်ဖွင့်ရန်)"
+                                                }
+                                            } else {
+                                                "လက်ရှိ ဂိမ်းနှင့် ထီများ ဖွင့်ထားပါသည်"
+                                            },
+                                            color = if (gamesStillPaused) AmberPending else Color(0xFF6EE7B7),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    Switch(
+                                        checked = gamesStillPaused,
+                                        onCheckedChange = { checked ->
+                                            gamesPaused = checked
+                                            if (!checked) gamesReopenAtMs = 0L
+                                        },
+                                        modifier = Modifier.testTag("pause_games_switch")
+                                    )
+                                }
+
+                                Text(
+                                    "အလိုအလျောက် ပြန်ဖွင့်မည့်အချိန် (Auto-Open Timer) ရွေးချယ်ရန်:",
+                                    color = Color(0xFFCDE2D6),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    listOf(
+                                        0L to "အချိန်မရှိ (Manual)",
+                                        15L to "15 မိနစ်",
+                                        30L to "30 မိနစ်",
+                                        60L to "1 နာရီ",
+                                        120L to "2 နာရီ",
+                                        360L to "6 နာရီ",
+                                        720L to "12 နာရီ"
+                                    ).forEach { (mins, lbl) ->
+                                        FilterChip(
+                                            selected = if (mins == 0L) (gamesStillPaused && gamesReopenAtMs == 0L)
+                                            else false,
+                                            onClick = {
+                                                gamesPaused = true
+                                                gamesReopenAtMs = if (mins == 0L) 0L else System.currentTimeMillis() + mins * 60_000L
+                                                if (mins > 0L) gamesMinutesInput = mins.toString()
+                                            },
+                                            label = { Text(lbl) }
+                                        )
+                                    }
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = gamesMinutesInput,
+                                        onValueChange = { gamesMinutesInput = it.filter { c -> c.isDigit() }.take(4) },
+                                        label = { Text("စိတ်ကြိုက် (မိနစ်)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            val mins = (gamesMinutesInput.toLongOrNull() ?: 0L).coerceAtLeast(1L)
+                                            gamesPaused = true
+                                            gamesReopenAtMs = System.currentTimeMillis() + mins * 60_000L
+                                        },
+                                        modifier = Modifier.testTag("apply_games_reopen_minutes")
+                                    ) {
+                                        Icon(Icons.Default.Schedule, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Timer ထားမည်", color = ChampionshipGold)
+                                    }
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = { onSaveSystemGameConfig(buildCurrentConfig()) },
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                            modifier = Modifier.fillMaxWidth().testTag("save_pause_timer_config_button")
+                        ) {
+                            Text("ပိတ်/ဖွင့် Timer ဆက်တင် သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            HideBarSectionHeader(
+                title = "ဂိမ်းအမျိုးအစား & စနစ်ဆိုင်ရာ ဆက်တင်များ",
+                isVisible = showBasicSettings,
+                onToggle = { showBasicSettings = !showBasicSettings },
+                testTag = "hide_bar_admin_system_basic"
+            )
+        }
+
+        if (showBasicSettings) {
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
@@ -1194,7 +1549,7 @@ fun AdminSystemSettingsTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Maintenance Mode (ဂိမ်းများ ခေတ္တပိတ်မည်)", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Maintenance Mode (စနစ်တစ်ခုလုံး ခေတ္တပိတ်မည်)", color = Color.White, fontWeight = FontWeight.Bold)
                             Text("ဖွင့်ထားပါက Customer များ လောင်းကြေးတင်၍ မရပါ", color = Color(0xFFFCA5A5), style = MaterialTheme.typography.bodySmall)
                         }
                         Switch(checked = maintenanceMode, onCheckedChange = { maintenanceMode = it })
@@ -1235,25 +1590,7 @@ fun AdminSystemSettingsTab(
                     }
 
                     Button(
-                        onClick = {
-                            onSaveSystemGameConfig(
-                                config.copy(
-                                    enabledGames = enabledGames,
-                                    dualApprovalThresholdKs = (dualThreshold.toLongOrNull() ?: 300_000L).coerceAtLeast(10_000L),
-                                    minStakeKs = (minStake.toLongOrNull() ?: 500L).coerceAtLeast(100L),
-                                    maxStakeKs = (maxStake.toLongOrNull() ?: 5_000_000L).coerceAtLeast(1_000L),
-                                    twoDPayoutMultiplier = twoDMult.toDoubleOrNull() ?: 80.0,
-                                    threeDPayoutMultiplier = threeDMult.toDoubleOrNull() ?: 550.0,
-                                    dicePayoutMultiplier = diceMult.toDoubleOrNull() ?: 1.95,
-                                    sixAnimalsPayoutMultiplier = animalsMult.toDoubleOrNull() ?: 2.0,
-                                    bonusPromoText = promoText.trim(),
-                                    maintenanceMode = maintenanceMode,
-                                    maintenanceMessage = maintenanceMsg.trim(),
-                                    hideTwoD = hideTwoD,
-                                    hideThreeD = hideThreeD
-                                )
-                            )
-                        },
+                        onClick = { onSaveSystemGameConfig(buildCurrentConfig()) },
                         enabled = !busy,
                         colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
                         modifier = Modifier.fillMaxWidth().testTag("save_system_game_config_button")
@@ -1262,6 +1599,7 @@ fun AdminSystemSettingsTab(
                     }
                 }
             }
+        }
         }
     }
 }

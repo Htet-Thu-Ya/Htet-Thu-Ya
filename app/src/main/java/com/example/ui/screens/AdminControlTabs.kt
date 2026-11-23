@@ -74,6 +74,7 @@ import com.example.data.model.PaymentAccount
 import com.example.data.model.SupportAgentProfile
 import com.example.data.model.UserAccount
 import com.example.ui.components.BrandLogoAvatar
+import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
@@ -126,6 +127,8 @@ fun AdminMiniGameControlTab(
 
     var showDiceQuotaSection by remember { mutableStateOf(true) }
     var showAnimalQuotaSection by remember { mutableStateOf(true) }
+    var showUserDirectivesSection by remember { mutableStateOf(true) }
+    var showRecentRoundsSection by remember { mutableStateOf(true) }
     var customerSearch by remember { mutableStateOf("") }
 
     LaunchedEffect(config) {
@@ -495,23 +498,28 @@ fun AdminMiniGameControlTab(
 
         // Per-User Directive Section
         item {
-            Text(
-                "Customer တစ်ဦးချင်း ဂိမ်းထိန်းချုပ်မှု (${users.size})",
-                color = ChampionshipGold,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            HideBarSectionHeader(
+                title = "Customer တစ်ဦးချင်း ဂိမ်းထိန်းချုပ်မှု ဇယား",
+                countBadge = "${users.size} ဦး",
+                isVisible = showUserDirectivesSection,
+                onToggle = { showUserDirectivesSection = !showUserDirectivesSection },
+                testTag = "hide_bar_minigame_user_directives"
             )
-            Spacer(Modifier.height(6.dp))
-            OutlinedTextField(
-                value = customerSearch,
-                onValueChange = { customerSearch = it },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = ChampionshipGold) },
-                label = { Text("Customer ရှာရန်") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                modifier = Modifier.fillMaxWidth()
-            )
+            if (showUserDirectivesSection) {
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = customerSearch,
+                    onValueChange = { customerSearch = it },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = ChampionshipGold) },
+                    label = { Text("Customer ရှာရန်") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
+
+        if (showUserDirectivesSection) {
 
         items(filteredUsers.take(30), key = { it.userId }) { user ->
             val currentDir = config.userDirectives[user.userId] ?: "auto"
@@ -548,19 +556,22 @@ fun AdminMiniGameControlTab(
                 }
             }
         }
+        }
 
         // Recent Live Rounds Monitor
         item {
             HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
             Spacer(Modifier.height(4.dp))
-            Text(
-                "လတ်တလော ဂိမ်းကစားမှု မှတ်တမ်း (${rounds.size})",
-                color = ChampionshipGold,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            HideBarSectionHeader(
+                title = "လတ်တလော ဂိမ်းကစားမှု မှတ်တမ်းဇယား",
+                countBadge = "${rounds.size} ကြိမ်",
+                isVisible = showRecentRoundsSection,
+                onToggle = { showRecentRoundsSection = !showRecentRoundsSection },
+                testTag = "hide_bar_minigame_recent_rounds"
             )
         }
 
+        if (showRecentRoundsSection) {
         if (rounds.isEmpty()) {
             item {
                 Text("ဂိမ်းကစားမှု မှတ်တမ်း မရှိသေးပါ", color = Color(0xFFB4C8BE))
@@ -608,6 +619,7 @@ fun AdminMiniGameControlTab(
                     }
                 }
             }
+        }
         }
     }
 }

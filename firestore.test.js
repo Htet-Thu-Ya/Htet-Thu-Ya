@@ -1598,6 +1598,220 @@ test("Branding config, mini-game control config, auto-accept orders, support age
   );
 });
 
+test("One Express & 555 boards, orders with kickoff text, wallet receipt image create/edit/clear, and pause schedule configs", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      email: "alice@example.com",
+      balanceKs: 50000,
+      rewardPoints: 100,
+      activeStakeKs: 0,
+      totalWonKs: 0,
+      isLocked: false,
+      createdAt: pastDate(10000),
+      updatedAt: pastDate(10000),
+    });
+  });
+
+  // Owner creates One Express & 555 matches + updates board_config auto-sync flags
+  await assertSucceeds(
+    ownerDb.collection("matches").doc("ext_oneexp_1").set({
+      league: "Premier League",
+      homeTeam: "Arsenal",
+      awayTeam: "Liverpool",
+      kickoffLabel: "Tonight 22:00",
+      handicapLine: "Home -0.5",
+      goalLine: "2.5",
+      bodyOdds: 1.95,
+      goalOdds: 1.92,
+      status: "open",
+      homeScore: 0,
+      awayScore: 0,
+      visibility: "public",
+      boardSource: "one_express",
+      oneExpressKyay: "Home (1-30) • 2-80",
+      fiveFiveFiveKyay: "",
+      autoUpdatedAtMs: 1700000000000,
+      createdBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("matches").doc("ext_555_1").set({
+      league: "La Liga",
+      homeTeam: "Real Madrid",
+      awayTeam: "Barcelona",
+      kickoffLabel: "Tomorrow 01:30",
+      handicapLine: "Home -0.5",
+      goalLine: "2.5",
+      bodyOdds: 1.95,
+      goalOdds: 1.95,
+      status: "open",
+      homeScore: 0,
+      awayScore: 0,
+      visibility: "public",
+      boardSource: "five_five_five",
+      oneExpressKyay: "",
+      fiveFiveFiveKyay: "555: H 1-30 | G 2-80",
+      autoUpdatedAtMs: 1700000000000,
+      createdBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+  await assertFails(
+    ownerDb.collection("matches").doc("bad_source_match").set({
+      league: "PL",
+      homeTeam: "A",
+      awayTeam: "B",
+      kickoffLabel: "21:00",
+      handicapLine: "Home -0.5",
+      goalLine: "2.5",
+      bodyOdds: 1.95,
+      goalOdds: 1.95,
+      status: "open",
+      homeScore: 0,
+      awayScore: 0,
+      visibility: "public",
+      boardSource: "unknown_source",
+      createdBy: OWNER_UID,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("board_config").set({
+      autoSyncDailyMatches: true,
+      autoSyncLiveResults: true,
+      lastSyncedDate: "2026-11-23",
+      allowedLeagues: [],
+      autoSyncOneExpress: true,
+      autoSyncFiveFiveFive: true,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(4500),
+    })
+  );
+
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("system_config").set({
+      enabledGames: ["parlay", "body_goal", "two_d", "three_d", "dice", "six_animals"],
+      dualApprovalThresholdKs: 500000,
+      minStakeKs: 500,
+      maxStakeKs: 5000000,
+      twoDPayoutMultiplier: 80.0,
+      threeDPayoutMultiplier: 500.0,
+      dicePayoutMultiplier: 1.95,
+      sixAnimalsPayoutMultiplier: 2.0,
+      bonusPromoText: "Bonus 5%",
+      maintenanceMode: false,
+      maintenanceMessage: "",
+      hideTwoD: false,
+      hideThreeD: false,
+      footballPaused: true,
+      footballReopenAtMs: Date.now() + 1800000,
+      gamesPaused: true,
+      gamesReopenAtMs: Date.now() + 900000,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // Customer creates One Express & 555 orders with matchKickoffText
+  await assertSucceeds(
+    aliceDb.collection("orders").doc("ord_oneexp_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "one_express",
+      selections: ["Arsenal -0.5 [Home (1-30)]"],
+      matchIds: ["ext_oneexp_1"],
+      pickKeys: ["ext_oneexp_1:home"],
+      drawRound: "",
+      stakeKs: 5000,
+      multiplier: 1.95,
+      potentialPayoutKs: 9750,
+      actualPayoutKs: 0,
+      commissionPercent: 0,
+      commissionKs: 0,
+      status: "pending",
+      adminNote: "",
+      settledBy: "",
+      isHidden: false,
+      matchKickoffMs: Date.now() + 3600000,
+      matchKickoffText: "Arsenal vs Liverpool (Tonight 22:00)",
+      scanAtMs: 0,
+      createdAt: pastDate(3500),
+      updatedAt: pastDate(3500),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("orders").doc("ord_555_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      orderType: "five_five_five",
+      selections: ["Real Madrid Over 2.5 [555: G 2-80]"],
+      matchIds: ["ext_555_1"],
+      pickKeys: ["ext_555_1:over"],
+      drawRound: "",
+      stakeKs: 2000,
+      multiplier: 1.95,
+      potentialPayoutKs: 3900,
+      actualPayoutKs: 0,
+      status: "pending",
+      adminNote: "",
+      settledBy: "",
+      matchKickoffMs: Date.now() + 7200000,
+      matchKickoffText: "Real Madrid vs Barcelona (Tomorrow 01:30)",
+      createdAt: pastDate(3200),
+      updatedAt: pastDate(3200),
+    })
+  );
+
+  // Customer submits wallet topup with device receipt image Base64; Owner can edit/clear; customer cannot update
+  await assertSucceeds(
+    aliceDb.collection("wallet_requests").doc("wr_receipt_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      requestType: "topup",
+      amountKs: 10000,
+      channel: "KBZPay",
+      referenceNote: "Slip #998877",
+      receiptImageBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      status: "pending",
+      adminNote: "",
+      processedBy: "",
+      ratePercent: 0,
+      rateMode: "none",
+      netAmountKs: 10000,
+      createdAt: pastDate(2500),
+      updatedAt: pastDate(2500),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("wallet_requests").doc("wr_receipt_1").update({
+      receiptImageBase64: "",
+      updatedAt: pastDate(2000),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("wallet_requests").doc("wr_receipt_1").update({
+      receiptImageBase64: "",
+      adminNote: "Cleared duplicate receipt",
+      processedBy: OWNER_UID,
+      updatedAt: pastDate(1800),
+    })
+  );
+});
+
+
 
 
 
