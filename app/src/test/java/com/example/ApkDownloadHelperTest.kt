@@ -61,5 +61,39 @@ class ApkDownloadHelperTest {
         assertTrue(text.contains("လိုတရ"))
         assertTrue(text.contains("(v2.5)"))
         assertTrue(text.contains("https://drive.usercontent.google.com/download?id=FILE_ID_123&export=download&confirm=t"))
+        assertTrue(text.contains(ApkDownloadHelper.CUSTOMER_SHARE_DEEP_LINK))
+    }
+
+    @Test
+    fun adminAndShareLinks_buildAndParseCorrectly() {
+        assertEquals("lotaya://admin", ApkDownloadHelper.buildAdminPortalLink())
+        assertEquals("lotaya://admin?invite=HTY-1234", ApkDownloadHelper.buildAdminInviteLink(" hty-1234 "))
+        assertEquals("lotaya://admin", ApkDownloadHelper.buildAdminInviteLink("  "))
+
+        val inviteShareText = ApkDownloadHelper.buildAdminInviteShareText(
+            appName = "လိုတရ",
+            code = "hty-abc9",
+            label = "Cashier",
+            rawApkUrl = "https://drive.google.com/file/d/XYZ99/view?usp=sharing"
+        )
+        assertTrue(inviteShareText.contains("lotaya://admin?invite=HTY-ABC9"))
+        assertTrue(inviteShareText.contains("HTY-ABC9"))
+        assertTrue(inviteShareText.contains("(Cashier)"))
+        assertTrue(inviteShareText.contains("https://drive.usercontent.google.com/download?id=XYZ99&export=download&confirm=t"))
+
+        assertEquals(
+            ApkDownloadHelper.ParsedAppLink.AdminPortal,
+            ApkDownloadHelper.parseIncomingAppLink("lotaya://admin")
+        )
+        assertEquals(
+            ApkDownloadHelper.ParsedAppLink.AdminInvite("HTY-9988"),
+            ApkDownloadHelper.parseIncomingAppLink("lotaya://admin?invite=hty-9988")
+        )
+        assertEquals(
+            ApkDownloadHelper.ParsedAppLink.CustomerShare,
+            ApkDownloadHelper.parseIncomingAppLink("lotaya://share")
+        )
+        assertEquals(null, ApkDownloadHelper.parseIncomingAppLink("https://example.com/admin"))
+        assertEquals(null, ApkDownloadHelper.parseIncomingAppLink("   "))
     }
 }

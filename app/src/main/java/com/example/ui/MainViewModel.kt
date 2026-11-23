@@ -119,6 +119,8 @@ class MainViewModel(
         isEmailVerified && currentUserEmail.equals(HtetThuYaRepository.BOOTSTRAPPED_ADMIN_EMAIL, ignoreCase = true)
 
     private var autoSyncedSession = false
+    private var autoSyncedOneExpressSession = false
+    private var autoSyncedFiveFiveFiveSession = false
 
     val adminMember: StateFlow<AdminMember?> = repository.observeAdminMember(currentUserId)
         .catch { error ->
@@ -467,27 +469,42 @@ class MainViewModel(
         checkForApkUpdate()
 
         viewModelScope.launch {
-            combine(isAdmin, boardConfig) { admin, cfg -> admin to cfg }
-                .collect { (admin, cfg) ->
-                    if (admin && !autoSyncedSession) {
-                        autoSyncedSession = true
-                        val today = feedService.todayDateIso()
-                        val canManageBoard = currentAdminPermissions.value.canManageBoard
-                        if (canManageBoard) {
-                            if (cfg.autoSyncDailyMatches && cfg.lastSyncedDate != today) {
-                                repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cfg)
-                            } else if (cfg.autoSyncLiveResults) {
-                                repository.syncLiveMatchResults(feedService)
-                            }
-                            if (cfg.autoSyncOneExpress && cfg.lastSyncedDate != today) {
-                                repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cfg)
-                            }
-                            if (cfg.autoSyncFiveFiveFive && cfg.lastSyncedDate != today) {
-                                repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cfg)
-                            }
-                        }
+            combine(isAdmin, boardConfig, matches) { admin, cfg, matchState ->
+                Triple(admin, cfg, matchState)
+            }.collect { (admin, cfg, matchState) ->
+                if (!admin) return@collect
+                val loadedMatches = (matchState as? UiState.Success)?.data ?: return@collect
+                val today = feedService.todayDateIso()
+                val canManageBoard = currentAdminPermissions.value.canManageBoard
+                if (!canManageBoard) return@collect
+
+                if (!autoSyncedSession) {
+                    autoSyncedSession = true
+                    if (cfg.autoSyncDailyMatches && cfg.lastSyncedDate != today) {
+                        repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cfg)
+                    } else if (cfg.autoSyncLiveResults) {
+                        repository.syncLiveMatchResults(feedService)
                     }
                 }
+                if (!autoSyncedOneExpressSession && cfg.autoSyncOneExpress) {
+                    autoSyncedOneExpressSession = true
+                    val hasOneExpressBoard = loadedMatches.any {
+                        it.boardSource == "one_express" && (it.matchDate == today || it.status == "open")
+                    }
+                    if (!hasOneExpressBoard || cfg.lastSyncedDate != today) {
+                        repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cfg)
+                    }
+                }
+                if (!autoSyncedFiveFiveFiveSession && cfg.autoSyncFiveFiveFive) {
+                    autoSyncedFiveFiveFiveSession = true
+                    val has555Board = loadedMatches.any {
+                        it.boardSource == "five_five_five" && (it.matchDate == today || it.status == "open")
+                    }
+                    if (!has555Board || cfg.lastSyncedDate != today) {
+                        repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cfg)
+                    }
+                }
+            }
         }
 
         // Chatbox local notification watchers
@@ -1898,6 +1915,24 @@ class MainViewModel(
 
     fun seedSampleBoard() = runAction("နမူနာ ပွဲစဉ်များနှင့် ၃လုံးထီ ထည့်သွင်းပြီးပါပြီ") {
         repository.seedSampleBoard()
+    }
+
+    fun seedSampleExpressBoard(boardSource: String) {
+        val label = if (boardSource == "one_express") "One Express" else "555"
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val res = repository.seedSampleBoardForSource(boardSource)
+                res.onSuccess { count ->
+                    _events.emit("$label နမူနာပွဲကြေး $count ပွဲ ထည့်သွင်းပြီးပါပြီ")
+                    logAuditAsync("Seeded $label sample board", "board", boardSource, "", "Count=$count")
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "$label နမူနာပွဲ ထည့်သွင်းမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
     }
 
     // --- APK Update, Chat & Quality Rating ---

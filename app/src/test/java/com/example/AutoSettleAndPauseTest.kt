@@ -92,6 +92,50 @@ class AutoSettleAndPauseTest {
         )
         val lossDecision = AutoSettleEngine.evaluate(fiveFiveFiveLossOrder, matchesById, emptyList())
         assertTrue(lossDecision is AutoSettleDecision.Loss)
+
+        val match2 = SportMatch(
+            id = "m2",
+            homeTeam = "Liverpool",
+            awayTeam = "Everton",
+            handicapLine = "Home -1",
+            goalLine = "2.5",
+            bodyOdds = 1.90,
+            goalOdds = 1.90,
+            status = "finished",
+            homeScore = 3L,
+            awayScore = 1L,
+            boardSource = "five_five_five"
+        )
+        val parlayMatchesById = mapOf("m1" to match, "m2" to match2)
+
+        val oneExpressParlayWin = BetOrder(
+            id = "o3",
+            orderType = "one_express",
+            selections = listOf("Arsenal (-0.5)", "Over (2.5)"),
+            matchIds = listOf("m1", "m2"),
+            pickKeys = listOf("home", "over"),
+            stakeKs = 5_000L,
+            multiplier = 3.648,
+            potentialPayoutKs = 18_240L,
+            status = "accepted"
+        )
+        val parlayWinDecision = AutoSettleEngine.evaluate(oneExpressParlayWin, parlayMatchesById, emptyList())
+        assertTrue(parlayWinDecision is AutoSettleDecision.Win)
+        assertEquals(18_240L, (parlayWinDecision as AutoSettleDecision.Win).grossPayoutKs)
+
+        val fiveFiveFiveParlayLoss = BetOrder(
+            id = "o4",
+            orderType = "five_five_five",
+            selections = listOf("Arsenal (-0.5)", "Under (2.5)"),
+            matchIds = listOf("m1", "m2"),
+            pickKeys = listOf("home", "under"),
+            stakeKs = 5_000L,
+            multiplier = 3.61,
+            potentialPayoutKs = 18_050L,
+            status = "accepted"
+        )
+        val parlayLossDecision = AutoSettleEngine.evaluate(fiveFiveFiveParlayLoss, parlayMatchesById, emptyList())
+        assertTrue(parlayLossDecision is AutoSettleDecision.Loss)
     }
 
     @Test

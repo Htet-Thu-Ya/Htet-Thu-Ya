@@ -688,10 +688,11 @@ fun OrderSlipCard(
 
 @Composable
 fun AdminInviteRedeemDialog(
+    initialCode: String = "",
     onDismiss: () -> Unit,
     onRedeem: (String) -> Unit
 ) {
-    var code by remember { mutableStateOf("") }
+    var code by remember(initialCode) { mutableStateOf(initialCode.trim().uppercase()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Key, contentDescription = null, tint = ChampionshipGold) },

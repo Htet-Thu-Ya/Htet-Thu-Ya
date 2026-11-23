@@ -9,15 +9,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,16 +22,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SportsSoccer
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,8 +36,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,10 +44,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,31 +56,32 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.data.betting.KyayFormatter
 import com.example.data.model.BoardConfig
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
+import com.example.ui.components.BoardGreenAccent
+import com.example.ui.components.BoardMatchInfoDialog
+import com.example.ui.components.BoardTopBarBg
 import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.MatchPick
 import com.example.ui.components.PauseStatusBannerCard
+import com.example.ui.components.ScreenshotMatchRowCard
+import com.example.ui.components.SportsBetBottomBar
+import com.example.ui.components.SportsLeagueFilterDialog
+import com.example.ui.components.SportsLeagueHeaderRow
 import com.example.ui.components.SubScreenTopBar
-import com.example.ui.components.TeamLogoAvatar
 import com.example.ui.components.buildOrderKickoffSummaryText
-import com.example.ui.components.formatEpochDateTime
-import com.example.ui.components.formatKickoffCountdown
 import com.example.ui.components.formatKs
+import com.example.ui.components.parseMatchKickoffEpochMs
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchBg
 import com.example.ui.theme.DeepPitchElevated
@@ -102,62 +92,9 @@ import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmeraldDark
 import kotlinx.coroutines.delay
-import java.util.Calendar
-import java.util.Locale
 import kotlin.math.roundToLong
 
-private data class MatchPick(
-    val matchId: String,
-    val label: String,
-    val odds: Double,
-    val pickKey: String
-)
 
-private val BoardTopBarBg = Color(0xFF232B28)
-private val BoardHeaderDark = Color(0xFF4F5451)
-private val BoardGreenAccent = Color(0xFF1DB954)
-private val BoardCellSelectedBg = Color(0xFF16A34A)
-private val BoardCellDefaultBg = Color(0xFFFDFDFD)
-private val BoardBorderGray = Color(0xFFD5DCD8)
-
-private fun parseMatchKickoffMs(match: SportMatch): Long {
-    val label = match.kickoffLabel.trim()
-    val dateStr = match.matchDate.trim()
-    val timeMatch = Regex("""(\d{1,2}):(\d{2})(?:\s*(AM|PM))?""", RegexOption.IGNORE_CASE).find(label)
-        ?: return 0L
-    var hour = timeMatch.groupValues[1].toIntOrNull() ?: return 0L
-    val minute = timeMatch.groupValues[2].toIntOrNull() ?: 0
-    val amPm = timeMatch.groupValues[3].uppercase()
-    if (amPm == "PM" && hour < 12) hour += 12
-    else if (amPm == "AM" && hour == 12) hour = 0
-
-    val cal = Calendar.getInstance()
-    val fullDateMatch = Regex("""(\d{4})-(\d{2})-(\d{2})""").find(dateStr)
-        ?: Regex("""(\d{4})-(\d{2})-(\d{2})""").find(label)
-    if (fullDateMatch != null) {
-        val y = fullDateMatch.groupValues[1].toInt()
-        val m = fullDateMatch.groupValues[2].toInt() - 1
-        val d = fullDateMatch.groupValues[3].toInt()
-        cal.set(y, m, d, hour, minute, 0)
-    } else {
-        val dmyMatch = Regex("""(\d{1,2})-(\d{1,2})-(\d{4})""").find(label)
-        if (dmyMatch != null) {
-            val d = dmyMatch.groupValues[1].toInt()
-            val m = dmyMatch.groupValues[2].toInt() - 1
-            val y = dmyMatch.groupValues[3].toInt()
-            cal.set(y, m, d, hour, minute, 0)
-        } else {
-            if (label.contains("tomorrow", ignoreCase = true) || label.contains("မနက်ဖြန်")) {
-                cal.add(Calendar.DAY_OF_YEAR, 1)
-            }
-            cal.set(Calendar.HOUR_OF_DAY, hour)
-            cal.set(Calendar.MINUTE, minute)
-            cal.set(Calendar.SECOND, 0)
-        }
-    }
-    cal.set(Calendar.MILLISECOND, 0)
-    return cal.timeInMillis
-}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -237,7 +174,7 @@ fun SportsOrderScreen(
     val earliestKickoffMs = remember(selectedPicks.keys.toList(), openMatches) {
         val pickedIds = selectedPicks.keys
         openMatches.filter { it.id in pickedIds }
-            .map { parseMatchKickoffMs(it) }
+            .map { parseMatchKickoffEpochMs(it) }
             .filter { it > 0L }
             .minOrNull() ?: 0L
     }
@@ -315,170 +252,37 @@ fun SportsOrderScreen(
             )
         },
         bottomBar = {
-            Surface(
-                color = BoardTopBarBg,
-                tonalElevation = 8.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Compact outcome strip
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${if (isParlay) "မောင်း: ${selectedPicks.size} | " else "ရွေးချယ်: ${selectedPicks.size} | "}x${String.format(Locale.US, "%.2f", combinedMultiplier)}",
-                            color = ChampionshipGold,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = if (selectedPicks.isEmpty()) "လက်ကျန်: ${formatKs(balanceKs)}"
-                            else "နိုင် +${formatKs(potentialProfit)} / ရှုံး -${formatKs(parsedStake)}",
-                            color = if (selectedPicks.isEmpty()) Color(0xFFD1D5DB) else Color(0xFF6EE7B7),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = JetBrainsMonoFontFamily,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    if (earliestKickoffMs > 0L) {
-                        Text(
-                            text = "${formatKickoffCountdown(earliestKickoffMs)} • စကန်ချိန်: ${formatEpochDateTime(scheduledScanAtMs)}",
-                            color = Color(0xFF93C5FD),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Screenshot-faithful bottom bar: လောင်းငွေ | White Box | Bright Green Pill
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "လောင်းငွေ",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White)
-                                .border(1.5.dp, BoardGreenAccent, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            if (stakeInput.isEmpty()) {
-                                Text("500+", color = InkMuted, fontSize = 14.sp)
-                            }
-                            BasicTextField(
-                                value = stakeInput,
-                                onValueChange = { stakeInput = it.filter { c -> c.isDigit() }.take(8) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                textStyle = TextStyle(
-                                    color = InkDark,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                ),
-                                cursorBrush = SolidColor(PitchEmeraldDark),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("sports_stake_input")
-                            )
-                        }
-
-                        Button(
-                            onClick = {
-                                val ordered = selectedPicks.values.toList()
-                                val pickedMatches = openMatches.filter { it.id in selectedPicks.keys }
-                                val kickoffSummary = buildOrderKickoffSummaryText(pickedMatches)
-                                onSubmitOrder(
-                                    if (isParlay) "parlay" else "body_goal",
-                                    ordered.map { it.label },
-                                    ordered.map { it.matchId },
-                                    ordered.map { it.pickKey },
-                                    if (isParlay) "မောင်း (${ordered.size} ပွဲ)" else "ဘော်ဒီ/ဂိုးပေါင်း",
-                                    parsedStake,
-                                    combinedMultiplier,
-                                    earliestKickoffMs,
-                                    scheduledScanAtMs,
-                                    kickoffSummary
-                                )
-                            },
-                            enabled = canSubmit,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BoardGreenAccent,
-                                contentColor = Color.White,
-                                disabledContainerColor = Color(0xFF4B5563),
-                                disabledContentColor = Color(0xFFD1D5DB)
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                            modifier = Modifier
-                                .height(46.dp)
-                                .testTag("submit_sports_order_button")
-                        ) {
-                            if (busy) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                            } else {
-                                Text(
-                                    text = "လောင်းမည်",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // Quick stake chips + Parlay helper
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf(500L, 1000L, 3000L, 5000L, 10000L).forEach { chipAmt ->
-                            Surface(
-                                color = if (parsedStake == chipAmt) BoardGreenAccent else Color(0xFF374151),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.clickable { stakeInput = chipAmt.toString() }
-                            ) {
-                                Text(
-                                    text = "$chipAmt",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                        if (isParlay && selectedPicks.size == 1) {
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                text = "* ၂ ပွဲ+ ရွေးပါ",
-                                color = ChampionshipGold,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    }
+            SportsBetBottomBar(
+                isParlay = isParlay,
+                selectedCount = selectedPicks.size,
+                combinedMultiplier = combinedMultiplier,
+                balanceKs = balanceKs,
+                potentialProfit = potentialProfit,
+                parsedStake = parsedStake,
+                earliestKickoffMs = earliestKickoffMs,
+                scheduledScanAtMs = scheduledScanAtMs,
+                stakeInput = stakeInput,
+                onStakeChange = { stakeInput = it },
+                canSubmit = canSubmit,
+                busy = busy,
+                onSubmit = {
+                    val ordered = selectedPicks.values.toList()
+                    val pickedMatches = openMatches.filter { it.id in selectedPicks.keys }
+                    val kickoffSummary = buildOrderKickoffSummaryText(pickedMatches)
+                    onSubmitOrder(
+                        if (isParlay) "parlay" else "body_goal",
+                        ordered.map { it.label },
+                        ordered.map { it.matchId },
+                        ordered.map { it.pickKey },
+                        if (isParlay) "မောင်း (${ordered.size} ပွဲ)" else "ဘော်ဒီ/ဂိုးပေါင်း",
+                        parsedStake,
+                        combinedMultiplier,
+                        earliestKickoffMs,
+                        scheduledScanAtMs,
+                        kickoffSummary
+                    )
                 }
-            }
+            )
         }
     ) { padding ->
         Box(
@@ -559,29 +363,7 @@ fun SportsOrderScreen(
                             if (showSportsTable) {
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
                                     item(key = "league_hdr_$leagueName") {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color(0xFFE2E8E5))
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Star,
-                                                contentDescription = null,
-                                                tint = BoardGreenAccent,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = leagueName,
-                                                color = InkDark,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
+                                        SportsLeagueHeaderRow(leagueName = leagueName)
                                     }
 
                                     items(leagueMatches, key = { it.id }) { match ->
@@ -612,310 +394,20 @@ fun SportsOrderScreen(
     }
 
     if (showLeagueFilterDialog) {
-        AlertDialog(
-            onDismissRequest = { showLeagueFilterDialog = false },
-            title = { Text("လိဂ် ရွေးချယ်ရန်") },
-            text = {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = selectedLeagueFilter == null,
-                        onClick = {
-                            selectedLeagueFilter = null
-                            showLeagueFilterDialog = false
-                        },
-                        label = { Text("အားလုံး (${openMatches.size})") }
-                    )
-                    availableLeagues.forEach { lg ->
-                        FilterChip(
-                            selected = selectedLeagueFilter == lg,
-                            onClick = {
-                                selectedLeagueFilter = lg
-                                showLeagueFilterDialog = false
-                            },
-                            label = { Text(lg) }
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showLeagueFilterDialog = false }) {
-                    Text("ပိတ်မည်")
-                }
-            }
+        SportsLeagueFilterDialog(
+            totalCount = openMatches.size,
+            availableLeagues = availableLeagues,
+            selectedLeague = selectedLeagueFilter,
+            onSelectLeague = { selectedLeagueFilter = it },
+            onDismiss = { showLeagueFilterDialog = false }
         )
     }
 
     infoMatch?.let { m ->
-        val hInfo = KyayFormatter.formatHandicap(m)
-        val gInfo = KyayFormatter.formatGoalLine(m.goalLine)
-        AlertDialog(
-            onDismissRequest = { infoMatch = null },
-            icon = { Icon(Icons.Default.Info, contentDescription = null, tint = PitchEmeraldDark) },
-            title = { Text("${m.homeTeam} vs ${m.awayTeam}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("လိဂ်: ${m.league} • ${m.kickoffLabel}", fontWeight = FontWeight.SemiBold)
-                    Text("ဘော်ဒီကြေး: ${hInfo.summaryText}", color = PitchEmeraldDark)
-                    Text(gInfo, color = Color(0xFF92400E))
-                    Text("Body Odds: x${m.bodyOdds} • Goal Odds: x${m.goalOdds}", fontFamily = JetBrainsMonoFontFamily)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { infoMatch = null }) { Text("နားလည်ပါပြီ") }
-            }
+        BoardMatchInfoDialog(
+            match = m,
+            onDismiss = { infoMatch = null }
         )
-    }
-}
-
-@Composable
-private fun ScreenshotMatchRowCard(
-    match: SportMatch,
-    selectedPickKey: String?,
-    onShowInfo: () -> Unit,
-    onSelect: (String, Double, String) -> Unit
-) {
-    val handicapInfo = remember(match.id, match.handicapLine, match.homeTeam, match.awayTeam) {
-        KyayFormatter.formatHandicap(match)
-    }
-    val compactHandicap = remember(handicapInfo.normalizedLine) {
-        compactKyayText(handicapInfo.normalizedLine)
-    }
-    val compactGoal = remember(match.goalLine) {
-        match.goalLine.trim().ifBlank { "2.5" }
-    }
-
-    val homePick = "${match.homeTeam} (${handicapInfo.homeBadge}) vs ${match.awayTeam}"
-    val awayPick = "${match.awayTeam} (${handicapInfo.awayBadge}) vs ${match.homeTeam}"
-    val overPick = "${match.homeTeam}-${match.awayTeam} ဂိုးပေါင်း Over (${match.goalLine})"
-    val underPick = "${match.homeTeam}-${match.awayTeam} ဂိုးပေါင်း Under (${match.goalLine})"
-
-    val homeSelected = selectedPickKey == "home"
-    val awaySelected = selectedPickKey == "away"
-    val overSelected = selectedPickKey == "over"
-    val underSelected = selectedPickKey == "under"
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 2.dp)
-    ) {
-        // Dark gray kickoff strip matching screenshots
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(BoardHeaderDark)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "ပွဲချိန် : ${match.kickoffLabel}",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
-            )
-            Icon(
-                imageVector = Icons.Default.Info,
-                contentDescription = "ကြေးအသေးစိတ်",
-                tint = Color.White.copy(alpha = 0.8f),
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable(onClick = onShowInfo)
-            )
-        }
-
-        // Row 1: Home Team vs Away Team with TeamLogoAvatar & compact Kyay Pill
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min)
-                .border(0.5.dp, BoardBorderGray)
-        ) {
-            // Home Cell
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .background(if (homeSelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(homePick, match.bodyOdds, "home") }
-                    .padding(horizontal = 8.dp, vertical = 10.dp)
-                    .testTag("match_home_${match.id}"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    TeamLogoAvatar(
-                        logoUrl = match.homeLogoUrl,
-                        teamName = match.homeTeam,
-                        size = 24.dp
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = match.homeTeam,
-                        color = if (homeSelected) Color.White else InkDark,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (handicapInfo.favIsHome) {
-                    Spacer(Modifier.width(4.dp))
-                    KyayPillBadge(text = compactHandicap, inverted = homeSelected)
-                }
-            }
-
-            VerticalDivider(thickness = 1.dp, color = BoardBorderGray)
-
-            // Away Cell
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .background(if (awaySelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(awayPick, match.bodyOdds, "away") }
-                    .padding(horizontal = 8.dp, vertical = 10.dp)
-                    .testTag("match_away_${match.id}"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    TeamLogoAvatar(
-                        logoUrl = match.awayLogoUrl,
-                        teamName = match.awayTeam,
-                        size = 24.dp
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = match.awayTeam,
-                        color = if (awaySelected) Color.White else InkDark,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (!handicapInfo.favIsHome) {
-                    Spacer(Modifier.width(4.dp))
-                    KyayPillBadge(text = compactHandicap, inverted = awaySelected)
-                }
-            }
-        }
-
-        HorizontalDivider(thickness = 1.dp, color = BoardBorderGray)
-
-        // Row 2: Over | GoalLine | Under
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp)
-                .border(0.5.dp, BoardBorderGray),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .background(if (overSelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(overPick, match.goalOdds, "over") }
-                    .testTag("match_over_${match.id}"),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Over",
-                    color = if (overSelected) Color.White else InkDark,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            VerticalDivider(thickness = 1.dp, color = BoardBorderGray)
-
-            Box(
-                modifier = Modifier
-                    .widthIn(min = 68.dp)
-                    .fillMaxHeight()
-                    .background(BoardGreenAccent.copy(alpha = 0.14f))
-                    .clickable(onClick = onShowInfo)
-                    .padding(horizontal = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = compactGoal,
-                    color = PitchEmeraldDark,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
-                )
-            }
-
-            VerticalDivider(thickness = 1.dp, color = BoardBorderGray)
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .background(if (underSelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(underPick, match.goalOdds, "under") }
-                    .testTag("match_under_${match.id}"),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Under",
-                    color = if (underSelected) Color.White else InkDark,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun KyayPillBadge(
-    text: String,
-    inverted: Boolean
-) {
-    Surface(
-        color = if (inverted) Color.White else BoardGreenAccent,
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Text(
-            text = text,
-            color = if (inverted) PitchEmeraldDark else Color.White,
-            fontFamily = JetBrainsMonoFontFamily,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-        )
-    }
-}
-
-private fun compactKyayText(normalizedLine: String): String {
-    val cleanSpec = normalizedLine
-        .replace("home", "", ignoreCase = true)
-        .replace("away", "", ignoreCase = true)
-        .replace("draw", "", ignoreCase = true)
-        .replace("even", "0", ignoreCase = true)
-        .trim()
-        .removePrefix("-")
-        .removePrefix("+")
-        .trim()
-        .ifBlank { "0.5" }
-    return when {
-        cleanSpec == "0" || cleanSpec == "0.0" -> "="
-        cleanSpec.startsWith("0+") -> "= +${cleanSpec.removePrefix("0+")}"
-        cleanSpec.startsWith("0-") -> "= -${cleanSpec.removePrefix("0-")}"
-        cleanSpec.startsWith("0 ") -> "= ${cleanSpec.removePrefix("0 ").trim()}"
-        else -> cleanSpec
     }
 }
 

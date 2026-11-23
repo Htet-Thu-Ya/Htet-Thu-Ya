@@ -87,19 +87,91 @@ object ApkDownloadHelper {
         return noFragment
     }
 
+    const val APP_LINK_SCHEME = "lotaya"
+    const val ADMIN_PORTAL_DEEP_LINK = "lotaya://admin"
+    const val CUSTOMER_SHARE_DEEP_LINK = "lotaya://share"
+
+    sealed interface ParsedAppLink {
+        data object AdminPortal : ParsedAppLink
+        data class AdminInvite(val code: String) : ParsedAppLink
+        data object CustomerShare : ParsedAppLink
+    }
+
+    fun buildAdminPortalLink(): String = ADMIN_PORTAL_DEEP_LINK
+
+    fun buildAdminInviteLink(code: String): String {
+        val cleanCode = code.trim().uppercase(Locale.US)
+        return if (cleanCode.isBlank()) ADMIN_PORTAL_DEEP_LINK
+        else "$ADMIN_PORTAL_DEEP_LINK?invite=$cleanCode"
+    }
+
+    fun buildCustomerShareLink(rawUrl: String): String {
+        val direct = toDirectDownloadUrl(rawUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL })
+        return direct.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+    }
+
     fun buildApkShareText(
         appName: String,
         rawUrl: String,
         versionLabel: String = ""
     ): String {
         val cleanName = appName.trim().ifBlank { "လိုတရ" }
-        val directUrl = toDirectDownloadUrl(rawUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL })
-            .ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+        val directUrl = buildCustomerShareLink(rawUrl)
         val versionPart = if (versionLabel.isNotBlank()) " ($versionLabel)" else ""
         return buildString {
-            append("$cleanName APK Direct Download$versionPart\n")
+            append("$cleanName APK Share Link$versionPart\n")
             append("တိုက်ရိုက်ဒေါင်းလုဒ်လင့်: $directUrl\n")
+            append("App Link: $CUSTOMER_SHARE_DEEP_LINK\n")
             append("မှတ်ချက်: လင့်ကိုနှိပ်၍ APK ဖိုင်ဒေါင်းပြီးပါက ဖွင့်၍ Install လုပ်ပါ။")
+        }
+    }
+
+    fun buildAdminInviteShareText(
+        appName: String,
+        code: String,
+        label: String,
+        rawApkUrl: String = AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL
+    ): String {
+        val cleanName = appName.trim().ifBlank { "လိုတရ" }
+        val cleanCode = code.trim().uppercase(Locale.US)
+        val inviteDeepLink = buildAdminInviteLink(cleanCode)
+        val directApkUrl = buildCustomerShareLink(rawApkUrl)
+        val labelPart = if (label.isNotBlank()) " ($label)" else ""
+        return buildString {
+            append("$cleanName Admin Link$labelPart\n")
+            append("1-Tap Admin Link: $inviteDeepLink\n")
+            append("Invite Code: $cleanCode\n")
+            append("APK Download: $directApkUrl\n")
+            append("မှတ်ချက်: Admin Link ကို နှိပ်၍ ဝင်ရောက်နိုင်သလို App ထဲရှိ 'Admin Key' တွင် Code ထည့်၍လည်း ဝင်နိုင်ပါသည်။")
+        }
+    }
+
+    fun parseIncomingAppLink(uriString: String?): ParsedAppLink? {
+        val raw = uriString?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        val parsed = runCatching { URI(raw) }.getOrNull() ?: return null
+        val scheme = parsed.scheme?.lowercase(Locale.US).orEmpty()
+        if (scheme != APP_LINK_SCHEME) return null
+        val host = parsed.host?.lowercase(Locale.US).orEmpty()
+        return when (host) {
+            "admin" -> {
+                val query = parsed.rawQuery.orEmpty()
+                val inviteParam = query.split("&")
+                    .mapNotNull { part ->
+                        val eq = part.indexOf('=')
+                        if (eq <= 0) null
+                        else part.substring(0, eq) to part.substring(eq + 1)
+                    }
+                    .firstOrNull { (k, _) -> k.equals("invite", ignoreCase = true) || k.equals("code", ignoreCase = true) }
+                    ?.second
+                    ?.trim()
+                    ?.uppercase(Locale.US)
+                    .orEmpty()
+                if (inviteParam.length >= 4) ParsedAppLink.AdminInvite(inviteParam)
+                else ParsedAppLink.AdminPortal
+            }
+            "share" -> ParsedAppLink.CustomerShare
+            else -> null
         }
     }
 

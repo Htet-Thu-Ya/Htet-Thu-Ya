@@ -75,8 +75,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import com.example.data.model.AppUpdateConfig
+import com.example.data.network.ApkDownloadHelper
 import com.example.data.model.AdminInvite
 import com.example.data.model.AdminMember
 import com.example.data.model.AdminPermissions
@@ -658,6 +665,8 @@ fun AdminSubAdminsTab(
     admins: List<AdminMember>,
     invites: List<AdminInvite>,
     supportAgents: List<SupportAgentProfile> = emptyList(),
+    appDisplayName: String = "လိုတရ",
+    apkDownloadUrl: String = AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
     onCreateInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
     onToggleInvite: (String, Boolean) -> Unit,
     onEditInvite: (
@@ -677,6 +686,9 @@ fun AdminSubAdminsTab(
     onRemoveAdmin: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val adminPortalLink = remember { ApkDownloadHelper.buildAdminPortalLink() }
+    val customerShareLink = remember(apkDownloadUrl) { ApkDownloadHelper.buildCustomerShareLink(apkDownloadUrl) }
     var showCreateCard by remember { mutableStateOf(true) }
     var inviteLabel by remember { mutableStateOf("") }
     var assignedEmail by remember { mutableStateOf("") }
@@ -695,6 +707,99 @@ fun AdminSubAdminsTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0E2920)),
+                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.45f)),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Link, contentDescription = null, tint = ChampionshipGold)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Admin Link နှင့် Share Link စီမံခန့်ခွဲမှု",
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        "Admin Portal Link: $adminPortalLink",
+                        color = Color.White,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(adminPortalLink))
+                                Toast.makeText(context, "Admin Link ကူးယူပြီးပါပြီ ($adminPortalLink)", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f).testTag("copy_admin_portal_link_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Admin Link ကူး", color = ChampionshipGold, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val msg = "$appDisplayName Admin Portal Link\n$adminPortalLink\n(Admin အကောင့်ဖြင့် ဝင်ထားပြီးဖြစ်ပါက နှိပ်ရုံဖြင့် Admin Dashboard သို့ တန်းဝင်နိုင်ပါသည်။)"
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "$appDisplayName Admin Link")
+                                    putExtra(Intent.EXTRA_TEXT, msg)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Admin Link"))
+                            },
+                            modifier = Modifier.weight(1f).testTag("share_admin_portal_link_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Admin Link ရှယ်", color = Color(0xFF34D399), maxLines = 1)
+                        }
+                    }
+                    HorizontalDivider(color = Color(0xFF1F473A))
+                    Text(
+                        "Customer Share Link (${ApkDownloadHelper.CUSTOMER_SHARE_DEEP_LINK}): $customerShareLink",
+                        color = Color(0xFFD7EAE1),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                val text = ApkDownloadHelper.buildApkShareText(appDisplayName, customerShareLink)
+                                clipboard.setText(AnnotatedString(text))
+                                Toast.makeText(context, "Customer Share Link ကူးယူပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f).testTag("copy_customer_share_link_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Share Link ကူး", color = Color.White, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val text = ApkDownloadHelper.buildApkShareText(appDisplayName, customerShareLink)
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "$appDisplayName Share Link")
+                                    putExtra(Intent.EXTRA_TEXT, text)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Customer App Link"))
+                            },
+                            modifier = Modifier.weight(1f).testTag("share_customer_share_link_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Share Link ရှယ်", color = ChampionshipGold, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
@@ -824,21 +929,43 @@ fun AdminSubAdminsTab(
                                 color = InkMuted,
                                 style = MaterialTheme.typography.bodySmall
                             )
+                            Text(
+                                text = ApkDownloadHelper.buildAdminInviteLink(inv.code),
+                                color = PitchEmeraldDark,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                style = MaterialTheme.typography.labelSmall
+                            )
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = {
+                                    val inviteUrl = ApkDownloadHelper.buildAdminInviteLink(inv.code)
+                                    clipboard.setText(AnnotatedString(inviteUrl))
+                                    Toast.makeText(context, "1-Tap Admin Link ကူးပြီး: $inviteUrl", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.testTag("copy_invite_link_${inv.code}")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Admin Invite Link", tint = PitchEmeraldDark)
+                            }
                             IconButton(
                                 onClick = {
                                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = "text/plain"
                                         putExtra(
                                             Intent.EXTRA_TEXT,
-                                            "လိုတရ Second Admin Invite Code: ${inv.code}\nApp ထဲတွင် Login ဝင်ပြီး 'Admin Key' ခလုတ်ကိုနှိပ်၍ ဤ Code ကို ထည့်သွင်းပါ။"
+                                            ApkDownloadHelper.buildAdminInviteShareText(
+                                                appName = appDisplayName,
+                                                code = inv.code,
+                                                label = inv.label,
+                                                rawApkUrl = customerShareLink
+                                            )
                                         )
                                     }
                                     context.startActivity(Intent.createChooser(shareIntent, "Share Second Admin Invite"))
-                                }
+                                },
+                                modifier = Modifier.testTag("share_invite_link_${inv.code}")
                             ) {
-                                Icon(Icons.Default.Share, contentDescription = "Share Invite Code", tint = PitchEmeraldDark)
+                                Icon(Icons.Default.Share, contentDescription = "Share Invite Link", tint = PitchEmeraldDark)
                             }
                             IconButton(
                                 onClick = { editingInvite = inv },

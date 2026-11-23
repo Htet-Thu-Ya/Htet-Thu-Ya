@@ -56,12 +56,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.widget.Toast
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import com.example.BuildConfig
 import com.example.data.model.AppLanguage
+import com.example.data.model.AppUpdateConfig
 import com.example.data.model.BrandingConfig
 import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UserAccount
+import com.example.data.network.ApkDownloadHelper
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.components.formatKs
 import com.example.ui.theme.ChampionshipGold
@@ -81,14 +91,19 @@ fun SettingsAndRulesScreen(
     systemGameConfig: SystemGameConfig,
     brandingConfig: BrandingConfig = BrandingConfig(),
     miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
+    apkDownloadUrl: String = AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
+    isAdmin: Boolean = false,
     onSelectLanguage: (AppLanguage) -> Unit,
     onUpdateSecurityPin: (String, () -> Unit) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var showRulesDialog by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
     var showTeamThemeDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
+    var showShareLinksDialog by remember { mutableStateOf(false) }
 
     val isEnglish = currentLanguage == AppLanguage.EN
 
@@ -149,6 +164,15 @@ fun SettingsAndRulesScreen(
                             badgeColor = Color(0xFF047857),
                             testTag = "settings_language_row",
                             onClick = { showLanguageDialog = true }
+                        )
+                        HorizontalDivider(color = PearlCardBorder)
+                        SettingsActionRow(
+                            icon = Icons.Default.Share,
+                            title = if (isEnglish) "Share Link & Admin Link" else "Share လင့် နှင့် Admin Link များ",
+                            trailingBadge = if (isAdmin) "ADMIN" else "SHARE",
+                            badgeColor = if (isAdmin) Color(0xFFB91C1C) else Color(0xFF0284C7),
+                            testTag = "settings_share_links_row",
+                            onClick = { showShareLinksDialog = true }
                         )
                     }
                 }
@@ -281,6 +305,91 @@ fun SettingsAndRulesScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLanguageDialog = false }) { Text("ပိတ်မည်") }
+            }
+        )
+    }
+
+    if (showShareLinksDialog) {
+        val appName = brandingConfig.appName.ifBlank { "လိုတရ" }
+        val directApkUrl = remember(apkDownloadUrl) { ApkDownloadHelper.buildCustomerShareLink(apkDownloadUrl) }
+        val shareText = remember(appName, directApkUrl) {
+            ApkDownloadHelper.buildApkShareText(appName = appName, rawUrl = directApkUrl)
+        }
+        val adminPortalLink = remember { ApkDownloadHelper.buildAdminPortalLink() }
+        AlertDialog(
+            onDismissRequest = { showShareLinksDialog = false },
+            title = { Text("Share Link နှင့် Admin Link များ", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Customer APK Share Link (${ApkDownloadHelper.CUSTOMER_SHARE_DEEP_LINK})", fontWeight = FontWeight.SemiBold)
+                    Text(directApkUrl, style = MaterialTheme.typography.bodySmall, color = PitchEmeraldDark)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(shareText))
+                                Toast.makeText(context, "Customer Share Link ကူးယူပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("ကူးမည်")
+                        }
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "$appName APK Download")
+                                    putExtra(Intent.EXTRA_TEXT, shareText)
+                                }
+                                context.startActivity(Intent.createChooser(intent, "Share Customer Link"))
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("ရှယ်မည်")
+                        }
+                    }
+                    if (isAdmin) {
+                        HorizontalDivider()
+                        Text("Admin Portal Link", fontWeight = FontWeight.SemiBold)
+                        Text(adminPortalLink, fontFamily = JetBrainsMonoFontFamily, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB91C1C))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(adminPortalLink))
+                                    Toast.makeText(context, "Admin Link ကူးယူပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Admin ကူးမည်")
+                            }
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "$appName Admin Link")
+                                        putExtra(Intent.EXTRA_TEXT, "$appName Admin Link: $adminPortalLink\nAPK: $directApkUrl")
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Share Admin Link"))
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Admin ရှယ်မည်")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showShareLinksDialog = false }) { Text("ပိတ်မည်") }
             }
         )
     }

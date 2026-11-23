@@ -1,9 +1,11 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import com.example.data.network.ApkDownloadHelper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -115,14 +117,26 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var incomingAppLinkUri by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingAppLinkUri = intent?.dataString
         enableEdgeToEdge()
         setContent {
             HtetThuYaTheme {
-                AppNavigation()
+                AppNavigation(
+                    incomingAppLinkUri = incomingAppLinkUri,
+                    onConsumeIncomingAppLink = { incomingAppLinkUri = null }
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let { incomingAppLinkUri = it }
     }
 }
 
@@ -137,20 +151,32 @@ internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
 private const val ROUTE_HOME = "customer_home"
 
 @Composable
-fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
+fun AppNavigation(
+    auth: FirebaseAuth = Firebase.auth,
+    incomingAppLinkUri: String? = null,
+    onConsumeIncomingAppLink: () -> Unit = {}
+) {
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
     val user = currentUser
     if (user == null) {
         AuthScreen(onAuthSuccess = {})
     } else {
         key(user.uid) {
-            AuthenticatedRoot(user = user)
+            AuthenticatedRoot(
+                user = user,
+                incomingAppLinkUri = incomingAppLinkUri,
+                onConsumeIncomingAppLink = onConsumeIncomingAppLink
+            )
         }
     }
 }
 
 @Composable
-private fun AuthenticatedRoot(user: FirebaseUser) {
+private fun AuthenticatedRoot(
+    user: FirebaseUser,
+    incomingAppLinkUri: String?,
+    onConsumeIncomingAppLink: () -> Unit
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -268,6 +294,39 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
     var manualOpenUpdateDialog by remember { mutableStateOf(false) }
     var showSplashOverlay by remember { mutableStateOf(true) }
     var startupRulesDismissed by remember { mutableStateOf(false) }
+    var pendingInviteCode by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(incomingAppLinkUri, isAdmin) {
+        val rawUri = incomingAppLinkUri ?: return@LaunchedEffect
+        when (val parsed = ApkDownloadHelper.parseIncomingAppLink(rawUri)) {
+            is ApkDownloadHelper.ParsedAppLink.AdminPortal -> {
+                if (isAdmin) {
+                    vm.setAdminMode(true)
+                    onConsumeIncomingAppLink()
+                } else {
+                    delay(900L)
+                    snackbarHostState.showSnackbar("Admin Portal Link ဝင်ရောက်ရန် Admin Invite Code ထည့်သွင်းပါ")
+                    onConsumeIncomingAppLink()
+                }
+            }
+            is ApkDownloadHelper.ParsedAppLink.AdminInvite -> {
+                if (isAdmin) {
+                    vm.setAdminMode(true)
+                    onConsumeIncomingAppLink()
+                } else {
+                    delay(900L)
+                    pendingInviteCode = parsed.code
+                    vm.setAdminMode(false)
+                    onConsumeIncomingAppLink()
+                }
+            }
+            is ApkDownloadHelper.ParsedAppLink.CustomerShare -> {
+                vm.setAdminMode(false)
+                onConsumeIncomingAppLink()
+            }
+            null -> onConsumeIncomingAppLink()
+        }
+    }
 
     LaunchedEffect(Unit) {
         delay(1400L)
@@ -453,6 +512,7 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             onUpdateLotteryDraw = vm::updateLotteryDraw,
                             onDeleteLotteryDraw = vm::deleteLotteryDraw,
                             onSeedSampleBoard = vm::seedSampleBoard,
+                            onSeedSampleExpressBoard = vm::seedSampleExpressBoard,
                             onSyncDailyMatchesNow = vm::syncDailyMatchesNow,
                             onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
                             onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
@@ -514,6 +574,8 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             apkDownloadUrl = availableApkUpdate?.downloadUrl
                                 ?: appUpdateConfig?.downloadUrl
                                 ?: com.example.data.model.AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
+                            pendingInviteCode = pendingInviteCode,
+                            onConsumePendingInviteCode = { pendingInviteCode = null },
                             onOpenUpdateDialog = { manualOpenUpdateDialog = true },
                             onNavigate = { route -> navController.navigate(route.name) },
                             onSwitchToAdmin = { vm.setAdminMode(true) },
@@ -573,14 +635,34 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     composable(CustomerRoute.ONE_EXPRESS.name) {
                         ExpressOddsOrderScreen(
                             boardMode = "one_express",
+                            initialIsParlay = false,
                             matchesState = matchesState,
                             balanceKs = balanceKs,
                             systemGameConfig = systemGameConfig,
                             boardConfig = boardConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, stake, mult, pKeys, kickoffMs, kickoffText ->
-                                vm.placeOrder(type, sel, mIds, "One Express", stake, mult, pKeys, kickoffMs, 0L, kickoffText) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs, kickoffText) {
+                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                        popUpTo(ROUTE_HOME)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.ONE_EXPRESS_PARLAY.name) {
+                        ExpressOddsOrderScreen(
+                            boardMode = "one_express",
+                            initialIsParlay = true,
+                            matchesState = matchesState,
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            boardConfig = boardConfig,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs, kickoffText) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -591,14 +673,34 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                     composable(CustomerRoute.FIVE_FIVE_FIVE.name) {
                         ExpressOddsOrderScreen(
                             boardMode = "five_five_five",
+                            initialIsParlay = false,
                             matchesState = matchesState,
                             balanceKs = balanceKs,
                             systemGameConfig = systemGameConfig,
                             boardConfig = boardConfig,
                             busy = busy,
                             onBack = { navController.popBackStack() },
-                            onSubmitOrder = { type, sel, mIds, stake, mult, pKeys, kickoffMs, kickoffText ->
-                                vm.placeOrder(type, sel, mIds, "555 Odds", stake, mult, pKeys, kickoffMs, 0L, kickoffText) {
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs, kickoffText) {
+                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                        popUpTo(ROUTE_HOME)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.FIVE_FIVE_FIVE_PARLAY.name) {
+                        ExpressOddsOrderScreen(
+                            boardMode = "five_five_five",
+                            initialIsParlay = true,
+                            matchesState = matchesState,
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            boardConfig = boardConfig,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onSubmitOrder = { type, sel, mIds, pKeys, round, stake, mult, kickoffMs, scanAtMs, kickoffText ->
+                                vm.placeOrder(type, sel, mIds, round, stake, mult, pKeys, kickoffMs, scanAtMs, kickoffText) {
                                     navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
                                         popUpTo(ROUTE_HOME)
                                     }
@@ -744,6 +846,10 @@ private fun AuthenticatedRoot(user: FirebaseUser) {
                             systemGameConfig = systemGameConfig,
                             brandingConfig = brandingConfig,
                             miniGameControlConfig = miniGameControlConfig,
+                            apkDownloadUrl = availableApkUpdate?.downloadUrl
+                                ?: appUpdateConfig?.downloadUrl
+                                ?: com.example.data.model.AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
+                            isAdmin = isAdmin,
                             onSelectLanguage = vm::setAppLanguage,
                             onUpdateSecurityPin = vm::updateCustomerSecurityPin,
                             onBack = { navController.popBackStack() }

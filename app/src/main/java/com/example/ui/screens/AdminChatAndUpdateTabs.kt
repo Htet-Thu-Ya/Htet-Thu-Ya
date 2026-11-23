@@ -569,6 +569,56 @@ fun AdminUpdateAndQualityTab(
                             Text("APK ဖိုင်တိုက်ရိုက်ပို့မည်", color = ChampionshipGold, maxLines = 1)
                         }
                     }
+                    Surface(
+                        color = Color(0xFF14212B),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Share Link (${ApkDownloadHelper.CUSTOMER_SHARE_DEEP_LINK}) & Admin Link (${ApkDownloadHelper.ADMIN_PORTAL_DEEP_LINK})",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val adminLink = ApkDownloadHelper.buildAdminPortalLink()
+                                        clipboard.setText(AnnotatedString(adminLink))
+                                        Toast.makeText(context, "Admin Link ကူးယူပြီး: $adminLink", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1f).testTag("copy_admin_link_from_update_tab")
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Admin Link ကူး", color = ChampionshipGold, maxLines = 1)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        val adminLink = ApkDownloadHelper.buildAdminPortalLink()
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "လိုတရ Admin Link")
+                                            putExtra(
+                                                Intent.EXTRA_TEXT,
+                                                "လိုတရ Admin Portal Link: $adminLink\nAPK Direct Download: $resolvedDirectUrl"
+                                            )
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share Admin Link"))
+                                    },
+                                    modifier = Modifier.weight(1f).testTag("share_admin_link_from_update_tab")
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Admin Link ရှယ်", color = Color(0xFF34D399), maxLines = 1)
+                                }
+                            }
+                        }
+                    }
                     OutlinedTextField(
                         value = releaseNotesText,
                         onValueChange = { releaseNotesText = it },

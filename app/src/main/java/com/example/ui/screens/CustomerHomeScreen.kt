@@ -97,6 +97,10 @@ import com.example.data.model.BrandingConfig
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.model.UserAccount
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import com.example.data.network.ApkDownloadHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -125,7 +129,9 @@ enum class CustomerRoute {
     PARLAY,
     BODY_GOAL,
     ONE_EXPRESS,
+    ONE_EXPRESS_PARLAY,
     FIVE_FIVE_FIVE,
+    FIVE_FIVE_FIVE_PARLAY,
     TWO_D,
     THREE_D,
     DICE_GAME,
@@ -162,6 +168,8 @@ fun CustomerHomeScreen(
     appLanguage: AppLanguage = AppLanguage.MY,
     availableApkUpdate: AvailableApkUpdate? = null,
     apkDownloadUrl: String = AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
+    pendingInviteCode: String? = null,
+    onConsumePendingInviteCode: () -> Unit = {},
     onOpenUpdateDialog: () -> Unit = {},
     onNavigate: (CustomerRoute) -> Unit,
     onSwitchToAdmin: () -> Unit,
@@ -172,8 +180,17 @@ fun CustomerHomeScreen(
     onSignOut: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var showInviteDialog by remember { mutableStateOf(false) }
+    var prefillInviteCode by remember { mutableStateOf("") }
+    LaunchedEffect(pendingInviteCode) {
+        val incoming = pendingInviteCode?.trim().orEmpty()
+        if (incoming.isNotBlank()) {
+            prefillInviteCode = incoming
+            showInviteDialog = true
+        }
+    }
     var directDownloading by remember { mutableStateOf(false) }
     var directDownloadProgress by remember { mutableIntStateOf(0) }
     var directDownloadError by remember { mutableStateOf<String?>(null) }
@@ -307,7 +324,10 @@ fun CustomerHomeScreen(
                                 border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.5f)),
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
-                                    .clickable { showInviteDialog = true }
+                                    .clickable {
+                                        prefillInviteCode = ""
+                                        showInviteDialog = true
+                                    }
                                     .testTag("open_admin_invite_dialog")
                             ) {
                                 Row(
@@ -638,6 +658,47 @@ fun CustomerHomeScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    color = SkyInfo.copy(alpha = 0.22f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS) }
+                                        .testTag("home_one_express_single")
+                                ) {
+                                    Text(
+                                        text = "ဘော်ဒီ",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                                    )
+                                }
+                                Surface(
+                                    color = Color(0xFF16A34A).copy(alpha = 0.35f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS_PARLAY) }
+                                        .testTag("home_one_express_parlay")
+                                ) {
+                                    Text(
+                                        text = "မောင်း",
+                                        color = Color(0xFF86EFAC),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -687,6 +748,47 @@ fun CustomerHomeScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    color = ChampionshipGold.copy(alpha = 0.24f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
+                                        .testTag("home_555_single")
+                                ) {
+                                    Text(
+                                        text = "ဘော်ဒီ",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                                    )
+                                }
+                                Surface(
+                                    color = Color(0xFF16A34A).copy(alpha = 0.35f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE_PARLAY) }
+                                        .testTag("home_555_parlay")
+                                ) {
+                                    Text(
+                                        text = "မောင်း",
+                                        color = Color(0xFF86EFAC),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1000,6 +1102,22 @@ fun CustomerHomeScreen(
                         }
                         OutlinedButton(
                             onClick = {
+                                val shareText = ApkDownloadHelper.buildApkShareText(
+                                    appName = appDisplayName,
+                                    rawUrl = resolvedApkUrl,
+                                    versionLabel = availableApkUpdate?.versionLabel.orEmpty()
+                                )
+                                clipboard.setText(AnnotatedString(shareText))
+                                Toast.makeText(context, "Customer Share Link ကူးယူပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("home_copy_share_link_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color(0xFFD7EAE1), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Share Link ကူးယူမည် (${ApkDownloadHelper.CUSTOMER_SHARE_DEEP_LINK})", color = Color(0xFFD7EAE1), maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
                                 scope.launch {
                                     ApkDownloadHelper.shareInstalledApkFile(context, appDisplayName)
                                         .onFailure { err ->
@@ -1017,6 +1135,47 @@ fun CustomerHomeScreen(
                             Spacer(Modifier.width(6.dp))
                             Text("APK ဖိုင်တိုက်ရိုက်ပို့မည် (Install Ready .apk)", color = ChampionshipGold, maxLines = 1)
                         }
+                        if (isAdmin) {
+                            HorizontalDivider(color = Color(0xFF1F473A))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val adminLink = ApkDownloadHelper.buildAdminPortalLink()
+                                        clipboard.setText(AnnotatedString(adminLink))
+                                        Toast.makeText(context, "Admin Link ကူးယူပြီး: $adminLink", Toast.LENGTH_SHORT).show()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                    modifier = Modifier.weight(1f).testTag("home_copy_admin_link_button")
+                                ) {
+                                    Icon(Icons.Default.Link, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Admin Link ကူး", color = ChampionshipGold, maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        val adminLink = ApkDownloadHelper.buildAdminPortalLink()
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "$appDisplayName Admin Portal Link")
+                                            putExtra(
+                                                Intent.EXTRA_TEXT,
+                                                "$appDisplayName Admin Link: $adminLink\nApp Download: $resolvedApkUrl"
+                                            )
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Admin Link မျှဝေမည်"))
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                    modifier = Modifier.weight(1f).testTag("home_share_admin_link_button")
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Admin Link ရှယ်", color = Color(0xFF34D399), maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1030,9 +1189,16 @@ fun CustomerHomeScreen(
 
     if (showInviteDialog) {
         AdminInviteRedeemDialog(
-            onDismiss = { showInviteDialog = false },
+            initialCode = prefillInviteCode,
+            onDismiss = {
+                showInviteDialog = false
+                prefillInviteCode = ""
+                onConsumePendingInviteCode()
+            },
             onRedeem = { code ->
                 showInviteDialog = false
+                prefillInviteCode = ""
+                onConsumePendingInviteCode()
                 onRedeemInviteCode(code)
             }
         )

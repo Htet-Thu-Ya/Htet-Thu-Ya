@@ -3295,6 +3295,69 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun seedSampleBoardForSource(boardSource: String): Result<Int> {
+        val path = "matches/sample_$boardSource"
+        return try {
+            val adminUid = requireUserId()
+            require(boardSource in listOf("one_express", "five_five_five")) { "Unsupported board source" }
+            val nowMs = System.currentTimeMillis()
+            val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(nowMs))
+            val docPrefix = if (boardSource == "one_express") "sample_1x_" else "sample_555_"
+            val specs = listOf(
+                Triple("La Liga", "Athletic Club" to "Espanyol", Triple("Tonight 21:30", "Home -1-20", "3+45")),
+                Triple("Bundesliga", "Darmstadt" to "FC Heidenheim", Triple("Tonight 23:00", "Away -0.75", "3-20")),
+                Triple("Premier League", "Arsenal" to "Chelsea", Triple("01:30 AM", "Home -0.5", "2.5/3")),
+                Triple("Serie A", "Inter Milan" to "AC Milan", Triple("Finished", "Home -0.5", "2.5"))
+            )
+            val batch = db.batch()
+            specs.forEachIndexed { idx, (league, teams, info) ->
+                val (kickoff, handicap, goalLine) = info
+                val isFinished = kickoff == "Finished"
+                val bodyOdds = 1.92
+                val goalOdds = 1.90
+                val oneExpKyay = if (boardSource == "one_express") {
+                    com.example.data.betting.KyayFormatter.formatOneExpressKyay(handicap, goalLine, bodyOdds, goalOdds).take(60)
+                } else ""
+                val fffKyay = if (boardSource == "five_five_five") {
+                    com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(handicap, goalLine, bodyOdds, goalOdds).take(60)
+                } else ""
+                val docId = "${docPrefix}${idx + 1}"
+                batch.set(
+                    db.collection("matches").document(docId),
+                    mapOf(
+                        "league" to league,
+                        "homeTeam" to teams.first,
+                        "awayTeam" to teams.second,
+                        "kickoffLabel" to kickoff,
+                        "handicapLine" to handicap,
+                        "goalLine" to goalLine,
+                        "bodyOdds" to bodyOdds,
+                        "goalOdds" to goalOdds,
+                        "status" to if (isFinished) "finished" else "open",
+                        "homeScore" to if (isFinished) 2L else 0L,
+                        "awayScore" to if (isFinished) 1L else 0L,
+                        "visibility" to "public",
+                        "matchDate" to today,
+                        "boardSource" to boardSource,
+                        "oneExpressKyay" to oneExpKyay,
+                        "fiveFiveFiveKyay" to fffKyay,
+                        "autoUpdatedAtMs" to nowMs,
+                        "createdBy" to adminUid,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.commit().await()
+            Result.success(specs.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun saveAppUpdateConfig(
         latestVersionCode: Int,
         latestVersionName: String,
