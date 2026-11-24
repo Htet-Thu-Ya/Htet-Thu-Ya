@@ -682,7 +682,7 @@ fun BoardMatchInfoDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("လိဂ်: ${match.league} • ${match.kickoffLabel}", fontWeight = FontWeight.SemiBold)
                 if (!boardSourceLabel.isNullOrBlank()) {
-                    Text("စနစ်: $boardSourceLabel", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                    Text("စနစ်: $boardSourceLabel • လိုတရ APK ကြေး", color = InkMuted, style = MaterialTheme.typography.bodySmall)
                 }
                 Text("ဘော်ဒီကြေး: ${hInfo.summaryText}", color = PitchEmeraldDark)
                 Text(gInfo, color = Color(0xFF92400E))

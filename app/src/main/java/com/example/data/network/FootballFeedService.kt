@@ -236,7 +236,7 @@ class FootballFeedService(
 
                 val league = obj.optString("LE")
                     .ifBlank { obj.optString("L") }
-                    .ifBlank { "1xBET Football" }
+                    .ifBlank { "Football" }
                     .trim()
                 val homeTeam = obj.optString("O1E")
                     .ifBlank { obj.optString("O1") }
@@ -779,7 +779,7 @@ class FootballFeedService(
                 }
                 outFmt.format(Date(startMs))
             } else {
-                liveClock.ifBlank { "1xBET Live" }
+                liveClock.ifBlank { "LIVE" }
             }
 
             val matchDate = if (startMs > 0L) {

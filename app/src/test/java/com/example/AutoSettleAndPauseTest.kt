@@ -321,8 +321,8 @@ class AutoSettleAndPauseTest {
         )
         assertEquals("Home -0.5", asianParsed.handicapLine)
         assertEquals("2.5/3", asianParsed.goalLine)
-        assertEquals(1.93, asianParsed.bodyOdds, 0.01)
-        assertEquals(1.92, asianParsed.goalOdds, 0.01)
+        assertEquals(1.90, asianParsed.bodyOdds, 0.001)
+        assertEquals(1.90, asianParsed.goalOdds, 0.001)
 
         val awayFavParsed = KyayFormatter.parseOneXBetOutcomesToLines(
             listOf(
@@ -332,6 +332,8 @@ class AutoSettleAndPauseTest {
         )
         assertEquals("Away -0.25", awayFavParsed.handicapLine)
         assertEquals("2.5", awayFavParsed.goalLine)
+        assertEquals(1.90, awayFavParsed.bodyOdds, 0.001)
+        assertEquals(1.90, awayFavParsed.goalOdds, 0.001)
 
         val moneylineFallback = KyayFormatter.parseOneXBetOutcomesToLines(
             listOf(
@@ -341,6 +343,8 @@ class AutoSettleAndPauseTest {
         )
         assertEquals("Home -1", moneylineFallback.handicapLine)
         assertEquals("2.5", moneylineFallback.goalLine)
+        assertEquals(1.90, moneylineFallback.bodyOdds, 0.001)
+        assertEquals(1.90, moneylineFallback.goalOdds, 0.001)
 
         val nowMs = 1_700_000_000_000L
         val openFix = com.example.data.network.FootballFeedService.buildOneXBetFixture(
@@ -368,6 +372,8 @@ class AutoSettleAndPauseTest {
         assertEquals("https://1xlite-19808.pro/sfiles/logo_teams/arsenal.png", openFix.homeLogoUrl)
         assertEquals("Home -0.5", openFix.handicapLine)
         assertEquals("2.5", openFix.goalLine)
+        assertEquals(1.90, openFix.bodyOdds, 0.001)
+        assertEquals(1.90, openFix.goalOdds, 0.001)
 
         val liveFix = com.example.data.network.FootballFeedService.buildOneXBetFixture(
             gameId = "55123",
@@ -415,14 +421,14 @@ class AutoSettleAndPauseTest {
                 matchIds = listOf("ext_oneexp_1xbet_55123"),
                 pickKeys = listOf("home"),
                 stakeKs = 10_000L,
-                multiplier = 1.94,
-                potentialPayoutKs = 19_400L,
+                multiplier = 1.90,
+                potentialPayoutKs = 19_000L,
                 status = "accepted"
             ),
             mapOf("ext_oneexp_1xbet_55123" to settledMatch),
             emptyList()
         )
         assertTrue(decision is AutoSettleDecision.Win)
-        assertEquals(19_400L, (decision as AutoSettleDecision.Win).grossPayoutKs)
+        assertEquals(19_000L, (decision as AutoSettleDecision.Win).grossPayoutKs)
     }
 }

@@ -31,8 +31,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LiveTv
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -48,8 +46,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -68,7 +64,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -134,7 +129,6 @@ fun ExpressOddsOrderScreen(
     val isOneExpress = boardMode == "one_express"
     val boardName = if (isOneExpress) "1xBET" else "555 Mix"
     val accentColor = if (isOneExpress) BoardGreenAccent else ChampionshipGold
-    val uriHandler = LocalUriHandler.current
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -251,21 +245,6 @@ fun ExpressOddsOrderScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     maxLines = 1
-                                )
-                            }
-                        }
-                        if (isOneExpress) {
-                            IconButton(
-                                onClick = {
-                                    val target = FootballFeedService.normalizeOneXBetLiveUrl(boardConfig.oneXBetLiveUrl)
-                                    runCatching { uriHandler.openUri(target) }
-                                },
-                                modifier = Modifier.testTag("open_1xbet_live_link")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                    contentDescription = "1xBET Live Link ဖွင့်ကြည့်ရန်",
-                                    tint = Color(0xFF38BDF8)
                                 )
                             }
                         }
@@ -493,7 +472,6 @@ fun AdminExpressBoardTab(
     onToggleAutoSync: (Boolean) -> Unit,
     onToggleAutoLiveResults: (Boolean) -> Unit,
     onSaveAllowedLeagues: (List<String>) -> Unit,
-    onSaveOneXBetLiveUrl: (String, Boolean) -> Unit = { _, _ -> },
     onSeedSampleBoard: () -> Unit,
     onSaveNewMatch: (
         league: String,
@@ -542,12 +520,6 @@ fun AdminExpressBoardTab(
     var selectedLeagues by remember(boardConfig.allowedLeagues) {
         mutableStateOf(boardConfig.allowedLeagues.toSet())
     }
-    val uriHandler = LocalUriHandler.current
-    var liveUrlInput by remember(boardConfig.oneXBetLiveUrl) {
-        mutableStateOf(
-            boardConfig.oneXBetLiveUrl.ifBlank { BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL }
-        )
-    }
 
     LazyColumn(
         modifier = Modifier
@@ -588,7 +560,11 @@ fun AdminExpressBoardTab(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "သီးသန့်ပွဲကြေး & ပထမစနစ် အလိုအလျောက်စီမံခန့်ခွဲမှု",
+                                text = if (isOneExpress) {
+                                    "ပွဲစဉ်နှင့် လောင်းကြေးတိုက်ရိုက်ထည့်သွင်းမှု • လိုတရ APK ကြေး (x1.90)"
+                                } else {
+                                    "သီးသန့်ပွဲကြေး & ပထမစနစ် အလိုအလျောက်စီမံခန့်ခွဲမှု"
+                                },
                                 color = Color(0xFFB4C8BE),
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -605,136 +581,6 @@ fun AdminExpressBoardTab(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
-                    }
-                }
-            }
-        }
-
-        // Direct 1xBET Live Link Configuration & Sync Card
-        if (isOneExpress) {
-            item {
-                val activeOrigin = remember(boardConfig.oneXBetLiveUrl) {
-                    FootballFeedService.extractOrigin(boardConfig.oneXBetLiveUrl).removePrefix("https://")
-                }
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
-                    border = BorderStroke(1.dp, accent.copy(alpha = 0.65f)),
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.Public, contentDescription = null, tint = accent)
-                                Spacer(Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "1xBET တိုက်ရိုက်လင့် ချိတ်ဆက်မှု",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "ချိတ်ဆက်ထားသော Host: $activeOrigin",
-                                        color = Color(0xFFB4C8BE),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            Surface(
-                                color = BoardGreenAccent.copy(alpha = 0.22f),
-                                shape = RoundedCornerShape(999.dp)
-                            ) {
-                                Text(
-                                    text = "LIVE LINK",
-                                    color = Color(0xFF4ADE80),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = liveUrlInput,
-                            onValueChange = { liveUrlInput = it },
-                            label = { Text("1xBET Live URL") },
-                            placeholder = { Text(BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = accent,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
-                                focusedLabelColor = accent,
-                                unfocusedLabelColor = Color(0xFFB4C8BE),
-                                cursorColor = accent
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("onexbet_live_url_input")
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { onSaveOneXBetLiveUrl(liveUrlInput, true) },
-                                enabled = !busy && liveUrlInput.isNotBlank(),
-                                colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = InkDark),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("save_and_sync_onexbet_url")
-                            ) {
-                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("သိမ်းပြီး Sync မည်", fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val target = FootballFeedService.normalizeOneXBetLiveUrl(liveUrlInput)
-                                    runCatching { uriHandler.openUri(target) }
-                                },
-                                border = BorderStroke(1.dp, accent.copy(alpha = 0.8f)),
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("open_onexbet_live_browser")
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("ဖွင့်ကြည့်", color = accent, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                        }
-
-                        if (liveUrlInput.trim() != BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL) {
-                            TextButton(
-                                onClick = {
-                                    liveUrlInput = BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
-                                    onSaveOneXBetLiveUrl(BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL, true)
-                                },
-                                enabled = !busy,
-                                modifier = Modifier
-                                    .align(Alignment.End)
-                                    .testTag("reset_onexbet_live_url")
-                            ) {
-                                Text(
-                                    text = "မူလလင့် (${BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL}) ပြန်သုံးမည်",
-                                    color = ChampionshipGold,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                        }
                     }
                 }
             }

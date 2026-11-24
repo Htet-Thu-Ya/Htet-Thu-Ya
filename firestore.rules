@@ -303,14 +303,13 @@ service cloud.firestore {
 
     function isValidBoardConfig(data) {
       return data.keys().hasAll(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'oneXBetLiveUrl', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'updatedBy', 'updatedAt']) &&
              data.autoSyncDailyMatches is bool &&
              data.autoSyncLiveResults is bool &&
              data.lastSyncedDate is string && data.lastSyncedDate.size() <= 20 &&
              (!('allowedLeagues' in data) || (data.allowedLeagues is list && data.allowedLeagues.size() <= 30)) &&
              (!('autoSyncOneExpress' in data) || data.autoSyncOneExpress is bool) &&
              (!('autoSyncFiveFiveFive' in data) || data.autoSyncFiveFiveFive is bool) &&
-             (!('oneXBetLiveUrl' in data) || (data.oneXBetLiveUrl is string && data.oneXBetLiveUrl.size() >= 8 && data.oneXBetLiveUrl.size() <= 300 && data.oneXBetLiveUrl.matches('^https://.*'))) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }

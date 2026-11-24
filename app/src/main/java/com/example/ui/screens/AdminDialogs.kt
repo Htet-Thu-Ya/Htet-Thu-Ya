@@ -132,7 +132,7 @@ fun AddMatchDialog(
     var kickoff by remember { mutableStateOf("Tonight 21:00") }
     var handicap by remember { mutableStateOf("Home -0.5") }
     var goalLine by remember { mutableStateOf("2.5") }
-    var bodyOdds by remember { mutableStateOf("1.92") }
+    var bodyOdds by remember { mutableStateOf("1.90") }
     var goalOdds by remember { mutableStateOf("1.90") }
     var oneExpKyay by remember {
         mutableStateOf(

@@ -2294,13 +2294,11 @@ class HtetThuYaRepository(
         lastSyncedDate: String,
         allowedLeagues: List<String> = emptyList(),
         autoSyncOneExpress: Boolean = false,
-        autoSyncFiveFiveFive: Boolean = false,
-        oneXBetLiveUrl: String = BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
+        autoSyncFiveFiveFive: Boolean = false
     ): Result<Unit> {
         val path = "app_settings/board_config"
         return try {
             val adminUid = requireUserId()
-            val normalizedUrl = FootballFeedService.normalizeOneXBetLiveUrl(oneXBetLiveUrl)
             db.collection("app_settings").document("board_config").set(
                 mapOf(
                     "autoSyncDailyMatches" to autoSyncDailyMatches,
@@ -2309,7 +2307,6 @@ class HtetThuYaRepository(
                     "allowedLeagues" to allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(30),
                     "autoSyncOneExpress" to autoSyncOneExpress,
                     "autoSyncFiveFiveFive" to autoSyncFiveFiveFive,
-                    "oneXBetLiveUrl" to normalizedUrl,
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2996,7 +2993,6 @@ class HtetThuYaRepository(
                         "allowedLeagues" to currentConfig.allowedLeagues.take(30),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
-                        "oneXBetLiveUrl" to FootballFeedService.normalizeOneXBetLiveUrl(currentConfig.oneXBetLiveUrl),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3012,9 +3008,7 @@ class HtetThuYaRepository(
     }
 
     data class BoardSyncOutcome(
-        val syncedCount: Int = 0,
-        val usedDirectSource: Boolean = false,
-        val sourceLabel: String = ""
+        val syncedCount: Int = 0
     )
 
     suspend fun syncBoardMatchesFromFeed(
@@ -3028,24 +3022,17 @@ class HtetThuYaRepository(
             val adminUid = requireUserId()
             require(boardSource in listOf("one_express", "five_five_five")) { "Unsupported board source" }
             val allowedLeagues = currentConfig?.allowedLeagues.orEmpty()
-            var usedDirectSource = false
-            var sourceLabel = ""
             val fixtures = if (boardSource == "one_express") {
-                val liveUrl = currentConfig?.oneXBetLiveUrl ?: BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
-                val oneXResult = feedService.fetchOneXBetFixtures(
-                    liveUrl = liveUrl,
+                feedService.fetchOneXBetFixtures(
                     allowedLeagues = allowedLeagues,
                     dayOffsets = dayOffsets
-                ).getOrElse { throw it }
-                usedDirectSource = oneXResult.usedDirect1xBet
-                sourceLabel = oneXResult.sourceOrigin.removePrefix("https://")
-                oneXResult.fixtures
+                ).getOrElse { throw it }.fixtures
             } else {
                 feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
                     .getOrElse { throw it }
             }
             if (fixtures.isEmpty()) {
-                return Result.success(BoardSyncOutcome(0, usedDirectSource, sourceLabel))
+                return Result.success(BoardSyncOutcome(0))
             }
             val existingSnap = db.collection("matches").get().await()
             val existingById = existingSnap.documents.associateBy { it.id }
@@ -3059,20 +3046,31 @@ class HtetThuYaRepository(
                     val docId = "${docPrefix}${fix.externalId}".replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(80)
                     val docRef = db.collection("matches").document(docId)
                     val prev = existingById[docId]
+                    // Always enforce LoTaYa APK standard 1.90 payout odds on synced 1xBET lines
+                    val appliedBodyOdds = if (boardSource == "one_express") {
+                        com.example.data.betting.KyayFormatter.LOTAYA_STANDARD_BODY_ODDS
+                    } else {
+                        fix.bodyOdds
+                    }
+                    val appliedGoalOdds = if (boardSource == "one_express") {
+                        com.example.data.betting.KyayFormatter.LOTAYA_STANDARD_GOAL_ODDS
+                    } else {
+                        fix.goalOdds
+                    }
                     val oneExpKyay = if (boardSource == "one_express") {
                         com.example.data.betting.KyayFormatter.formatOneExpressKyay(
                             handicapLine = fix.handicapLine,
                             goalLine = fix.goalLine,
-                            bodyOdds = fix.bodyOdds,
-                            goalOdds = fix.goalOdds
+                            bodyOdds = appliedBodyOdds,
+                            goalOdds = appliedGoalOdds
                         )
                     } else ""
                     val fffKyay = if (boardSource == "five_five_five") {
                         com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(
                             handicapLine = fix.handicapLine,
                             goalLine = fix.goalLine,
-                            bodyOdds = fix.bodyOdds,
-                            goalOdds = fix.goalOdds
+                            bodyOdds = appliedBodyOdds,
+                            goalOdds = appliedGoalOdds
                         )
                     } else ""
                     if (prev == null || !prev.exists()) {
@@ -3087,8 +3085,8 @@ class HtetThuYaRepository(
                                 "kickoffLabel" to fix.kickoffLabel,
                                 "handicapLine" to fix.handicapLine,
                                 "goalLine" to fix.goalLine,
-                                "bodyOdds" to fix.bodyOdds,
-                                "goalOdds" to fix.goalOdds,
+                                "bodyOdds" to appliedBodyOdds,
+                                "goalOdds" to appliedGoalOdds,
                                 "status" to fix.status,
                                 "homeScore" to fix.homeScore,
                                 "awayScore" to fix.awayScore,
@@ -3122,8 +3120,8 @@ class HtetThuYaRepository(
                         if (fix.status == "open") {
                             updateFields["handicapLine"] = fix.handicapLine
                             updateFields["goalLine"] = fix.goalLine
-                            updateFields["bodyOdds"] = fix.bodyOdds
-                            updateFields["goalOdds"] = fix.goalOdds
+                            updateFields["bodyOdds"] = appliedBodyOdds
+                            updateFields["goalOdds"] = appliedGoalOdds
                             if (boardSource == "one_express") {
                                 updateFields["oneExpressKyay"] = oneExpKyay
                             }
@@ -3154,13 +3152,12 @@ class HtetThuYaRepository(
                         "allowedLeagues" to currentConfig.allowedLeagues.take(30),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
-                        "oneXBetLiveUrl" to FootballFeedService.normalizeOneXBetLiveUrl(currentConfig.oneXBetLiveUrl),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
             }
-            Result.success(BoardSyncOutcome(syncedCount, usedDirectSource, sourceLabel))
+            Result.success(BoardSyncOutcome(syncedCount))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -3170,14 +3167,13 @@ class HtetThuYaRepository(
     }
 
     suspend fun syncLiveMatchResults(
-        feedService: FootballFeedService,
-        oneXBetLiveUrl: String = BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
+        feedService: FootballFeedService
     ): Result<Int> {
         val path = "matches/live_sync"
         return try {
             requireUserId()
             val espnFixtures = feedService.fetchFixturesForDays(listOf(-1, 0, 1)).getOrDefault(emptyList())
-            val oneXBetLiveFixtures = feedService.fetchOneXBetLiveUpdates(oneXBetLiveUrl)
+            val oneXBetLiveFixtures = feedService.fetchOneXBetLiveUpdates()
             val allFixtures = espnFixtures + oneXBetLiveFixtures
             if (allFixtures.isEmpty()) return Result.success(0)
 
@@ -3374,8 +3370,8 @@ class HtetThuYaRepository(
             specs.forEachIndexed { idx, (league, teams, info) ->
                 val (kickoff, handicap, goalLine) = info
                 val isFinished = kickoff == "Finished"
-                val bodyOdds = 1.92
-                val goalOdds = 1.90
+                val bodyOdds = com.example.data.betting.KyayFormatter.LOTAYA_STANDARD_BODY_ODDS
+                val goalOdds = com.example.data.betting.KyayFormatter.LOTAYA_STANDARD_GOAL_ODDS
                 val oneExpKyay = if (boardSource == "one_express") {
                     com.example.data.betting.KyayFormatter.formatOneExpressKyay(handicap, goalLine, bodyOdds, goalOdds).take(60)
                 } else ""

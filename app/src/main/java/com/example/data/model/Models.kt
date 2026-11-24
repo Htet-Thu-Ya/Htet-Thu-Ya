@@ -389,14 +389,9 @@ data class BoardConfig(
     val autoSyncFiveFiveFive: Boolean = false,
     val lastSyncedDate: String = "",
     val allowedLeagues: List<String> = emptyList(),
-    val oneXBetLiveUrl: String = DEFAULT_ONE_X_BET_LIVE_URL,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
-) {
-    companion object {
-        const val DEFAULT_ONE_X_BET_LIVE_URL = "https://1xlite-19808.pro/en/live"
-    }
-}
+)
 
 @Keep
 @IgnoreExtraProperties

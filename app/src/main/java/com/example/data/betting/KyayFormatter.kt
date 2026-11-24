@@ -272,11 +272,14 @@ object KyayFormatter {
         return bodyOdds.coerceIn(1.50, 3.80) to goalOdds.coerceIn(1.50, 3.80)
     }
 
+    const val LOTAYA_STANDARD_BODY_ODDS = 1.90
+    const val LOTAYA_STANDARD_GOAL_ODDS = 1.90
+
     fun formatOneExpressKyay(
         handicapLine: String,
         goalLine: String,
-        bodyOdds: Double = 1.93,
-        goalOdds: Double = 1.90
+        bodyOdds: Double = LOTAYA_STANDARD_BODY_ODDS,
+        goalOdds: Double = LOTAYA_STANDARD_GOAL_ODDS
     ): String {
         val cleanH = toMyanmarKyaySpec(handicapLine)
         val cleanG = goalLine.trim().ifBlank { "2.5" }
@@ -288,8 +291,8 @@ object KyayFormatter {
     fun formatFiveFiveFiveKyay(
         handicapLine: String,
         goalLine: String,
-        bodyOdds: Double = 1.93,
-        goalOdds: Double = 1.90
+        bodyOdds: Double = LOTAYA_STANDARD_BODY_ODDS,
+        goalOdds: Double = LOTAYA_STANDARD_GOAL_ODDS
     ): String {
         val cleanH = toMyanmarKyaySpec(handicapLine)
         val cleanG = goalLine.trim().ifBlank { "2.5" }
@@ -332,8 +335,6 @@ object KyayFormatter {
     )
 
     fun parseOneXBetOutcomesToLines(outcomes: List<OneXBetMarketOutcome>): ParsedOneXBetLines {
-        fun round2(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
-
         val handicapCandidates = outcomes.filter {
             (it.type == 7 || it.type == 8) &&
                 it.param != null &&
@@ -342,11 +343,11 @@ object KyayFormatter {
                 it.coef in 1.25..4.20
         }
 
-        val chosenHandicap = handicapCandidates.minByOrNull { abs(it.coef - 1.92) }
-        val (handicapLine, bodyOdds) = if (chosenHandicap != null && chosenHandicap.param != null) {
+        val chosenHandicap = handicapCandidates.minByOrNull { abs(it.coef - LOTAYA_STANDARD_BODY_ODDS) }
+        val handicapLine = if (chosenHandicap != null && chosenHandicap.param != null) {
             val snappedP = kotlin.math.round(chosenHandicap.param * 4.0) / 4.0
             val absStr = formatCleanDecimal(abs(snappedP))
-            val hLine = when (chosenHandicap.type) {
+            when (chosenHandicap.type) {
                 7 -> when {
                     abs(snappedP) < 0.01 -> "Home -0"
                     snappedP < 0.0 -> "Home -$absStr"
@@ -358,20 +359,10 @@ object KyayFormatter {
                     else -> "Home -$absStr"
                 }
             }
-            val oppositeType = if (chosenHandicap.type == 7) 8 else 7
-            val opposite = handicapCandidates.firstOrNull {
-                it.type == oppositeType && it.param != null && abs(it.param + snappedP) < 0.05
-            }
-            val avgBodyOdds = if (opposite != null) {
-                (chosenHandicap.coef + opposite.coef) / 2.0
-            } else {
-                chosenHandicap.coef
-            }
-            hLine to round2(avgBodyOdds.coerceIn(1.50, 3.80))
         } else {
             val homeWin = outcomes.firstOrNull { it.type == 1 && it.coef > 1.01 }?.coef
             val awayWin = outcomes.firstOrNull { it.type == 3 && it.coef > 1.01 }?.coef
-            val derivedLine = if (homeWin != null && awayWin != null) {
+            if (homeWin != null && awayWin != null) {
                 when {
                     abs(homeWin - awayWin) <= 0.25 -> "Home -0"
                     homeWin < awayWin -> when {
@@ -392,7 +383,6 @@ object KyayFormatter {
             } else {
                 "Home -0.5"
             }
-            derivedLine to 1.92
         }
 
         val totalCandidates = outcomes.filter {
@@ -403,29 +393,19 @@ object KyayFormatter {
                 it.coef in 1.25..4.20
         }
 
-        val chosenTotal = totalCandidates.minByOrNull { abs(it.coef - 1.90) }
-        val (goalLine, goalOdds) = if (chosenTotal != null && chosenTotal.param != null) {
+        val chosenTotal = totalCandidates.minByOrNull { abs(it.coef - LOTAYA_STANDARD_GOAL_ODDS) }
+        val goalLine = if (chosenTotal != null && chosenTotal.param != null) {
             val snappedG = kotlin.math.round(chosenTotal.param * 4.0) / 4.0
-            val formattedG = formatGoalLineParam(snappedG)
-            val oppositeType = if (chosenTotal.type == 9) 10 else 9
-            val opposite = totalCandidates.firstOrNull {
-                it.type == oppositeType && it.param != null && abs(it.param - snappedG) < 0.05
-            }
-            val avgGoalOdds = if (opposite != null) {
-                (chosenTotal.coef + opposite.coef) / 2.0
-            } else {
-                chosenTotal.coef
-            }
-            formattedG to round2(avgGoalOdds.coerceIn(1.50, 3.80))
+            formatGoalLineParam(snappedG)
         } else {
-            "2.5" to 1.90
+            "2.5"
         }
 
         return ParsedOneXBetLines(
             handicapLine = handicapLine,
             goalLine = goalLine,
-            bodyOdds = bodyOdds,
-            goalOdds = goalOdds
+            bodyOdds = LOTAYA_STANDARD_BODY_ODDS,
+            goalOdds = LOTAYA_STANDARD_GOAL_ODDS
         )
     }
 

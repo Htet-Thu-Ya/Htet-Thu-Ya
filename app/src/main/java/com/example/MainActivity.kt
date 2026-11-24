@@ -521,7 +521,6 @@ private fun AuthenticatedRoot(
                             onSync555Now = vm::sync555MatchesNow,
                             onToggleAutoOneExpress = vm::toggleAutoSyncOneExpress,
                             onToggleAuto555 = vm::toggleAutoSync555,
-                            onSaveOneXBetLiveUrl = vm::saveOneXBetLiveUrl,
                             onSaveAllowedLeagues = vm::saveAllowedLeagues,
                             onCreateAdminInvite = { label, email, pin, perms ->
                                 vm.createAdminInvite(label, email, pin, perms)
