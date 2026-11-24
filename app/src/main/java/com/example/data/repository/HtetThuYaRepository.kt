@@ -2294,11 +2294,13 @@ class HtetThuYaRepository(
         lastSyncedDate: String,
         allowedLeagues: List<String> = emptyList(),
         autoSyncOneExpress: Boolean = false,
-        autoSyncFiveFiveFive: Boolean = false
+        autoSyncFiveFiveFive: Boolean = false,
+        oneXBetLiveUrl: String = BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
     ): Result<Unit> {
         val path = "app_settings/board_config"
         return try {
             val adminUid = requireUserId()
+            val normalizedUrl = FootballFeedService.normalizeOneXBetLiveUrl(oneXBetLiveUrl)
             db.collection("app_settings").document("board_config").set(
                 mapOf(
                     "autoSyncDailyMatches" to autoSyncDailyMatches,
@@ -2307,6 +2309,7 @@ class HtetThuYaRepository(
                     "allowedLeagues" to allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(30),
                     "autoSyncOneExpress" to autoSyncOneExpress,
                     "autoSyncFiveFiveFive" to autoSyncFiveFiveFive,
+                    "oneXBetLiveUrl" to normalizedUrl,
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2993,6 +2996,7 @@ class HtetThuYaRepository(
                         "allowedLeagues" to currentConfig.allowedLeagues.take(30),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
+                        "oneXBetLiveUrl" to FootballFeedService.normalizeOneXBetLiveUrl(currentConfig.oneXBetLiveUrl),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3007,21 +3011,41 @@ class HtetThuYaRepository(
         }
     }
 
+    data class BoardSyncOutcome(
+        val syncedCount: Int = 0,
+        val usedDirectSource: Boolean = false,
+        val sourceLabel: String = ""
+    )
+
     suspend fun syncBoardMatchesFromFeed(
         boardSource: String,
         feedService: FootballFeedService,
         dayOffsets: List<Int> = listOf(0, 1),
         currentConfig: BoardConfig? = null
-    ): Result<Int> {
+    ): Result<BoardSyncOutcome> {
         val path = "matches/sync_$boardSource"
         return try {
             val adminUid = requireUserId()
             require(boardSource in listOf("one_express", "five_five_five")) { "Unsupported board source" }
             val allowedLeagues = currentConfig?.allowedLeagues.orEmpty()
-            val feedResult = feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
-            val fixtures = feedResult.getOrElse { throw it }
+            var usedDirectSource = false
+            var sourceLabel = ""
+            val fixtures = if (boardSource == "one_express") {
+                val liveUrl = currentConfig?.oneXBetLiveUrl ?: BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
+                val oneXResult = feedService.fetchOneXBetFixtures(
+                    liveUrl = liveUrl,
+                    allowedLeagues = allowedLeagues,
+                    dayOffsets = dayOffsets
+                ).getOrElse { throw it }
+                usedDirectSource = oneXResult.usedDirect1xBet
+                sourceLabel = oneXResult.sourceOrigin.removePrefix("https://")
+                oneXResult.fixtures
+            } else {
+                feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
+                    .getOrElse { throw it }
+            }
             if (fixtures.isEmpty()) {
-                return Result.success(0)
+                return Result.success(BoardSyncOutcome(0, usedDirectSource, sourceLabel))
             }
             val existingSnap = db.collection("matches").get().await()
             val existingById = existingSnap.documents.associateBy { it.id }
@@ -3130,12 +3154,13 @@ class HtetThuYaRepository(
                         "allowedLeagues" to currentConfig.allowedLeagues.take(30),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
+                        "oneXBetLiveUrl" to FootballFeedService.normalizeOneXBetLiveUrl(currentConfig.oneXBetLiveUrl),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
             }
-            Result.success(syncedCount)
+            Result.success(BoardSyncOutcome(syncedCount, usedDirectSource, sourceLabel))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -3144,15 +3169,23 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun syncLiveMatchResults(feedService: FootballFeedService): Result<Int> {
+    suspend fun syncLiveMatchResults(
+        feedService: FootballFeedService,
+        oneXBetLiveUrl: String = BoardConfig.DEFAULT_ONE_X_BET_LIVE_URL
+    ): Result<Int> {
         val path = "matches/live_sync"
         return try {
             requireUserId()
-            val fixtures = feedService.fetchFixturesForDays(listOf(-1, 0, 1)).getOrElse { throw it }
-            if (fixtures.isEmpty()) return Result.success(0)
+            val espnFixtures = feedService.fetchFixturesForDays(listOf(-1, 0, 1)).getOrDefault(emptyList())
+            val oneXBetLiveFixtures = feedService.fetchOneXBetLiveUpdates(oneXBetLiveUrl)
+            val allFixtures = espnFixtures + oneXBetLiveFixtures
+            if (allFixtures.isEmpty()) return Result.success(0)
 
-            val byExternalId = fixtures.associateBy { it.externalId }
-            val byNormalizedTeams = fixtures.associateBy {
+            val byExternalId = allFixtures.associateBy { it.externalId }
+            val byNormalizedTeams = espnFixtures.associateBy {
+                "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}"
+            }
+            val oneXBetByNormalizedTeams = oneXBetLiveFixtures.associateBy {
                 "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}"
             }
 
@@ -3161,8 +3194,10 @@ class HtetThuYaRepository(
 
             val updates = mutableListOf<Pair<String, LiveFootballFixture>>()
             existingMatches.forEach { m ->
+                val teamKey = "${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}"
                 val matched = byExternalId[m.externalId]
-                    ?: byNormalizedTeams["${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}"]
+                    ?: (if (m.boardSource == "one_express") oneXBetByNormalizedTeams[teamKey] else null)
+                    ?: byNormalizedTeams[teamKey]
                 if (matched != null) {
                     val changed = m.homeScore != matched.homeScore ||
                         m.awayScore != matched.awayScore ||

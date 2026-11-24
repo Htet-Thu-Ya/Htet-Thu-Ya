@@ -317,4 +317,125 @@ object KyayFormatter {
             else -> "$prefix-$body"
         }
     }
+
+    data class OneXBetMarketOutcome(
+        val type: Int,
+        val param: Double?,
+        val coef: Double
+    )
+
+    data class ParsedOneXBetLines(
+        val handicapLine: String,
+        val goalLine: String,
+        val bodyOdds: Double,
+        val goalOdds: Double
+    )
+
+    fun parseOneXBetOutcomesToLines(outcomes: List<OneXBetMarketOutcome>): ParsedOneXBetLines {
+        fun round2(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
+
+        val handicapCandidates = outcomes.filter {
+            (it.type == 7 || it.type == 8) &&
+                it.param != null &&
+                !it.param.isNaN() &&
+                abs(it.param) <= 4.5 &&
+                it.coef in 1.25..4.20
+        }
+
+        val chosenHandicap = handicapCandidates.minByOrNull { abs(it.coef - 1.92) }
+        val (handicapLine, bodyOdds) = if (chosenHandicap != null && chosenHandicap.param != null) {
+            val snappedP = kotlin.math.round(chosenHandicap.param * 4.0) / 4.0
+            val absStr = formatCleanDecimal(abs(snappedP))
+            val hLine = when (chosenHandicap.type) {
+                7 -> when {
+                    abs(snappedP) < 0.01 -> "Home -0"
+                    snappedP < 0.0 -> "Home -$absStr"
+                    else -> "Away -$absStr"
+                }
+                else -> when {
+                    abs(snappedP) < 0.01 -> "Away -0"
+                    snappedP < 0.0 -> "Away -$absStr"
+                    else -> "Home -$absStr"
+                }
+            }
+            val oppositeType = if (chosenHandicap.type == 7) 8 else 7
+            val opposite = handicapCandidates.firstOrNull {
+                it.type == oppositeType && it.param != null && abs(it.param + snappedP) < 0.05
+            }
+            val avgBodyOdds = if (opposite != null) {
+                (chosenHandicap.coef + opposite.coef) / 2.0
+            } else {
+                chosenHandicap.coef
+            }
+            hLine to round2(avgBodyOdds.coerceIn(1.50, 3.80))
+        } else {
+            val homeWin = outcomes.firstOrNull { it.type == 1 && it.coef > 1.01 }?.coef
+            val awayWin = outcomes.firstOrNull { it.type == 3 && it.coef > 1.01 }?.coef
+            val derivedLine = if (homeWin != null && awayWin != null) {
+                when {
+                    abs(homeWin - awayWin) <= 0.25 -> "Home -0"
+                    homeWin < awayWin -> when {
+                        homeWin <= 1.28 -> "Home -1.5"
+                        homeWin <= 1.52 -> "Home -1"
+                        homeWin <= 1.78 -> "Home -0.75"
+                        homeWin <= 2.08 -> "Home -0.5"
+                        else -> "Home -0.25"
+                    }
+                    else -> when {
+                        awayWin <= 1.28 -> "Away -1.5"
+                        awayWin <= 1.52 -> "Away -1"
+                        awayWin <= 1.78 -> "Away -0.75"
+                        awayWin <= 2.08 -> "Away -0.5"
+                        else -> "Away -0.25"
+                    }
+                }
+            } else {
+                "Home -0.5"
+            }
+            derivedLine to 1.92
+        }
+
+        val totalCandidates = outcomes.filter {
+            (it.type == 9 || it.type == 10) &&
+                it.param != null &&
+                !it.param.isNaN() &&
+                it.param in 0.5..7.5 &&
+                it.coef in 1.25..4.20
+        }
+
+        val chosenTotal = totalCandidates.minByOrNull { abs(it.coef - 1.90) }
+        val (goalLine, goalOdds) = if (chosenTotal != null && chosenTotal.param != null) {
+            val snappedG = kotlin.math.round(chosenTotal.param * 4.0) / 4.0
+            val formattedG = formatGoalLineParam(snappedG)
+            val oppositeType = if (chosenTotal.type == 9) 10 else 9
+            val opposite = totalCandidates.firstOrNull {
+                it.type == oppositeType && it.param != null && abs(it.param - snappedG) < 0.05
+            }
+            val avgGoalOdds = if (opposite != null) {
+                (chosenTotal.coef + opposite.coef) / 2.0
+            } else {
+                chosenTotal.coef
+            }
+            formattedG to round2(avgGoalOdds.coerceIn(1.50, 3.80))
+        } else {
+            "2.5" to 1.90
+        }
+
+        return ParsedOneXBetLines(
+            handicapLine = handicapLine,
+            goalLine = goalLine,
+            bodyOdds = bodyOdds,
+            goalOdds = goalOdds
+        )
+    }
+
+    private fun formatGoalLineParam(snappedValue: Double): String {
+        val floorInt = kotlin.math.floor(snappedValue).toInt()
+        val frac = snappedValue - floorInt
+        return when {
+            abs(frac - 0.25) < 0.02 -> "$floorInt/${floorInt}.5"
+            abs(frac - 0.75) < 0.02 -> "${floorInt}.5/${floorInt + 1}"
+            else -> formatCleanDecimal(snappedValue)
+        }
+    }
 }

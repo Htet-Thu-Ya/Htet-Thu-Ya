@@ -487,7 +487,7 @@ class MainViewModel(
                     if (cfg.autoSyncDailyMatches && cfg.lastSyncedDate != today) {
                         repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cfg)
                     } else if (cfg.autoSyncLiveResults) {
-                        repository.syncLiveMatchResults(feedService)
+                        repository.syncLiveMatchResults(feedService, cfg.oneXBetLiveUrl)
                     }
                 }
                 if (!autoSyncedOneExpressSession && cfg.autoSyncOneExpress) {
@@ -713,7 +713,7 @@ class MainViewModel(
                 if (isAdmin.value) {
                     var syncedMatches = 0
                     if (boardConfig.value.autoSyncLiveResults && currentAdminPermissions.value.canManageBoard) {
-                        syncedMatches = repository.syncLiveMatchResults(feedService).getOrDefault(0)
+                        syncedMatches = repository.syncLiveMatchResults(feedService, boardConfig.value.oneXBetLiveUrl).getOrDefault(0)
                     }
                     if (bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
                         val settled = repository.autoSettleFinishedOrders(bettingConfig.value)
@@ -1389,7 +1389,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            oneXBetLiveUrl = cur.oneXBetLiveUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cur.copy(autoSyncDailyMatches = true))
@@ -1408,10 +1409,11 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            oneXBetLiveUrl = cur.oneXBetLiveUrl
         )
         if (res.isSuccess && enabled) {
-            repository.syncLiveMatchResults(feedService)
+            repository.syncLiveMatchResults(feedService, cur.oneXBetLiveUrl)
         }
         res
     }
@@ -1427,7 +1429,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = enabled,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            oneXBetLiveUrl = cur.oneXBetLiveUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cur.copy(autoSyncOneExpress = true))
@@ -1446,7 +1449,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = enabled
+            autoSyncFiveFiveFive = enabled,
+            oneXBetLiveUrl = cur.oneXBetLiveUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cur.copy(autoSyncFiveFiveFive = true))
@@ -1462,12 +1466,63 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = leagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            oneXBetLiveUrl = cur.oneXBetLiveUrl
         )
         if (res.isSuccess) {
             logAuditAsync("Updated allowed leagues", "board", "board_config", "", "${leagues.size} leagues")
         }
         res
+    }
+
+    fun saveOneXBetLiveUrl(url: String, syncAfterSave: Boolean = true) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val cur = boardConfig.value
+                val cleanUrl = FootballFeedService.normalizeOneXBetLiveUrl(url)
+                val saveRes = repository.saveBoardConfig(
+                    autoSyncDailyMatches = cur.autoSyncDailyMatches,
+                    autoSyncLiveResults = cur.autoSyncLiveResults,
+                    lastSyncedDate = cur.lastSyncedDate,
+                    allowedLeagues = cur.allowedLeagues,
+                    autoSyncOneExpress = cur.autoSyncOneExpress,
+                    autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+                    oneXBetLiveUrl = cleanUrl
+                )
+                if (saveRes.isFailure) {
+                    _events.emit(saveRes.exceptionOrNull()?.localizedMessage ?: "1xBET လင့် သိမ်းဆည်းမှု မအောင်မြင်ပါ")
+                    return@launch
+                }
+                logAuditAsync("Updated 1xBET live URL", "board", "board_config", "", cleanUrl)
+                if (syncAfterSave) {
+                    val syncRes = repository.syncBoardMatchesFromFeed(
+                        boardSource = "one_express",
+                        feedService = feedService,
+                        dayOffsets = listOf(0, 1),
+                        currentConfig = cur.copy(oneXBetLiveUrl = cleanUrl)
+                    )
+                    syncRes.onSuccess { outcome ->
+                        val msg = when {
+                            outcome.syncedCount > 0 && outcome.usedDirectSource ->
+                                "1xBET တိုက်ရိုက်လင့် (${outcome.sourceLabel}) သိမ်းပြီး ပွဲကြေး ${outcome.syncedCount} ပွဲ ချိတ်ဆက်ပြီးပါပြီ"
+                            outcome.syncedCount > 0 ->
+                                "1xBET လင့် သိမ်းဆည်းပြီး ပွဲကြေး ${outcome.syncedCount} ပွဲ ချိတ်ဆက်ပြီးပါပြီ"
+                            else ->
+                                "1xBET တိုက်ရိုက်လင့် ($cleanUrl) သိမ်းဆည်းပြီးပါပြီ"
+                        }
+                        _events.emit(msg)
+                        refreshLiveFootballFeed()
+                    }.onFailure { err ->
+                        _events.emit("1xBET လင့် သိမ်းဆည်းပြီးသော်လည်း Sync မအောင်မြင်ပါ: ${err.localizedMessage ?: ""}")
+                    }
+                } else {
+                    _events.emit("1xBET တိုက်ရိုက်လင့် သိမ်းဆည်းပြီးပါပြီ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
     }
 
     fun syncDailyMatchesNow() {
@@ -1497,10 +1552,21 @@ class MainViewModel(
             _busy.value = true
             try {
                 val res = repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), boardConfig.value)
-                res.onSuccess { count ->
-                    if (count > 0) {
-                        _events.emit("1xBET ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
-                        logAuditAsync("Synced 1xBET board", "board", "one_express", "", "Count=$count")
+                res.onSuccess { outcome ->
+                    if (outcome.syncedCount > 0) {
+                        val msg = if (outcome.usedDirectSource) {
+                            "1xBET တိုက်ရိုက်လင့် (${outcome.sourceLabel}) မှ ပွဲကြေး ${outcome.syncedCount} ပွဲ ချိတ်ဆက်ပြီးပါပြီ"
+                        } else {
+                            "1xBET ပွဲကြေး ${outcome.syncedCount} ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ"
+                        }
+                        _events.emit(msg)
+                        logAuditAsync(
+                            "Synced 1xBET board",
+                            "board",
+                            "one_express",
+                            "",
+                            "Count=${outcome.syncedCount}, direct=${outcome.usedDirectSource}, host=${outcome.sourceLabel}"
+                        )
                     } else {
                         _events.emit("1xBET အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
@@ -1519,10 +1585,10 @@ class MainViewModel(
             _busy.value = true
             try {
                 val res = repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), boardConfig.value)
-                res.onSuccess { count ->
-                    if (count > 0) {
-                        _events.emit("555 Mix ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
-                        logAuditAsync("Synced 555 Mix board", "board", "five_five_five", "", "Count=$count")
+                res.onSuccess { outcome ->
+                    if (outcome.syncedCount > 0) {
+                        _events.emit("555 Mix ပွဲကြေး ${outcome.syncedCount} ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced 555 Mix board", "board", "five_five_five", "", "Count=${outcome.syncedCount}")
                     } else {
                         _events.emit("555 Mix အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
@@ -1540,7 +1606,7 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.syncLiveMatchResults(feedService)
+                val res = repository.syncLiveMatchResults(feedService, boardConfig.value.oneXBetLiveUrl)
                 res.onSuccess { updated ->
                     val settledCount = if (bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
                         repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0

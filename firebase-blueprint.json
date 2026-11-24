@@ -283,7 +283,7 @@
     },
     "BoardConfig": {
       "title": "BoardConfig",
-      "description": "Admin-configurable automatic daily fixtures, league filters, and live result sync flags.",
+      "description": "Admin-configurable automatic daily fixtures, league filters, 1xBET live feed URL, and live result sync flags.",
       "type": "object",
       "properties": {
         "autoSyncDailyMatches": { "type": "boolean" },
@@ -292,6 +292,7 @@
         "allowedLeagues": { "type": "array" },
         "autoSyncOneExpress": { "type": "boolean" },
         "autoSyncFiveFiveFive": { "type": "boolean" },
+        "oneXBetLiveUrl": { "type": "string" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

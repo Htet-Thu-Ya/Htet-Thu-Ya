@@ -13,12 +13,19 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
+
+data class OneXBetSyncResult(
+    val fixtures: List<LiveFootballFixture>,
+    val usedDirect1xBet: Boolean,
+    val sourceOrigin: String
+)
 
 class FootballFeedService(
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -86,6 +93,210 @@ class FootballFeedService(
         } catch (e: Exception) {
             Log.w(TAG, "Failed to fetch live football feed: ${e.message}", e)
             Result.failure(e)
+        }
+    }
+
+    suspend fun fetchOneXBetFixtures(
+        liveUrl: String = DEFAULT_ONE_X_BET_LIVE_URL,
+        allowedLeagues: List<String> = emptyList(),
+        dayOffsets: List<Int> = listOf(0, 1)
+    ): Result<OneXBetSyncResult> = withContext(Dispatchers.IO) {
+        val normalizedUrl = normalizeOneXBetLiveUrl(liveUrl)
+        val origin = extractOrigin(normalizedUrl)
+        val lng = extractLanguageCode(normalizedUrl)
+        try {
+            val (lineFixtures, liveFixtures) = coroutineScope {
+                val lineDeferred = async {
+                    fetchOneXBetEndpoint(
+                        urls = listOf(
+                            "$origin/service-api/LineFeed/Get1x2_VZip?sports=1&count=80&lng=$lng&tf=2200000&tz=6&mode=4&country=190&partner=1&getEmpty=true",
+                            "$origin/LineFeed/Get1x2_VZip?sports=1&count=80&lng=$lng&tf=2200000&tz=6&mode=4&country=190&partner=1&getEmpty=true"
+                        ),
+                        refererUrl = normalizedUrl,
+                        origin = origin,
+                        isLiveFeed = false
+                    )
+                }
+                val liveDeferred = async {
+                    fetchOneXBetEndpoint(
+                        urls = listOf(
+                            "$origin/service-api/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true",
+                            "$origin/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true"
+                        ),
+                        refererUrl = normalizedUrl,
+                        origin = origin,
+                        isLiveFeed = true
+                    )
+                }
+                lineDeferred.await() to liveDeferred.await()
+            }
+
+            val merged = linkedMapOf<String, LiveFootballFixture>()
+            lineFixtures.forEach { merged[it.externalId] = it }
+            liveFixtures.forEach { merged[it.externalId] = it }
+
+            if (merged.isNotEmpty()) {
+                val allowedSet = allowedLeagues
+                    .map { it.trim().lowercase(Locale.US) }
+                    .filter { it.isNotBlank() }
+                    .toSet()
+                val rawList = merged.values.toList()
+                val filtered = if (allowedSet.isEmpty()) {
+                    rawList
+                } else {
+                    rawList.filter { fix ->
+                        val lLow = fix.league.lowercase(Locale.US)
+                        allowedSet.any { allowed -> lLow.contains(allowed) || allowed.contains(lLow) }
+                    }.ifEmpty { rawList }
+                }
+                return@withContext Result.success(
+                    OneXBetSyncResult(
+                        fixtures = filtered,
+                        usedDirect1xBet = true,
+                        sourceOrigin = origin
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Direct 1xBET feed skipped ($origin): ${e.message}")
+        }
+
+        // Graceful fallback to live ESPN/SportsDB odds feed if mirror is geo-blocked or unreachable
+        val fallback = fetchFixturesForDays(dayOffsets = dayOffsets, allowedLeagues = allowedLeagues)
+        fallback.map { fixtures ->
+            OneXBetSyncResult(
+                fixtures = fixtures,
+                usedDirect1xBet = false,
+                sourceOrigin = origin
+            )
+        }
+    }
+
+    suspend fun fetchOneXBetLiveUpdates(
+        liveUrl: String = DEFAULT_ONE_X_BET_LIVE_URL
+    ): List<LiveFootballFixture> = withContext(Dispatchers.IO) {
+        val normalizedUrl = normalizeOneXBetLiveUrl(liveUrl)
+        val origin = extractOrigin(normalizedUrl)
+        val lng = extractLanguageCode(normalizedUrl)
+        try {
+            fetchOneXBetEndpoint(
+                urls = listOf(
+                    "$origin/service-api/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true",
+                    "$origin/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true"
+                ),
+                refererUrl = normalizedUrl,
+                origin = origin,
+                isLiveFeed = true
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "1xBET live score poll skipped: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun fetchOneXBetEndpoint(
+        urls: List<String>,
+        refererUrl: String,
+        origin: String,
+        isLiveFeed: Boolean
+    ): List<LiveFootballFixture> {
+        for (url in urls) {
+            val body = httpGetBrowserJson(url = url, refererUrl = refererUrl, origin = origin)
+            if (!body.isNullOrBlank()) {
+                val parsed = parseOneXBetFeedJson(
+                    jsonStr = body,
+                    origin = origin,
+                    isLiveFeed = isLiveFeed
+                )
+                if (parsed.isNotEmpty()) {
+                    return parsed
+                }
+            }
+        }
+        return emptyList()
+    }
+
+    internal fun parseOneXBetFeedJson(
+        jsonStr: String,
+        origin: String,
+        isLiveFeed: Boolean,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<LiveFootballFixture> {
+        val trimmed = jsonStr.trim()
+        if (!trimmed.startsWith("{")) return emptyList()
+        return try {
+            val root = JSONObject(trimmed)
+            val valueArr = root.optJSONArray("Value") ?: return emptyList()
+            val list = mutableListOf<LiveFootballFixture>()
+            for (i in 0 until valueArr.length().coerceAtMost(80)) {
+                val obj = valueArr.optJSONObject(i) ?: continue
+                val gameId = obj.optLong("I", 0L).takeIf { it > 0L }?.toString()
+                    ?: obj.optString("CI").trim()
+                if (gameId.isBlank()) continue
+
+                val league = obj.optString("LE")
+                    .ifBlank { obj.optString("L") }
+                    .ifBlank { "1xBET Football" }
+                    .trim()
+                val homeTeam = obj.optString("O1E")
+                    .ifBlank { obj.optString("O1") }
+                    .trim()
+                val awayTeam = obj.optString("O2E")
+                    .ifBlank { obj.optString("O2") }
+                    .trim()
+                if (homeTeam.isBlank() || awayTeam.isBlank()) continue
+
+                val o1Img = obj.optJSONArray("O1IMG")?.optString(0)?.trim().orEmpty()
+                val o2Img = obj.optJSONArray("O2IMG")?.optString(0)?.trim().orEmpty()
+                val startSec = obj.optLong("S", 0L)
+
+                val scObj = obj.optJSONObject("SC")
+                val fsObj = scObj?.optJSONObject("FS")
+                val homeScore = fsObj?.optLong("S1", 0L) ?: 0L
+                val awayScore = fsObj?.optLong("S2", 0L) ?: 0L
+                val cps = scObj?.optString("CPS").orEmpty().trim()
+                val isFinished = obj.optBoolean("F", false) ||
+                    cps.equals("Match finished", ignoreCase = true) ||
+                    cps.equals("FT", ignoreCase = true)
+
+                val outcomes = mutableListOf<KyayFormatter.OneXBetMarketOutcome>()
+                val eArr = obj.optJSONArray("E")
+                if (eArr != null) {
+                    for (j in 0 until eArr.length()) {
+                        val eObj = eArr.optJSONObject(j) ?: continue
+                        val t = eObj.optInt("T", -1)
+                        val c = eObj.optDouble("C", Double.NaN)
+                        val p = if (eObj.has("P") && !eObj.isNull("P")) {
+                            eObj.optDouble("P", Double.NaN).takeUnless { it.isNaN() }
+                        } else null
+                        if (t > 0 && !c.isNaN() && c > 1.0) {
+                            outcomes.add(KyayFormatter.OneXBetMarketOutcome(type = t, param = p, coef = c))
+                        }
+                    }
+                }
+
+                buildOneXBetFixture(
+                    gameId = gameId,
+                    league = league,
+                    homeTeam = homeTeam,
+                    awayTeam = awayTeam,
+                    homeImgFile = o1Img,
+                    awayImgFile = o2Img,
+                    startEpochSec = startSec,
+                    homeScore = homeScore,
+                    awayScore = awayScore,
+                    livePeriodClock = cps,
+                    isFinished = isFinished,
+                    isLiveFeed = isLiveFeed,
+                    outcomes = outcomes,
+                    origin = origin,
+                    nowMs = nowMs
+                )?.let { list.add(it) }
+            }
+            list
+        } catch (e: Exception) {
+            Log.d(TAG, "1xBET JSON parse error: ${e.message}")
+            emptyList()
         }
     }
 
@@ -417,6 +628,26 @@ class FootballFeedService(
         }
     }
 
+    private fun httpGetBrowserJson(url: String, refererUrl: String, origin: String): String? {
+        return try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Referer", refererUrl)
+                .header("Origin", origin)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.string() else null
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "1xBET GET $url failed: ${e.message}")
+            null
+        }
+    }
+
     private fun formatUtcToLocalLabel(isoUtc: String): String {
         if (isoUtc.isBlank()) return "Today"
         val patterns = listOf("yyyy-MM-dd'T'HH:mm'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'")
@@ -454,6 +685,9 @@ class FootballFeedService(
 
     companion object {
         private const val TAG = "FootballFeed"
+        const val DEFAULT_ONE_X_BET_LIVE_URL = "https://1xlite-19808.pro/en/live"
+        private const val BROWSER_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
         val DEFAULT_LEAGUE_OPTIONS = listOf(
             "Premier League",
@@ -467,6 +701,120 @@ class FootballFeedService(
             "Carabao Cup",
             "World Cup Qualifiers"
         )
+
+        fun normalizeOneXBetLiveUrl(raw: String): String {
+            val cleaned = raw.trim()
+            if (cleaned.isBlank()) return DEFAULT_ONE_X_BET_LIVE_URL
+            val withHttps = when {
+                cleaned.startsWith("https://", ignoreCase = true) -> cleaned
+                cleaned.startsWith("http://", ignoreCase = true) -> "https://" + cleaned.removePrefix("http://").removePrefix("HTTP://")
+                else -> "https://$cleaned"
+            }
+            return try {
+                val uri = URI(withHttps)
+                if (uri.host.isNullOrBlank()) DEFAULT_ONE_X_BET_LIVE_URL else withHttps.take(300)
+            } catch (_: Exception) {
+                DEFAULT_ONE_X_BET_LIVE_URL
+            }
+        }
+
+        fun extractOrigin(liveUrl: String): String {
+            val normalized = normalizeOneXBetLiveUrl(liveUrl)
+            return try {
+                val uri = URI(normalized)
+                val host = uri.host?.takeIf { it.isNotBlank() } ?: return "https://1xlite-19808.pro"
+                val portPart = if (uri.port > 0 && uri.port != 443) ":${uri.port}" else ""
+                "https://$host$portPart"
+            } catch (_: Exception) {
+                "https://1xlite-19808.pro"
+            }
+        }
+
+        fun extractLanguageCode(liveUrl: String): String {
+            return try {
+                val seg = URI(normalizeOneXBetLiveUrl(liveUrl)).path
+                    ?.split('/')
+                    ?.firstOrNull { it.length == 2 && it.all { ch -> ch.isLetter() } }
+                    ?.lowercase(Locale.US)
+                seg ?: "en"
+            } catch (_: Exception) {
+                "en"
+            }
+        }
+
+        internal fun buildOneXBetFixture(
+            gameId: String,
+            league: String,
+            homeTeam: String,
+            awayTeam: String,
+            homeImgFile: String,
+            awayImgFile: String,
+            startEpochSec: Long,
+            homeScore: Long,
+            awayScore: Long,
+            livePeriodClock: String,
+            isFinished: Boolean,
+            isLiveFeed: Boolean,
+            outcomes: List<KyayFormatter.OneXBetMarketOutcome>,
+            origin: String,
+            nowMs: Long = System.currentTimeMillis()
+        ): LiveFootballFixture? {
+            if (gameId.isBlank() || homeTeam.isBlank() || awayTeam.isBlank()) return null
+
+            val startMs = if (startEpochSec > 0L) startEpochSec * 1000L else 0L
+            val status = when {
+                isFinished -> "finished"
+                isLiveFeed || (startMs in 1 until nowMs) -> "closed"
+                else -> "open"
+            }
+            val liveClock = when (status) {
+                "finished" -> "FT"
+                "closed" -> if (livePeriodClock.isNotBlank()) "LIVE $livePeriodClock" else "LIVE"
+                else -> ""
+            }
+
+            val kickoffLabel = if (status == "open" && startMs > 0L) {
+                val outFmt = SimpleDateFormat("dd MMM hh:mm a", Locale.US).apply {
+                    timeZone = TimeZone.getDefault()
+                }
+                outFmt.format(Date(startMs))
+            } else {
+                liveClock.ifBlank { "1xBET Live" }
+            }
+
+            val matchDate = if (startMs > 0L) {
+                SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(startMs))
+            } else {
+                SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+            }
+
+            val parsedLines = KyayFormatter.parseOneXBetOutcomesToLines(outcomes)
+            val homeLogoUrl = homeImgFile.trim().takeIf { it.isNotBlank() }?.let { file ->
+                if (file.startsWith("http")) file else "$origin/sfiles/logo_teams/$file"
+            }.orEmpty()
+            val awayLogoUrl = awayImgFile.trim().takeIf { it.isNotBlank() }?.let { file ->
+                if (file.startsWith("http")) file else "$origin/sfiles/logo_teams/$file"
+            }.orEmpty()
+
+            return LiveFootballFixture(
+                externalId = "1xbet_$gameId",
+                league = league.take(60),
+                homeTeam = homeTeam.take(60),
+                awayTeam = awayTeam.take(60),
+                homeLogoUrl = homeLogoUrl.take(300),
+                awayLogoUrl = awayLogoUrl.take(300),
+                kickoffLabel = kickoffLabel.take(40),
+                matchDate = matchDate.take(20),
+                handicapLine = parsedLines.handicapLine.take(40),
+                goalLine = parsedLines.goalLine.take(20),
+                bodyOdds = parsedLines.bodyOdds,
+                goalOdds = parsedLines.goalOdds,
+                status = status,
+                liveClock = liveClock.take(24),
+                homeScore = homeScore.coerceIn(0L, 99L),
+                awayScore = awayScore.coerceIn(0L, 99L)
+            )
+        }
 
         fun normalizeTeam(name: String): String {
             return name.lowercase(Locale.US)

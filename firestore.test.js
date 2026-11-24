@@ -1711,8 +1711,22 @@ test("One Express & 555 boards, orders with kickoff text, wallet receipt image c
       allowedLeagues: [],
       autoSyncOneExpress: true,
       autoSyncFiveFiveFive: true,
+      oneXBetLiveUrl: "https://1xlite-19808.pro/en/live",
       updatedBy: OWNER_UID,
       updatedAt: pastDate(4500),
+    })
+  );
+  await assertFails(
+    ownerDb.collection("app_settings").doc("board_config").update({
+      oneXBetLiveUrl: "http://insecure.example.com/live",
+      updatedAt: pastDate(4400),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("app_settings").doc("board_config").update({
+      oneXBetLiveUrl: "https://1xlite-19808.pro/en/live",
+      updatedBy: ALICE_UID,
+      updatedAt: pastDate(4400),
     })
   );
 

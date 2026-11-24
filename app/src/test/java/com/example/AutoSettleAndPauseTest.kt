@@ -291,4 +291,138 @@ class AutoSettleAndPauseTest {
         assertTrue(full.contains("မြန်မာစံတော်ချိန်"))
         assertTrue(full.contains("01:05:09 ကျန်"))
     }
+
+    @Test
+    fun oneXBetUrlHelpers_andMarketOutcomeParser_workEndToEnd() {
+        val defaultUrl = "https://1xlite-19808.pro/en/live"
+        assertEquals(defaultUrl, com.example.data.network.FootballFeedService.normalizeOneXBetLiveUrl(defaultUrl))
+        assertEquals("https://1xlite-19808.pro", com.example.data.network.FootballFeedService.extractOrigin(defaultUrl))
+        assertEquals("en", com.example.data.network.FootballFeedService.extractLanguageCode(defaultUrl))
+        assertEquals(
+            "https://1xlite-99999.pro/my/live",
+            com.example.data.network.FootballFeedService.normalizeOneXBetLiveUrl("http://1xlite-99999.pro/my/live")
+        )
+        assertEquals(
+            "https://1xlite-99999.pro",
+            com.example.data.network.FootballFeedService.extractOrigin("1xlite-99999.pro/my/live")
+        )
+        assertEquals(
+            "my",
+            com.example.data.network.FootballFeedService.extractLanguageCode("1xlite-99999.pro/my/live")
+        )
+
+        val asianParsed = KyayFormatter.parseOneXBetOutcomesToLines(
+            listOf(
+                KyayFormatter.OneXBetMarketOutcome(type = 7, param = -0.5, coef = 1.95),
+                KyayFormatter.OneXBetMarketOutcome(type = 8, param = 0.5, coef = 1.91),
+                KyayFormatter.OneXBetMarketOutcome(type = 9, param = 2.75, coef = 1.88),
+                KyayFormatter.OneXBetMarketOutcome(type = 10, param = 2.75, coef = 1.96)
+            )
+        )
+        assertEquals("Home -0.5", asianParsed.handicapLine)
+        assertEquals("2.5/3", asianParsed.goalLine)
+        assertEquals(1.93, asianParsed.bodyOdds, 0.01)
+        assertEquals(1.92, asianParsed.goalOdds, 0.01)
+
+        val awayFavParsed = KyayFormatter.parseOneXBetOutcomesToLines(
+            listOf(
+                KyayFormatter.OneXBetMarketOutcome(type = 7, param = 0.25, coef = 1.90),
+                KyayFormatter.OneXBetMarketOutcome(type = 9, param = 2.5, coef = 1.91)
+            )
+        )
+        assertEquals("Away -0.25", awayFavParsed.handicapLine)
+        assertEquals("2.5", awayFavParsed.goalLine)
+
+        val moneylineFallback = KyayFormatter.parseOneXBetOutcomesToLines(
+            listOf(
+                KyayFormatter.OneXBetMarketOutcome(type = 1, param = null, coef = 1.48),
+                KyayFormatter.OneXBetMarketOutcome(type = 3, param = null, coef = 6.20)
+            )
+        )
+        assertEquals("Home -1", moneylineFallback.handicapLine)
+        assertEquals("2.5", moneylineFallback.goalLine)
+
+        val nowMs = 1_700_000_000_000L
+        val openFix = com.example.data.network.FootballFeedService.buildOneXBetFixture(
+            gameId = "55123",
+            league = "UEFA Champions League",
+            homeTeam = "Arsenal",
+            awayTeam = "Inter",
+            homeImgFile = "arsenal.png",
+            awayImgFile = "inter.png",
+            startEpochSec = (nowMs / 1000L) + 7200L,
+            homeScore = 0L,
+            awayScore = 0L,
+            livePeriodClock = "",
+            isFinished = false,
+            isLiveFeed = false,
+            outcomes = listOf(
+                KyayFormatter.OneXBetMarketOutcome(type = 7, param = -0.5, coef = 1.94),
+                KyayFormatter.OneXBetMarketOutcome(type = 9, param = 2.5, coef = 1.90)
+            ),
+            origin = "https://1xlite-19808.pro",
+            nowMs = nowMs
+        )!!
+        assertEquals("1xbet_55123", openFix.externalId)
+        assertEquals("open", openFix.status)
+        assertEquals("https://1xlite-19808.pro/sfiles/logo_teams/arsenal.png", openFix.homeLogoUrl)
+        assertEquals("Home -0.5", openFix.handicapLine)
+        assertEquals("2.5", openFix.goalLine)
+
+        val liveFix = com.example.data.network.FootballFeedService.buildOneXBetFixture(
+            gameId = "55123",
+            league = "UEFA Champions League",
+            homeTeam = "Arsenal",
+            awayTeam = "Inter",
+            homeImgFile = "arsenal.png",
+            awayImgFile = "inter.png",
+            startEpochSec = (nowMs / 1000L) - 1800L,
+            homeScore = 2L,
+            awayScore = 1L,
+            livePeriodClock = "64'",
+            isFinished = false,
+            isLiveFeed = true,
+            outcomes = listOf(
+                KyayFormatter.OneXBetMarketOutcome(type = 7, param = -0.5, coef = 1.94),
+                KyayFormatter.OneXBetMarketOutcome(type = 9, param = 2.5, coef = 1.90)
+            ),
+            origin = "https://1xlite-19808.pro",
+            nowMs = nowMs
+        )!!
+        assertEquals("closed", liveFix.status)
+        assertEquals("LIVE 64'", liveFix.liveClock)
+        assertEquals(2L, liveFix.homeScore)
+        assertEquals(1L, liveFix.awayScore)
+
+        val settledMatch = SportMatch(
+            id = "ext_oneexp_1xbet_55123",
+            homeTeam = openFix.homeTeam,
+            awayTeam = openFix.awayTeam,
+            handicapLine = openFix.handicapLine,
+            goalLine = openFix.goalLine,
+            bodyOdds = openFix.bodyOdds,
+            goalOdds = openFix.goalOdds,
+            status = "finished",
+            homeScore = 2L,
+            awayScore = 1L,
+            boardSource = "one_express"
+        )
+        val decision = AutoSettleEngine.evaluate(
+            BetOrder(
+                id = "ord_1x",
+                orderType = "one_express",
+                selections = listOf("Arsenal (-0.5)"),
+                matchIds = listOf("ext_oneexp_1xbet_55123"),
+                pickKeys = listOf("home"),
+                stakeKs = 10_000L,
+                multiplier = 1.94,
+                potentialPayoutKs = 19_400L,
+                status = "accepted"
+            ),
+            mapOf("ext_oneexp_1xbet_55123" to settledMatch),
+            emptyList()
+        )
+        assertTrue(decision is AutoSettleDecision.Win)
+        assertEquals(19_400L, (decision as AutoSettleDecision.Win).grossPayoutKs)
+    }
 }
