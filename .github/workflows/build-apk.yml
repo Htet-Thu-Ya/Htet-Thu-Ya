@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -91,11 +95,59 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view latest >/dev/null 2>&1; then
-            gh release upload latest LoTaYa.apk HtetThuYa.apk --clobber
-          else
-            gh release create latest LoTaYa.apk HtetThuYa.apk \
+          set -euo pipefail
+
+          if ! gh release view latest >/dev/null 2>&1; then
+            gh release create latest \
               --title "Lo Ta Ya (လိုတရ) APK" \
               --notes "Direct Android APK download for Lo Ta Ya (Customer & Admin)." \
               --latest
           fi
+
+          RELEASE_ID="$(gh release view latest --json databaseId --jq '.databaseId')"
+
+          delete_existing_asset() {
+            local file="$1"
+            local asset_id
+            for asset_id in $(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq ".[] | select(.name == \"${file}\") | .id" 2>/dev/null || true); do
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null 2>&1 || true
+            done
+          }
+
+          upload_asset() {
+            local file="$1"
+            local attempt
+            for attempt in 1 2 3 4; do
+              echo "Uploading ${file} (attempt ${attempt}/4)..."
+              if [ "$attempt" -eq 1 ]; then
+                if gh release upload latest "$file" --clobber; then
+                  echo "Uploaded ${file} via gh CLI."
+                  return 0
+                fi
+              else
+                delete_existing_asset "$file"
+                if curl --http1.1 --fail --show-error --silent \
+                  --connect-timeout 30 --max-time 300 \
+                  --speed-time 30 --speed-limit 1024 \
+                  -X POST \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  -H "Content-Type: application/vnd.android.package-archive" \
+                  --data-binary "@${file}" \
+                  "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${file}" >/dev/null; then
+                  echo "Uploaded ${file} via curl HTTP/1.1."
+                  return 0
+                fi
+              fi
+
+              echo "Upload attempt ${attempt} failed for ${file}; waiting before retry..."
+              sleep $((attempt * 5))
+            done
+
+            echo "ERROR: Failed to upload ${file} after 4 attempts."
+            return 1
+          }
+
+          upload_asset "LoTaYa.apk"
+          upload_asset "HtetThuYa.apk"
