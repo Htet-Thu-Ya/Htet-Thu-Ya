@@ -1476,10 +1476,25 @@ test("Branding config, mini-game control config, auto-accept orders, support age
       diceMaxEvenPerDay: 15,
       diceTotalDailyQuotas: { "10": 5 },
       animalDailyQuotas: { "tiger": 10 },
-      globalDirective: "auto",
-      userDirectives: { [ALICE_UID]: "force_win" },
+      globalDirective: "stealth_house",
+      stealthHouseWinPct: 78,
+      userDirectives: { [ALICE_UID]: "stealth_house" },
       updatedBy: OWNER_UID,
       updatedAt: pastDate(3500),
+    })
+  );
+  await assertFails(
+    ownerDb.collection("app_settings").doc("mini_game_control").update({
+      stealthHouseWinPct: 99,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(3200),
+    })
+  );
+  await assertFails(
+    ownerDb.collection("app_settings").doc("mini_game_control").update({
+      globalDirective: "rigged",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(3100),
     })
   );
   await assertFails(

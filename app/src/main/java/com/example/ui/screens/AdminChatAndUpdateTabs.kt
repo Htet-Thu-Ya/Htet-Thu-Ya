@@ -346,7 +346,12 @@ fun AdminUpdateAndQualityTab(
     var versionCodeText by remember { mutableStateOf((appUpdateConfig?.latestVersionCode ?: BuildConfig.VERSION_CODE).toString()) }
     var versionNameText by remember { mutableStateOf(appUpdateConfig?.latestVersionName ?: BuildConfig.VERSION_NAME) }
     var downloadUrlText by remember { mutableStateOf(appUpdateConfig?.downloadUrl ?: AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL) }
-    var releaseNotesText by remember { mutableStateOf(appUpdateConfig?.releaseNotes ?: "ဗားရှင်းအသစ် ထွက်ရှိပါပြီ။") }
+    var releaseNotesText by remember {
+        mutableStateOf(
+            appUpdateConfig?.releaseNotes
+                ?: "🔥 စနစ်သစ်ဖြင့် ပိုမိုမြန်ဆန်တိကျလာပါပြီ!\n• 1xBET နှင့် 555 Mix တိုက်ရိုက်ပွဲကြေးများ အချိန်နှင့်တပြေးညီ တိကျစွာ ကြည့်ရှုလောင်းနိုင်ခြင်း\n• တိုက်ရိုက် Live ရလဒ်နှင့် ငွေသွင်း/ငွေထုတ် ပိုမိုမြန်ဆန်ချောမွေ့ခြင်း\n• လုံခြုံရေးနှင့် စွမ်းဆောင်ရည် အပြည့်အဝ မြှင့်တင်ထားပါသဖြင့် ယခုပဲ Update တင်လိုက်ပါ!"
+        )
+    }
     var forceUpdate by remember { mutableStateOf(appUpdateConfig?.forceUpdate ?: false) }
 
     val resolvedDirectUrl = remember(downloadUrlText) {
@@ -622,14 +627,40 @@ fun AdminUpdateAndQualityTab(
                     OutlinedTextField(
                         value = releaseNotesText,
                         onValueChange = { releaseNotesText = it },
-                        label = { Text("Update မှတ်စု") },
-                        maxLines = 2,
+                        label = { Text("Customer ဆွဲဆောင်မည့် Update မှတ်စု") },
+                        minLines = 3,
+                        maxLines = 5,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("admin_update_notes")
                     )
+                    Text(
+                        text = "အသင့်သုံး စာသားလှလှများ (နှိပ်၍ထည့်ရန်):",
+                        color = ChampionshipGold,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val presets = listOf(
+                            "⚽ 1xBET & 555 Mix" to "🔥 စနစ်သစ် အဆင့်မြှင့်တင်မှု!\n• 1xBET နှင့် 555 Mix တရားဝင်ကြေးနှုန်းများ တိုက်ရိုက်ချိတ်ဆက်ပြီး ပိုမိုတိကျမြန်ဆန်\n• Live ပွဲရလဒ်နှင့် အော်ဒါရှင်းလင်းမှု စက္ကန့်ပိုင်းအတွင်း ချောမွေ့စွာ လုပ်ဆောင်နိုင်ပါပြီ!",
+                            "⚡ မြန်နှုန်း & ငွေသွင်း/ထုတ်" to "✨ ဗားရှင်းအသစ် ထွက်ရှိပါပြီ!\n• ငွေသွင်း/ငွေထုတ် နှင့် အလိုအလျောက် စာရင်းရှင်းစနစ် ပိုမိုမြန်ဆန်\n• ဂိမ်းခန်းနှင့် ထီကစားမှုများ အထစ်အငေါ့မရှိ ပိုမိုကောင်းမွန်လာပါပြီ — ယခုပဲ Update ရယူပါ!",
+                            "🎁 အထူးဝန်ဆောင်မှုသစ်" to "🎉 အထူးမြှင့်တင်ထားသော ဗားရှင်းသစ်!\n• လုံခြုံစိတ်ချရမှု နှင့် ဒီဇိုင်းအသွင်သစ် ပိုမိုသပ်ရပ်\n• ပွိုင့်လက်ဆောင်နှင့် အနိုင်ရနှုန်းများ ကြည်လင်ပြတ်သားစွာ ခံစားနိုင်ရန် ယခု Update တင်လိုက်ပါ!"
+                        )
+                        presets.forEach { (chipLabel, templateText) ->
+                            OutlinedButton(
+                                onClick = { releaseNotesText = templateText },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(chipLabel, color = ChampionshipGold, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

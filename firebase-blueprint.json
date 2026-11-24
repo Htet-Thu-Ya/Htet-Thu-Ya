@@ -402,6 +402,7 @@
         "diceTotalDailyQuotas": { "type": "object" },
         "animalDailyQuotas": { "type": "object" },
         "globalDirective": { "type": "string" },
+        "stealthHouseWinPct": { "type": "integer" },
         "userDirectives": { "type": "object" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }

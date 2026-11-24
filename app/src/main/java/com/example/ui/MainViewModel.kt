@@ -271,7 +271,9 @@ class MainViewModel(
         when {
             fsNewer && fsCfg != null -> AvailableApkUpdate(
                 versionLabel = "v${fsCfg.latestVersionName} (Build ${fsCfg.latestVersionCode})",
-                releaseNotes = fsCfg.releaseNotes.ifBlank { "ဗားရှင်းအသစ် ထွက်ရှိနေပါပြီ။ အောက်ပါခလုတ်မှ Download ရယူ Update လုပ်ပါ။" },
+                releaseNotes = fsCfg.releaseNotes.ifBlank {
+                    "🔥 စနစ်သစ် v${fsCfg.latestVersionName} အဆင်သင့်ဖြစ်ပါပြီ!\n• 1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေးနှုန်းများ ပိုမိုမြန်ဆန်တိကျ\n• တိုက်ရိုက်ပွဲစဉ်ရလဒ်နှင့် ငွေသွင်း/ငွေထုတ် ပိုမိုချောမွေ့\n• အကောင်းဆုံးစွမ်းဆောင်ရည်အတွက် ယခုပဲ Update တင်လိုက်ပါ!"
+                },
                 downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(
                     fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
                 ),
@@ -280,7 +282,9 @@ class MainViewModel(
             )
             ghNewer && ghRel != null -> AvailableApkUpdate(
                 versionLabel = "Latest Release (${ghRel.tagName})",
-                releaseNotes = ghRel.releaseNotes.ifBlank { "GitHub တွင် APK ဗားရှင်းအသစ် တင်ထားပြီးဖြစ်ပါသည်။ Update ရယူနိုင်ပါပြီ။" },
+                releaseNotes = ghRel.releaseNotes.ifBlank {
+                    "✨ ဗားရှင်းအသစ် (${ghRel.tagName}) ထွက်ရှိနေပါပြီ!\n• တိုက်ရိုက် 1xBET / 555 Mix ကြေးနှုန်းနှင့် Live ရလဒ်များ ပိုမိုတိကျမြန်ဆန်\n• လုံခြုံစိတ်ချရသော စနစ်မြှင့်တင်မှုများ ပါဝင်ပါသည် — ယခုပဲ Update ရယူလိုက်ပါ!"
+                },
                 downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(ghRel.downloadUrl),
                 forceUpdate = false,
                 source = "GitHub Auto"
@@ -907,23 +911,19 @@ class MainViewModel(
                 }
                 val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
                 val quotaCombos = allCombos.filter { (a, b, c) -> isQuotaOk(a, b, c) }
-                val pool: List<Triple<Int, Int, Int>> = when (directive) {
-                    "force_win" -> {
-                        val qWin = quotaCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second > 0L }
-                        qWin.ifEmpty {
-                            allCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second > 0L }
-                        }.ifEmpty { allCombos }
-                    }
-                    "force_loss" -> {
-                        val qLoss = quotaCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second == 0L }
-                        qLoss.ifEmpty {
-                            allCombos.filter { (a, b, c) -> computeDiceOutcome(a, b, c).second == 0L }
-                        }.ifEmpty { allCombos }
-                    }
-                    else -> quotaCombos.ifEmpty { allCombos }
-                }
-
-                val chosen = pool[Random.nextInt(pool.size)]
+                val recentCustomerDice = ((userMiniGameRounds.value as? UiState.Success)?.data ?: emptyList())
+                    .filter { it.gameType == "dice" }
+                val chosen = com.example.data.betting.MiniGameEngine.selectDiceRoll(
+                    allCombos = allCombos,
+                    quotaCombos = quotaCombos,
+                    directive = directive,
+                    stealthHouseWinPct = ctrl.stealthHouseWinPct,
+                    betOption = betOption,
+                    exactNumber = exactNumber,
+                    stakeKs = stakeKs,
+                    recentCustomerRounds = recentCustomerDice,
+                    computePayout = { a, b, c -> computeDiceOutcome(a, b, c).second }
+                )
                 val d1 = chosen.first
                 val d2 = chosen.second
                 val d3 = chosen.third
@@ -1000,23 +1000,17 @@ class MainViewModel(
                 }
                 val quotaCombos = allCombos.filter { (a, b, c) -> isComboWithinQuota(a, b, c) }
                 val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
-                val pool = when (directive) {
-                    "force_win" -> {
-                        quotaCombos.filter { (a, b, c) -> a == selectedAnimalIndex || b == selectedAnimalIndex || c == selectedAnimalIndex }
-                            .ifEmpty {
-                                allCombos.filter { (a, b, c) -> a == selectedAnimalIndex || b == selectedAnimalIndex || c == selectedAnimalIndex }
-                            }
-                    }
-                    "force_loss" -> {
-                        quotaCombos.filter { (a, b, c) -> a != selectedAnimalIndex && b != selectedAnimalIndex && c != selectedAnimalIndex }
-                            .ifEmpty {
-                                allCombos.filter { (a, b, c) -> a != selectedAnimalIndex && b != selectedAnimalIndex && c != selectedAnimalIndex }
-                            }
-                    }
-                    else -> quotaCombos.ifEmpty { allCombos }
-                }
-
-                val chosen = pool[Random.nextInt(pool.size)]
+                val recentCustomerAnimals = ((userMiniGameRounds.value as? UiState.Success)?.data ?: emptyList())
+                    .filter { it.gameType == "six_animals" }
+                val chosen = com.example.data.betting.MiniGameEngine.selectSixAnimalsRoll(
+                    allCombos = allCombos,
+                    quotaCombos = quotaCombos,
+                    selectedAnimalIndex = selectedAnimalIndex,
+                    directive = directive,
+                    stealthHouseWinPct = ctrl.stealthHouseWinPct,
+                    stakeKs = stakeKs,
+                    recentCustomerRounds = recentCustomerAnimals
+                )
                 val rolled = listOf(chosen.first, chosen.second, chosen.third)
                 val matches = rolled.count { it == selectedAnimalIndex }
                 val baseBonus = (ctrl.sixAnimalsMult - 1.0).coerceIn(0.2, 29.0)
@@ -1261,7 +1255,13 @@ class MainViewModel(
         val cur = miniGameControlConfig.value
         val updatedMap = cur.userDirectives.toMutableMap()
         if (directive == "auto") updatedMap.remove(targetUid) else updatedMap[targetUid] = directive
-        runAction("$customerName ဂိမ်းထိန်းချုပ်မှု ($directive) သတ်မှတ်ပြီးပါပြီ") {
+        val dirLabel = when (directive) {
+            "stealth_house" -> "ဒိုင်အနိုင် (Stealth)"
+            "force_win" -> "Win"
+            "force_loss" -> "Loss"
+            else -> "Auto"
+        }
+        runAction("$customerName ဂိမ်းထိန်းချုပ်မှု ($dirLabel) သတ်မှတ်ပြီးပါပြီ") {
             val res = repository.saveMiniGameControlConfig(cur.copy(userDirectives = updatedMap))
             if (res.isSuccess) logAuditAsync("Set mini-game directive", "settings", targetUid, customerName, directive)
             res
@@ -1417,8 +1417,8 @@ class MainViewModel(
     }
 
     fun toggleAutoSyncOneExpress(enabled: Boolean) = runAction(
-        if (enabled) "One Express အလိုအလျောက် ကြေးထည့်စနစ် ဖွင့်ပြီးပါပြီ"
-        else "One Express အလိုအလျောက် ကြေးထည့်စနစ် ပိတ်ပြီးပါပြီ"
+        if (enabled) "1xBET အလိုအလျောက် ကြေးထည့်စနစ် ဖွင့်ပြီးပါပြီ"
+        else "1xBET အလိုအလျောက် ကြေးထည့်စနစ် ပိတ်ပြီးပါပြီ"
     ) {
         val cur = boardConfig.value
         val res = repository.saveBoardConfig(
@@ -1436,8 +1436,8 @@ class MainViewModel(
     }
 
     fun toggleAutoSync555(enabled: Boolean) = runAction(
-        if (enabled) "555 အလိုအလျောက် ကြေးထည့်စနစ် ဖွင့်ပြီးပါပြီ"
-        else "555 အလိုအလျောက် ကြေးထည့်စနစ် ပိတ်ပြီးပါပြီ"
+        if (enabled) "555 Mix အလိုအလျောက် ကြေးထည့်စနစ် ဖွင့်ပြီးပါပြီ"
+        else "555 Mix အလိုအလျောက် ကြေးထည့်စနစ် ပိတ်ပြီးပါပြီ"
     ) {
         val cur = boardConfig.value
         val res = repository.saveBoardConfig(
@@ -1499,14 +1499,14 @@ class MainViewModel(
                 val res = repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), boardConfig.value)
                 res.onSuccess { count ->
                     if (count > 0) {
-                        _events.emit("One Express ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
-                        logAuditAsync("Synced One Express board", "board", "one_express", "", "Count=$count")
+                        _events.emit("1xBET ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced 1xBET board", "board", "one_express", "", "Count=$count")
                     } else {
-                        _events.emit("One Express အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                        _events.emit("1xBET အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
-                    _events.emit(err.localizedMessage ?: "One Express ပွဲကြေးဆွဲယူမှု မအောင်မြင်ပါ")
+                    _events.emit(err.localizedMessage ?: "1xBET ပွဲကြေးဆွဲယူမှု မအောင်မြင်ပါ")
                 }
             } finally {
                 _busy.value = false
@@ -1521,14 +1521,14 @@ class MainViewModel(
                 val res = repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), boardConfig.value)
                 res.onSuccess { count ->
                     if (count > 0) {
-                        _events.emit("555 ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
-                        logAuditAsync("Synced 555 board", "board", "five_five_five", "", "Count=$count")
+                        _events.emit("555 Mix ပွဲကြေး $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced 555 Mix board", "board", "five_five_five", "", "Count=$count")
                     } else {
-                        _events.emit("555 အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                        _events.emit("555 Mix အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
-                    _events.emit(err.localizedMessage ?: "555 ပွဲကြေးဆွဲယူမှု မအောင်မြင်ပါ")
+                    _events.emit(err.localizedMessage ?: "555 Mix ပွဲကြေးဆွဲယူမှု မအောင်မြင်ပါ")
                 }
             } finally {
                 _busy.value = false
@@ -1918,7 +1918,7 @@ class MainViewModel(
     }
 
     fun seedSampleExpressBoard(boardSource: String) {
-        val label = if (boardSource == "one_express") "One Express" else "555"
+        val label = if (boardSource == "one_express") "1xBET" else "555 Mix"
         viewModelScope.launch {
             _busy.value = true
             try {

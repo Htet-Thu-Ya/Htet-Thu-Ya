@@ -225,29 +225,77 @@ object KyayFormatter {
         }
     }
 
+    fun americanOddsToDecimal(rawOdds: Double): Double? {
+        if (rawOdds.isNaN() || rawOdds == 0.0) return null
+        val dec = when {
+            rawOdds >= 100.0 -> 1.0 + (rawOdds / 100.0)
+            rawOdds <= -100.0 -> 1.0 + (100.0 / abs(rawOdds))
+            rawOdds in 1.05..25.0 -> rawOdds
+            else -> return null
+        }
+        return kotlin.math.round(dec.coerceIn(1.50, 4.20) * 100.0) / 100.0
+    }
+
+    fun deriveRealOddsFromEspn(
+        homeMoneyLine: Double = Double.NaN,
+        awayMoneyLine: Double = Double.NaN,
+        homeSpreadOdds: Double = Double.NaN,
+        awaySpreadOdds: Double = Double.NaN,
+        overOdds: Double = Double.NaN,
+        underOdds: Double = Double.NaN
+    ): Pair<Double, Double> {
+        val hSpread = americanOddsToDecimal(homeSpreadOdds)
+        val aSpread = americanOddsToDecimal(awaySpreadOdds)
+        val hMl = americanOddsToDecimal(homeMoneyLine)
+        val aMl = americanOddsToDecimal(awayMoneyLine)
+        val bodyOdds = when {
+            hSpread != null && aSpread != null -> kotlin.math.round(((hSpread + aSpread) / 2.0) * 100.0) / 100.0
+            hSpread != null -> hSpread
+            aSpread != null -> aSpread
+            hMl != null && aMl != null -> {
+                val fav = minOf(hMl, aMl)
+                // Map favorite moneyline into realistic Asian handicap payout around 1.82..2.05
+                (kotlin.math.round((1.78 + (fav - 1.0).coerceIn(0.05, 1.5) * 0.16) * 100.0) / 100.0).coerceIn(1.80, 2.08)
+            }
+            else -> 1.93
+        }
+
+        val oDec = americanOddsToDecimal(overOdds)
+        val uDec = americanOddsToDecimal(underOdds)
+        val goalOdds = when {
+            oDec != null && uDec != null -> kotlin.math.round(((oDec + uDec) / 2.0) * 100.0) / 100.0
+            oDec != null -> oDec
+            uDec != null -> uDec
+            else -> 1.90
+        }
+
+        return bodyOdds.coerceIn(1.50, 3.80) to goalOdds.coerceIn(1.50, 3.80)
+    }
+
     fun formatOneExpressKyay(
         handicapLine: String,
         goalLine: String,
-        bodyOdds: Double = 1.92,
+        bodyOdds: Double = 1.93,
         goalOdds: Double = 1.90
     ): String {
         val cleanH = toMyanmarKyaySpec(handicapLine)
         val cleanG = goalLine.trim().ifBlank { "2.5" }
-        val oddsLbl = formatCleanDecimal(bodyOdds)
-        val gOddsLbl = formatCleanDecimal(goalOdds)
-        return "1X: $cleanH ($oddsLbl) | G $cleanG ($gOddsLbl)".take(60)
+        val oddsLbl = String.format(Locale.US, "%.2f", bodyOdds)
+        val gOddsLbl = String.format(Locale.US, "%.2f", goalOdds)
+        return "1xBET: $cleanH ($oddsLbl) | G $cleanG ($gOddsLbl)".take(60)
     }
 
     fun formatFiveFiveFiveKyay(
         handicapLine: String,
         goalLine: String,
-        bodyOdds: Double = 1.92,
+        bodyOdds: Double = 1.93,
         goalOdds: Double = 1.90
     ): String {
         val cleanH = toMyanmarKyaySpec(handicapLine)
         val cleanG = goalLine.trim().ifBlank { "2.5" }
-        val oddsLbl = formatCleanDecimal(bodyOdds)
-        return "555: $cleanH | ဂိုး $cleanG ($oddsLbl)".take(60)
+        val oddsLbl = String.format(Locale.US, "%.2f", bodyOdds)
+        val gOddsLbl = String.format(Locale.US, "%.2f", goalOdds)
+        return "555 Mix: $cleanH ($oddsLbl) | ဂိုး $cleanG ($gOddsLbl)".take(60)
     }
 
     private fun toMyanmarKyaySpec(handicapLine: String): String {

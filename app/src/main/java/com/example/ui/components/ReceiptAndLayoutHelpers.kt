@@ -56,9 +56,12 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.SportMatch
 import com.example.ui.theme.AmberPending
 import com.example.ui.theme.ChampionshipGold
+import com.example.ui.theme.ChampionshipGoldBright
 import com.example.ui.theme.DeepPitchBg
 import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.PauseBannerBg
+import com.example.ui.theme.PauseBannerPillBg
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -323,22 +326,32 @@ fun FullScreenReceiptDialog(
     }
 }
 
-fun formatRemainingReopenCountdown(reopenAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
-    if (reopenAtMs <= 0L) return ""
+fun formatCountdownPill(reopenAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+    if (reopenAtMs <= nowMs) return ""
     val remSec = ((reopenAtMs - nowMs) / 1000L).coerceAtLeast(0L)
-    val hrs = remSec / 3600L
+    val days = remSec / 86_400L
+    val hrs = (remSec % 86_400L) / 3600L
     val mins = (remSec % 3600L) / 60L
     val secs = remSec % 60L
-    val clockFmt = SimpleDateFormat("HH:mm", Locale.ENGLISH).apply {
-        timeZone = TimeZone.getTimeZone("Asia/Yangon")
-    }
-    val openAtStr = clockFmt.format(Date(reopenAtMs))
-    val hms = if (hrs > 0) {
-        String.format(Locale.ENGLISH, "%02d:%02d:%02d", hrs, mins, secs)
-    } else {
-        String.format(Locale.ENGLISH, "%02d:%02d", mins, secs)
-    }
-    return "$openAtStr (မြန်မာစံတော်ချိန်) တွင် အလိုအလျောက် ပြန်ဖွင့်မည် • $hms ကျန်"
+    val hms = String.format(Locale.ENGLISH, "%02d:%02d:%02d", hrs, mins, secs)
+    return if (days > 0L) "${days}ရက် $hms" else hms
+}
+
+fun formatYangonReopenTime(reopenAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+    if (reopenAtMs <= 0L) return ""
+    val tz = TimeZone.getTimeZone("Asia/Yangon")
+    val dayFmt = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).apply { timeZone = tz }
+    val sameDay = dayFmt.format(Date(reopenAtMs)) == dayFmt.format(Date(nowMs))
+    val pattern = if (sameDay) "hh:mm a" else "dd MMM hh:mm a"
+    val fmt = SimpleDateFormat(pattern, Locale.ENGLISH).apply { timeZone = tz }
+    return fmt.format(Date(reopenAtMs))
+}
+
+fun formatRemainingReopenCountdown(reopenAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+    if (reopenAtMs <= 0L) return ""
+    val openAtStr = formatYangonReopenTime(reopenAtMs, nowMs)
+    val countdown = formatCountdownPill(reopenAtMs, nowMs).ifBlank { "00:00:00" }
+    return "$openAtStr (မြန်မာစံတော်ချိန်) တွင် အလိုအလျောက် ပြန်ဖွင့်မည် • $countdown ကျန်"
 }
 
 @Composable
@@ -348,51 +361,95 @@ fun PauseStatusBannerCard(
     nowMs: Long,
     modifier: Modifier = Modifier
 ) {
+    val hasCountdown = reopenAtMs > nowMs
+    val countdownText = remember(reopenAtMs, nowMs) {
+        if (hasCountdown) formatCountdownPill(reopenAtMs, nowMs) else ""
+    }
+    val openAtText = remember(reopenAtMs, nowMs) {
+        if (hasCountdown) formatYangonReopenTime(reopenAtMs, nowMs) else ""
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .widthIn(max = 600.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF3A240B)),
-        border = BorderStroke(1.dp, AmberPending),
+            .widthIn(max = 600.dp)
+            .testTag("pause_status_banner_card"),
+        colors = CardDefaults.cardColors(containerColor = PauseBannerBg),
+        border = BorderStroke(1.2.dp, AmberPending),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.PauseCircle,
-                contentDescription = null,
-                tint = AmberPending,
-                modifier = Modifier.size(30.dp)
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PauseCircle,
+                    contentDescription = null,
+                    tint = AmberPending,
+                    modifier = Modifier.size(28.dp)
                 )
-                Spacer(Modifier.height(3.dp))
-                val detail = if (reopenAtMs > nowMs) {
-                    formatRemainingReopenCountdown(reopenAtMs, nowMs)
-                } else {
-                    "Admin မှ ယာယီရပ်နားထားပါသည်။ ပြန်ဖွင့်ချိန်ကို စောင့်ဆိုင်းပါ။"
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = null,
-                        tint = ChampionshipGold,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = detail,
-                        color = ChampionshipGold,
+                        text = title,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (!hasCountdown) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Admin မှ ယာယီရပ်နားထားပါသည်။ ပြန်ဖွင့်ချိန်ကို စောင့်ဆိုင်းပါ။",
+                            color = ChampionshipGoldBright,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                if (hasCountdown) {
+                    Surface(
+                        color = PauseBannerPillBg,
+                        border = BorderStroke(1.dp, ChampionshipGoldBright.copy(alpha = 0.7f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("reopen_countdown_pill")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = "Countdown",
+                                tint = ChampionshipGoldBright,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = countdownText,
+                                color = ChampionshipGoldBright,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+            if (hasCountdown) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.24f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "ပြန်ဖွင့်မည့်အချိန်: $openAtText (မြန်မာစံတော်ချိန်) — အချိန်ပြည့်သည်နှင့် အလိုအလျောက် ပြန်ဖွင့်ပေးပါမည်",
+                        color = ChampionshipGoldBright,
                         style = MaterialTheme.typography.bodySmall,
-                        fontFamily = JetBrainsMonoFontFamily
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
                     )
                 }
             }

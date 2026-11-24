@@ -137,16 +137,16 @@ fun ApkUpdateBanner(
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "APK ဗားရှင်းအသစ် ထွက်ရှိနေပါပြီ",
+                        text = "✨ စနစ်သစ် ${update.versionLabel} အဆင်သင့်ဖြစ်ပါပြီ!",
                         color = ChampionshipGold,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${update.versionLabel} • နှိပ်၍ Update ရယူပါ",
+                        text = "1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေး + Live ရလဒ် မြန်နှုန်းမြှင့်တင်ပြီး • နှိပ်၍ ချက်ချင်း Update ရယူပါ",
                         color = Color(0xFFD7EAE1),
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -157,7 +157,7 @@ fun ApkUpdateBanner(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text(
-                    text = "Update",
+                    text = "ယခု Update",
                     color = InkDark,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
@@ -205,13 +205,17 @@ fun ApkUpdatePromptDialog(
         },
         title = {
             Text(
-                text = "လိုတရ Update အသစ် (${update.versionLabel})",
+                text = "🔥 လိုတရ ဗားရှင်းအသစ် (${update.versionLabel})",
                 fontWeight = FontWeight.Bold
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(update.releaseNotes)
+                Text(
+                    text = update.releaseNotes,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = InkDark
+                )
                 Surface(
                     color = Color(0xFFEFF6F2),
                     shape = RoundedCornerShape(10.dp),

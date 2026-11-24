@@ -108,6 +108,7 @@ fun AdminMiniGameControlTab(
     onSetCustomerDirective: (userId: String, customerName: String, directive: String) -> Unit
 ) {
     var globalDirective by remember { mutableStateOf(config.globalDirective) }
+    var stealthHouseWinPct by remember { mutableIntStateOf(config.stealthHouseWinPct.coerceIn(50, 95)) }
     var diceStdMult by remember { mutableStateOf(config.diceStandardMult.toString()) }
     var diceTripleMult by remember { mutableStateOf(config.diceTripleMult.toString()) }
     var diceExactMult by remember { mutableStateOf(config.diceExactMult.toString()) }
@@ -133,6 +134,7 @@ fun AdminMiniGameControlTab(
 
     LaunchedEffect(config) {
         globalDirective = config.globalDirective
+        stealthHouseWinPct = config.stealthHouseWinPct.coerceIn(50, 95)
         diceStdMult = config.diceStandardMult.toString()
         diceTripleMult = config.diceTripleMult.toString()
         diceExactMult = config.diceExactMult.toString()
@@ -175,7 +177,8 @@ fun AdminMiniGameControlTab(
                 diceMaxEvenPerDay = (maxEven.toLongOrNull() ?: 0L).coerceAtLeast(0L),
                 diceTotalDailyQuotas = totalQuotas.filterValues { it > 0L }.toMap(),
                 animalDailyQuotas = parsedAnimalQuotas,
-                globalDirective = globalDirective
+                globalDirective = globalDirective,
+                stealthHouseWinPct = stealthHouseWinPct.coerceIn(50, 95)
             )
         )
     }
@@ -209,6 +212,7 @@ fun AdminMiniGameControlTab(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(
                             "auto" to "ပုံမှန် (Auto)",
+                            "stealth_house" to "ဒိုင်အနိုင် (Stealth Auto)",
                             "force_win" to "အနိုင်ပေး (Win)",
                             "force_loss" to "အရှုံးပေး (Loss)"
                         ).forEach { (key, label) ->
@@ -218,6 +222,40 @@ fun AdminMiniGameControlTab(
                                 label = { Text(label) },
                                 modifier = Modifier.testTag("mini_game_global_dir_$key")
                             )
+                        }
+                    }
+
+                    Surface(
+                        color = DeepPitchSurface,
+                        border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "ဒိုင်အနိုင်နှုန်း (Stealth House Edge): $stealthHouseWinPct%",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "ကစားသမား သတိမထားမိစေဘဲ ကပ်ရှုံး/သဘာဝကျသော ရလဒ်များဖြင့် ဒိုင်အသာစီးရစေသည် (လောင်းကြေးကြီး/နိုင်ကြိမ်များလျှင် အလိုအလျောက် ထိန်းပေးသည်)",
+                                color = Color(0xFFB4C8BE),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                listOf(65, 75, 78, 85, 90).forEach { pct ->
+                                    FilterChip(
+                                        selected = stealthHouseWinPct == pct,
+                                        onClick = { stealthHouseWinPct = pct },
+                                        label = { Text("$pct%") },
+                                        modifier = Modifier.testTag("stealth_house_pct_$pct")
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -544,12 +582,19 @@ fun AdminMiniGameControlTab(
                         Text(formatKs(user.balanceKs), color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        listOf("auto" to "Auto", "force_win" to "Win", "force_loss" to "Loss").forEach { (dirKey, lbl) ->
+                        listOf(
+                            "auto" to "Auto",
+                            "stealth_house" to "ဒိုင်သာ",
+                            "force_win" to "Win",
+                            "force_loss" to "Loss"
+                        ).forEach { (dirKey, lbl) ->
                             FilterChip(
                                 selected = currentDir == dirKey,
                                 onClick = { onSetCustomerDirective(user.userId, custName, dirKey) },
-                                label = { Text(lbl) },
-                                modifier = Modifier.weight(1f)
+                                label = { Text(lbl, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("user_dir_${user.userId}_$dirKey")
                             )
                         }
                     }
@@ -607,7 +652,10 @@ fun AdminMiniGameControlTab(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("ထိုး: ${formatKs(round.stakeKs)} • ${formatTimestamp(round.createdAt)}", color = InkMuted, style = MaterialTheme.typography.labelSmall)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                TextButton(onClick = { onSetCustomerDirective(round.userId, custName, "stealth_house") }) {
+                                    Text("ဒိုင်သာ", color = Color(0xFFB45309), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                }
                                 TextButton(onClick = { onSetCustomerDirective(round.userId, custName, "force_win") }) {
                                     Text("Win ပေး", color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall)
                                 }

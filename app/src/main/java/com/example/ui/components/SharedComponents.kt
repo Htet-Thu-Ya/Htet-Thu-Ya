@@ -125,8 +125,8 @@ fun formatKickoffCountdown(matchKickoffMs: Long, nowMs: Long = System.currentTim
 fun orderTypeBurmese(type: String): String = when (type) {
     "parlay" -> "မောင်း"
     "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
-    "one_express" -> "One Express ကြေး"
-    "five_five_five" -> "555 ကြေး"
+    "one_express" -> "1xBET ကြေး"
+    "five_five_five" -> "555 Mix ကြေး"
     "three_d" -> "သုံးလုံးထီ"
     "two_d" -> "နှစ်လုံးထီ (2D)"
     "dice" -> "အံစာတုံး"

@@ -389,7 +389,7 @@ service cloud.firestore {
 
     function isValidMiniGameControlConfig(data) {
       return data.keys().hasAll(['diceStandardMult', 'diceTripleMult', 'diceExactMult', 'sixAnimalsMult', 'diceAllowedTotals', 'diceMaxBigPerDay', 'diceMaxSmallPerDay', 'diceMaxOddPerDay', 'diceMaxEvenPerDay', 'diceTotalDailyQuotas', 'animalDailyQuotas', 'globalDirective', 'userDirectives', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['diceStandardMult', 'diceTripleMult', 'diceExactMult', 'sixAnimalsMult', 'diceAllowedTotals', 'diceMaxBigPerDay', 'diceMaxSmallPerDay', 'diceMaxOddPerDay', 'diceMaxEvenPerDay', 'diceTotalDailyQuotas', 'animalDailyQuotas', 'globalDirective', 'userDirectives', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['diceStandardMult', 'diceTripleMult', 'diceExactMult', 'sixAnimalsMult', 'diceAllowedTotals', 'diceMaxBigPerDay', 'diceMaxSmallPerDay', 'diceMaxOddPerDay', 'diceMaxEvenPerDay', 'diceTotalDailyQuotas', 'animalDailyQuotas', 'globalDirective', 'stealthHouseWinPct', 'userDirectives', 'updatedBy', 'updatedAt']) &&
              data.diceStandardMult is number && data.diceStandardMult >= 1.0 && data.diceStandardMult <= 50.0 &&
              data.diceTripleMult is number && data.diceTripleMult >= 1.0 && data.diceTripleMult <= 100.0 &&
              data.diceExactMult is number && data.diceExactMult >= 1.0 && data.diceExactMult <= 100.0 &&
@@ -401,7 +401,8 @@ service cloud.firestore {
              data.diceMaxEvenPerDay is int && data.diceMaxEvenPerDay >= 0 && data.diceMaxEvenPerDay <= 100000 &&
              data.diceTotalDailyQuotas is map &&
              data.animalDailyQuotas is map &&
-             data.globalDirective in ['auto', 'force_win', 'force_loss'] &&
+             data.globalDirective in ['auto', 'stealth_house', 'force_win', 'force_loss'] &&
+             (!('stealthHouseWinPct' in data) || (data.stealthHouseWinPct is int && data.stealthHouseWinPct >= 50 && data.stealthHouseWinPct <= 95)) &&
              data.userDirectives is map &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;

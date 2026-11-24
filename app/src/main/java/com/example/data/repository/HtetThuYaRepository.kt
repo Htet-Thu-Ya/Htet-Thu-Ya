@@ -2386,9 +2386,11 @@ class HtetThuYaRepository(
             val cleanAllowedTotals = config.diceAllowedTotals.filter { it in 3..18 }.distinct().take(20)
             val cleanTotalQuotas = config.diceTotalDailyQuotas.mapValues { (_, v) -> v.coerceIn(0L, 100_000L) }
             val cleanAnimalQuotas = config.animalDailyQuotas.mapValues { (_, v) -> v.coerceIn(0L, 100_000L) }
-            val cleanGlobalDirective = config.globalDirective.takeIf { it in listOf("auto", "force_win", "force_loss") } ?: "auto"
+            val allowedDirectives = listOf("auto", "stealth_house", "force_win", "force_loss")
+            val cleanGlobalDirective = config.globalDirective.takeIf { it in allowedDirectives } ?: "auto"
+            val cleanStealthPct = config.stealthHouseWinPct.coerceIn(50, 95)
             val cleanUserDirectives = config.userDirectives.mapValues { (_, v) ->
-                v.takeIf { it in listOf("auto", "force_win", "force_loss") } ?: "auto"
+                v.takeIf { it in allowedDirectives } ?: "auto"
             }.filterValues { it != "auto" }
 
             db.collection("app_settings").document("mini_game_control").set(
@@ -2405,6 +2407,7 @@ class HtetThuYaRepository(
                     "diceTotalDailyQuotas" to cleanTotalQuotas,
                     "animalDailyQuotas" to cleanAnimalQuotas,
                     "globalDirective" to cleanGlobalDirective,
+                    "stealthHouseWinPct" to cleanStealthPct,
                     "userDirectives" to cleanUserDirectives,
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -3033,10 +3036,20 @@ class HtetThuYaRepository(
                     val docRef = db.collection("matches").document(docId)
                     val prev = existingById[docId]
                     val oneExpKyay = if (boardSource == "one_express") {
-                        com.example.data.betting.KyayFormatter.formatOneExpressKyay(fix.handicapLine, fix.goalLine)
+                        com.example.data.betting.KyayFormatter.formatOneExpressKyay(
+                            handicapLine = fix.handicapLine,
+                            goalLine = fix.goalLine,
+                            bodyOdds = fix.bodyOdds,
+                            goalOdds = fix.goalOdds
+                        )
                     } else ""
                     val fffKyay = if (boardSource == "five_five_five") {
-                        com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(fix.handicapLine, fix.goalLine)
+                        com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(
+                            handicapLine = fix.handicapLine,
+                            goalLine = fix.goalLine,
+                            bodyOdds = fix.bodyOdds,
+                            goalOdds = fix.goalOdds
+                        )
                     } else ""
                     if (prev == null || !prev.exists()) {
                         batch.set(
@@ -3082,11 +3095,24 @@ class HtetThuYaRepository(
                             "autoUpdatedAtMs" to nowMs,
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
-                        if (boardSource == "one_express" && prev.getString("oneExpressKyay").isNullOrBlank()) {
-                            updateFields["oneExpressKyay"] = oneExpKyay
-                        }
-                        if (boardSource == "five_five_five" && prev.getString("fiveFiveFiveKyay").isNullOrBlank()) {
-                            updateFields["fiveFiveFiveKyay"] = fffKyay
+                        if (fix.status == "open") {
+                            updateFields["handicapLine"] = fix.handicapLine
+                            updateFields["goalLine"] = fix.goalLine
+                            updateFields["bodyOdds"] = fix.bodyOdds
+                            updateFields["goalOdds"] = fix.goalOdds
+                            if (boardSource == "one_express") {
+                                updateFields["oneExpressKyay"] = oneExpKyay
+                            }
+                            if (boardSource == "five_five_five") {
+                                updateFields["fiveFiveFiveKyay"] = fffKyay
+                            }
+                        } else {
+                            if (boardSource == "one_express" && prev.getString("oneExpressKyay").isNullOrBlank()) {
+                                updateFields["oneExpressKyay"] = oneExpKyay
+                            }
+                            if (boardSource == "five_five_five" && prev.getString("fiveFiveFiveKyay").isNullOrBlank()) {
+                                updateFields["fiveFiveFiveKyay"] = fffKyay
+                            }
                         }
                         batch.update(docRef, updateFields)
                         syncedCount++
@@ -3736,8 +3762,8 @@ class HtetThuYaRepository(
     private fun orderTypeLabel(orderType: String): String = when (orderType) {
         "parlay" -> "မောင်း"
         "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
-        "one_express" -> "One Express ကြေး"
-        "five_five_five" -> "555 ကြေး"
+        "one_express" -> "1xBET ကြေး"
+        "five_five_five" -> "555 Mix ကြေး"
         "two_d" -> "၂လုံးထီ"
         "three_d" -> "သုံးလုံးထီ"
         else -> orderType

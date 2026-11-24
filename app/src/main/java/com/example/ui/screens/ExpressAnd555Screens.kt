@@ -127,7 +127,7 @@ fun ExpressOddsOrderScreen(
     ) -> Unit
 ) {
     val isOneExpress = boardMode == "one_express"
-    val boardName = if (isOneExpress) "One Express" else "555"
+    val boardName = if (isOneExpress) "1xBET" else "555 Mix"
     val accentColor = if (isOneExpress) BoardGreenAccent else ChampionshipGold
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -341,52 +341,60 @@ fun ExpressOddsOrderScreen(
                     }
                 }
                 is UiState.Success -> {
-                    if (filteredMatches.isEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Default.SportsSoccer, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(56.dp))
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                text = "လက်ရှိ $boardName ပွဲစဉ် မရှိသေးပါ",
-                                color = InkDark,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = "Admin မှ $boardName ပွဲစဉ်များ ထည့်သွင်း/Auto-Sync လုပ်ပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
-                                color = InkMuted,
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .widthIn(max = 620.dp),
-                            contentPadding = PaddingValues(bottom = 16.dp)
-                        ) {
-                            if (isFootballPaused) {
-                                item(key = "express_pause_banner") {
-                                    Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                        PauseStatusBannerCard(
-                                            title = if (systemGameConfig.maintenanceMode) {
-                                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                                            } else {
-                                                "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
-                                            },
-                                            reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.footballReopenAtMs,
-                                            nowMs = nowMs
-                                        )
-                                    }
-                                }
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (isFootballPaused) {
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 620.dp)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                PauseStatusBannerCard(
+                                    title = if (systemGameConfig.maintenanceMode) {
+                                        systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                                    } else {
+                                        "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
+                                    },
+                                    reopenAtMs = systemGameConfig.footballReopenAtMs,
+                                    nowMs = nowMs
+                                )
                             }
+                        }
+                        if (filteredMatches.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.SportsSoccer, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(56.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = "လက်ရှိ $boardName ပွဲစဉ် မရှိသေးပါ",
+                                    color = InkDark,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = "Admin မှ $boardName ပွဲစဉ်များ ထည့်သွင်း/Auto-Sync လုပ်ပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
+                                    color = InkMuted,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .widthIn(max = 620.dp),
+                                contentPadding = PaddingValues(bottom = 16.dp)
+                            ) {
                             item(key = "hide_bar_express_table") {
                                 Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                                     HideBarSectionHeader(
@@ -425,6 +433,7 @@ fun ExpressOddsOrderScreen(
                                 }
                             }
                         }
+                        }
                     }
                 }
             }
@@ -444,7 +453,7 @@ fun ExpressOddsOrderScreen(
     infoMatch?.let { m ->
         BoardMatchInfoDialog(
             match = m,
-            boardSourceLabel = if (isOneExpress) "One Express" else "555 Odds",
+            boardSourceLabel = if (isOneExpress) "1xBET" else "555 Mix",
             onDismiss = { infoMatch = null }
         )
     }
@@ -496,7 +505,7 @@ fun AdminExpressBoardTab(
     onDeleteMatch: (String) -> Unit
 ) {
     val isOneExpress = boardMode == "one_express"
-    val boardTitle = if (isOneExpress) "One Express ဘောလုံးပွဲကြေး" else "555 ဘောလုံးပွဲကြေး"
+    val boardTitle = if (isOneExpress) "1xBET ဘောလုံးပွဲကြေး" else "555 Mix ဘောလုံးပွဲကြေး"
     val accent = if (isOneExpress) Color(0xFF38BDF8) else ChampionshipGold
     val autoEnabled = if (isOneExpress) boardConfig.autoSyncOneExpress else boardConfig.autoSyncFiveFiveFive
     val filteredMatches = remember(matches, boardMode) {
@@ -636,7 +645,7 @@ fun AdminExpressBoardTab(
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (isOneExpress) "ယနေ့ One Express ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်" else "ယနေ့ 555 ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်",
+                                text = if (isOneExpress) "ယနေ့ 1xBET ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်" else "ယနေ့ 555 Mix ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်",
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -757,7 +766,7 @@ fun AdminExpressBoardTab(
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold)
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (isOneExpress) "နမူနာ One Express ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်" else "နမူနာ 555 ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်",
+                                text = if (isOneExpress) "နမူနာ 1xBET ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်" else "နမူနာ 555 Mix ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်",
                                 color = ChampionshipGold
                             )
                         }
@@ -780,7 +789,7 @@ fun AdminExpressBoardTab(
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = if (isOneExpress) "One Express ပွဲစဉ်သစ် ထည့်မည်" else "555 ပွဲစဉ်သစ် ထည့်မည်",
+                    text = if (isOneExpress) "1xBET ပွဲစဉ်သစ် ထည့်မည်" else "555 Mix ပွဲစဉ်သစ် ထည့်မည်",
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -789,7 +798,7 @@ fun AdminExpressBoardTab(
         // Matches List Hide Bar
         item {
             HideBarSectionHeader(
-                title = if (isOneExpress) "One Express ပွဲစဉ်များ ဇယား" else "555 ပွဲစဉ်များ ဇယား",
+                title = if (isOneExpress) "1xBET ပွဲစဉ်များ ဇယား" else "555 Mix ပွဲစဉ်များ ဇယား",
                 countBadge = "${filteredMatches.size} ပွဲ",
                 isVisible = showMatchesTable,
                 onToggle = { showMatchesTable = !showMatchesTable },

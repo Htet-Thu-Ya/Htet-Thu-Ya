@@ -150,8 +150,8 @@ fun AddMatchDialog(
         title = {
             Text(
                 when (boardMode) {
-                    "one_express" -> "One Express ပွဲစဉ်အသစ် ထည့်ရန်"
-                    "five_five_five" -> "555 ပွဲစဉ်အသစ် ထည့်ရန်"
+                    "one_express" -> "1xBET ပွဲစဉ်အသစ် ထည့်ရန်"
+                    "five_five_five" -> "555 Mix ပွဲစဉ်အသစ် ထည့်ရန်"
                     else -> "ပွဲစဉ်အသစ် ထည့်သွင်းရန်"
                 }
             )
@@ -171,7 +171,7 @@ fun AddMatchDialog(
                     OutlinedTextField(
                         value = oneExpKyay,
                         onValueChange = { oneExpKyay = it },
-                        label = { Text("One Express ကြေး Label") },
+                        label = { Text("1xBET ကြေး Label") },
                         singleLine = true
                     )
                 }
@@ -179,7 +179,7 @@ fun AddMatchDialog(
                     OutlinedTextField(
                         value = fffKyay,
                         onValueChange = { fffKyay = it },
-                        label = { Text("555 ကြေး Label") },
+                        label = { Text("555 Mix ကြေး Label") },
                         singleLine = true
                     )
                 }
@@ -311,7 +311,7 @@ fun EditMatchResultDialog(
                     OutlinedTextField(
                         value = oneExpKyay,
                         onValueChange = { oneExpKyay = it },
-                        label = { Text("One Express ကြေး Label") },
+                        label = { Text("1xBET ကြေး Label") },
                         singleLine = true
                     )
                 }
@@ -319,7 +319,7 @@ fun EditMatchResultDialog(
                     OutlinedTextField(
                         value = fffKyay,
                         onValueChange = { fffKyay = it },
-                        label = { Text("555 ကြေး Label") },
+                        label = { Text("555 Mix ကြေး Label") },
                         singleLine = true
                     )
                 }

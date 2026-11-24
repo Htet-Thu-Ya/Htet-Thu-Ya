@@ -3,14 +3,19 @@ package com.example
 import com.example.data.betting.AutoSettleDecision
 import com.example.data.betting.AutoSettleEngine
 import com.example.data.betting.KyayFormatter
+import com.example.data.betting.MiniGameEngine
 import com.example.data.model.BetOrder
+import com.example.data.model.MiniGameRound
 import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.WalletRequest
+import com.example.ui.components.formatCountdownPill
+import com.example.ui.components.formatRemainingReopenCountdown
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.random.Random
 
 class AutoSettleAndPauseTest {
 
@@ -22,8 +27,8 @@ class AutoSettleAndPauseTest {
             bodyOdds = 1.92,
             goalOdds = 1.90
         )
-        assertTrue(homeHalf.contains("1X: H-0.5 (1.92)"))
-        assertTrue(homeHalf.contains("G 2.5 (1.9)"))
+        assertTrue(homeHalf.contains("1xBET: H-0.5 (1.92)"))
+        assertTrue(homeHalf.contains("G 2.5 (1.90)"))
 
         val awayQuarter = KyayFormatter.formatOneExpressKyay(
             handicapLine = "Away -0.25",
@@ -31,7 +36,7 @@ class AutoSettleAndPauseTest {
             bodyOdds = 1.95,
             goalOdds = 1.88
         )
-        assertTrue(awayQuarter.contains("1X: A 0+50 (1.95)"))
+        assertTrue(awayQuarter.contains("1xBET: A 0+50 (1.95)"))
         assertTrue(awayQuarter.contains("G 3 (1.88)"))
     }
 
@@ -43,8 +48,22 @@ class AutoSettleAndPauseTest {
             bodyOdds = 1.92,
             goalOdds = 1.90
         )
-        assertTrue(evenLine.startsWith("555: H="))
-        assertTrue(evenLine.contains("ဂိုး 2.5/3 (1.92)"))
+        assertTrue(evenLine.startsWith("555 Mix: H="))
+        assertTrue(evenLine.contains("ဂိုး 2.5/3 (1.90)"))
+    }
+
+    @Test
+    fun kyayFormatter_convertsAmericanAndEspnLiveOddsToDecimal() {
+        assertEquals(1.91, KyayFormatter.americanOddsToDecimal(-110.0)!!, 0.01)
+        assertEquals(2.50, KyayFormatter.americanOddsToDecimal(150.0)!!, 0.01)
+        val (body, goal) = KyayFormatter.deriveRealOddsFromEspn(
+            homeSpreadOdds = -115.0,
+            awaySpreadOdds = -105.0,
+            overOdds = -108.0,
+            underOdds = -112.0
+        )
+        assertEquals(1.91, body, 0.03)
+        assertEquals(1.91, goal, 0.03)
     }
 
     @Test
@@ -192,5 +211,84 @@ class AutoSettleAndPauseTest {
 
         val receiptReq = WalletRequest(receiptImageBase64 = "base64sampledata")
         assertEquals("base64sampledata", receiptReq.receiptImageBase64)
+    }
+
+    @Test
+    fun miniGameEngine_stealthHouseAdvantageTargetsExpectedWinRateAndNearMisses() {
+        val allDice = buildList {
+            for (d1 in 1..6) for (d2 in 1..6) for (d3 in 1..6) add(Triple(d1, d2, d3))
+        }
+        fun bigPayout(d1: Int, d2: Int, d3: Int): Long {
+            val isTriple = d1 == d2 && d2 == d3
+            val sum = d1 + d2 + d3
+            return if (!isTriple && sum in 11..17) 1950L else 0L
+        }
+
+        val highStakeProb = MiniGameEngine.computeAdaptiveHouseWinProbability(
+            baseWinPct = 78,
+            stakeKs = 50_000L,
+            recentCustomerRounds = listOf(MiniGameRound(payoutKs = 2000L))
+        )
+        assertTrue(highStakeProb >= 0.90)
+
+        val rng = Random(42)
+        var houseWins = 0
+        var nearMisses = 0
+        var losses = 0
+        val trials = 400
+        repeat(trials) {
+            val (d1, d2, d3) = MiniGameEngine.selectDiceRoll(
+                allCombos = allDice,
+                quotaCombos = allDice,
+                directive = "stealth_house",
+                stealthHouseWinPct = 78,
+                betOption = "BIG",
+                exactNumber = 11,
+                stakeKs = 5_000L,
+                recentCustomerRounds = emptyList(),
+                computePayout = ::bigPayout,
+                random = rng
+            )
+            val payout = bigPayout(d1, d2, d3)
+            if (payout == 0L) {
+                houseWins++
+                losses++
+                if ((d1 + d2 + d3) in 9..10) nearMisses++
+            }
+        }
+        val houseWinRate = houseWins.toDouble() / trials.toDouble()
+        assertTrue("Expected house win rate near 78%, got $houseWinRate", houseWinRate in 0.68..0.88)
+        assertTrue("Expected noticeable near-miss losses for stealth feel", nearMisses > losses / 2)
+
+        val allAnimals = buildList {
+            for (a in 0..5) for (b in 0..5) for (c in 0..5) add(Triple(a, b, c))
+        }
+        var animalHouseWins = 0
+        repeat(trials) {
+            val r = MiniGameEngine.selectSixAnimalsRoll(
+                allCombos = allAnimals,
+                quotaCombos = allAnimals,
+                selectedAnimalIndex = 2,
+                directive = "stealth_house",
+                stealthHouseWinPct = 78,
+                stakeKs = 5_000L,
+                recentCustomerRounds = emptyList(),
+                random = rng
+            )
+            val matches = listOf(r.first, r.second, r.third).count { it == 2 }
+            if (matches == 0) animalHouseWins++
+        }
+        val animalHouseRate = animalHouseWins.toDouble() / trials.toDouble()
+        assertTrue("Expected animal house win rate near 78%, got $animalHouseRate", animalHouseRate in 0.68..0.88)
+    }
+
+    @Test
+    fun reopenCountdownFormatter_displaysClearHmsAndDays() {
+        val now = 1_700_000_000_000L
+        assertEquals("01:05:09", formatCountdownPill(now + 3_909_000L, now))
+        assertEquals("1ရက် 00:00:05", formatCountdownPill(now + 86_405_000L, now))
+        val full = formatRemainingReopenCountdown(now + 3_909_000L, now)
+        assertTrue(full.contains("မြန်မာစံတော်ချိန်"))
+        assertTrue(full.contains("01:05:09 ကျန်"))
     }
 }

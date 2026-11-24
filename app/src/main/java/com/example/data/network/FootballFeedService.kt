@@ -182,6 +182,8 @@ class FootballFeedService(
 
             var goalLine = "2.5"
             var handicapLine = "Home -0.5"
+            var derivedBodyOdds = 1.93
+            var derivedGoalOdds = 1.90
             val oddsArr = comp.optJSONArray("odds")
             if (oddsArr != null && oddsArr.length() > 0) {
                 val firstOdds = oddsArr.optJSONObject(0)
@@ -199,6 +201,18 @@ class FootballFeedService(
                     homeAbbr = homeAbbr,
                     awayAbbr = awayAbbr
                 )
+                val homeOddsObj = firstOdds?.optJSONObject("homeTeamOdds")
+                val awayOddsObj = firstOdds?.optJSONObject("awayTeamOdds")
+                val (bOdds, gOdds) = KyayFormatter.deriveRealOddsFromEspn(
+                    homeMoneyLine = homeOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN,
+                    awayMoneyLine = awayOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN,
+                    homeSpreadOdds = homeOddsObj?.optDouble("spreadOdds", Double.NaN) ?: Double.NaN,
+                    awaySpreadOdds = awayOddsObj?.optDouble("spreadOdds", Double.NaN) ?: Double.NaN,
+                    overOdds = firstOdds?.optDouble("overOdds", Double.NaN) ?: Double.NaN,
+                    underOdds = firstOdds?.optDouble("underOdds", Double.NaN) ?: Double.NaN
+                )
+                derivedBodyOdds = bOdds
+                derivedGoalOdds = gOdds
             }
 
             list.add(
@@ -213,8 +227,8 @@ class FootballFeedService(
                     matchDate = isoDate,
                     handicapLine = handicapLine.take(40),
                     goalLine = goalLine.take(20),
-                    bodyOdds = 1.92,
-                    goalOdds = 1.90,
+                    bodyOdds = derivedBodyOdds,
+                    goalOdds = derivedGoalOdds,
                     status = mappedStatus,
                     liveClock = liveClock.take(24),
                     homeScore = homeScore.coerceIn(0L, 99L),

@@ -24,3 +24,12 @@ val AmberPendingSoft = Color(0xFFFEF3C7)
 val EmeraldSoft = Color(0xFFD1FAE5)
 val SkyInfo = Color(0xFF0284C7)
 val SkyInfoSoft = Color(0xFFE0F2FE)
+
+val OneXBetNavy = Color(0xFF0A3D73)
+val OneXBetBlue = Color(0xFF14A0E8)
+val MixCharcoal = Color(0xFF141E22)
+val MixAmber = Color(0xFFD97706)
+val WhiteCardBorder = Color(0xFFE2E8F0)
+val PauseBannerBg = Color(0xFF3A240B)
+val PauseBannerPillBg = Color(0xFF54330C)
+

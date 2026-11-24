@@ -303,52 +303,60 @@ fun SportsOrderScreen(
                     }
                 }
                 is UiState.Success -> {
-                    if (filteredMatches.isEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Default.SportsSoccer, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(56.dp))
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                text = "လက်ရှိ ဖွင့်ထားသော ပွဲစဉ် မရှိသေးပါ",
-                                color = InkDark,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = "Admin မှ ပွဲစဉ်အသစ်များ ထည့်သွင်းပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
-                                color = InkMuted,
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .widthIn(max = 620.dp),
-                            contentPadding = PaddingValues(bottom = 16.dp)
-                        ) {
-                            if (isFootballPaused) {
-                                item(key = "football_pause_banner") {
-                                    Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                        PauseStatusBannerCard(
-                                            title = if (systemGameConfig.maintenanceMode) {
-                                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                                            } else {
-                                                "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
-                                            },
-                                            reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.footballReopenAtMs,
-                                            nowMs = nowMs
-                                        )
-                                    }
-                                }
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (isFootballPaused) {
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 620.dp)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                PauseStatusBannerCard(
+                                    title = if (systemGameConfig.maintenanceMode) {
+                                        systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                                    } else {
+                                        "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
+                                    },
+                                    reopenAtMs = systemGameConfig.footballReopenAtMs,
+                                    nowMs = nowMs
+                                )
                             }
+                        }
+                        if (filteredMatches.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.SportsSoccer, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(56.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = "လက်ရှိ ဖွင့်ထားသော ပွဲစဉ် မရှိသေးပါ",
+                                    color = InkDark,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = "Admin မှ ပွဲစဉ်အသစ်များ ထည့်သွင်းပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
+                                    color = InkMuted,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .widthIn(max = 620.dp),
+                                contentPadding = PaddingValues(bottom = 16.dp)
+                            ) {
                             item(key = "hide_bar_sports_table") {
                                 Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                                     HideBarSectionHeader(
@@ -386,6 +394,7 @@ fun SportsOrderScreen(
                                     }
                                 }
                             }
+                        }
                         }
                     }
                 }
@@ -485,7 +494,7 @@ fun ThreeDLotteryScreen(
                         } else {
                             "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
                         nowMs = nowMs
                     )
                 }

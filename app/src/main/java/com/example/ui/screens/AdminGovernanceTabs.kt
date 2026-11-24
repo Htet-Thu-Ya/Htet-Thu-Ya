@@ -1335,7 +1335,7 @@ fun AdminSystemSettingsTab(
                                 ) {
                                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                         Text(
-                                            "ဘောလုံးပွဲ (မောင်း/ဘော်ဒီ/One Express/555) ခေတ္တပိတ်မည်",
+                                            "ဘောလုံးပွဲ (မောင်း/ဘော်ဒီ/1xBET/555 Mix) ခေတ္တပိတ်မည်",
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold
                                         )

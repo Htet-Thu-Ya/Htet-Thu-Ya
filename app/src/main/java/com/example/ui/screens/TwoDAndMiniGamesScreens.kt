@@ -170,7 +170,7 @@ fun TwoDLotteryScreen(
                         } else {
                             "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
                         nowMs = nowMs
                     )
                 }
@@ -594,7 +594,7 @@ fun DiceGameScreen(
                         } else {
                             "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
                         nowMs = nowMs
                     )
                 }
@@ -912,7 +912,7 @@ fun SixAnimalsGameScreen(
                         } else {
                             "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = if (systemGameConfig.maintenanceMode) 0L else systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
                         nowMs = nowMs
                     )
                 }

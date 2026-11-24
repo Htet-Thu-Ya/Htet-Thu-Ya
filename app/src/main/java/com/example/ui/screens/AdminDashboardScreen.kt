@@ -435,8 +435,8 @@ fun AdminDashboardScreen(
                         AdminTabKey.SETTLEMENT -> "စာရင်းချုပ်" to "admin_tab_settlement"
                         AdminTabKey.WALLET -> "ငွေသွင်း/ထုတ် ($pendingWalletCount)" to "admin_tab_wallet"
                         AdminTabKey.BOARD -> "ပွဲစဉ် / ထီ" to "admin_tab_board"
-                        AdminTabKey.ONE_EXPRESS -> "One Express ကြေး" to "admin_tab_one_express"
-                        AdminTabKey.FIVE_FIVE_FIVE -> "555 ကြေး" to "admin_tab_five_five_five"
+                        AdminTabKey.ONE_EXPRESS -> "1xBET ကြေး" to "admin_tab_one_express"
+                        AdminTabKey.FIVE_FIVE_FIVE -> "555 Mix ကြေး" to "admin_tab_five_five_five"
                         AdminTabKey.MINI_GAMES -> "ဂိမ်းခန်းထိန်းချုပ်" to "admin_tab_mini_games"
                         AdminTabKey.CUSTOMERS -> "Customer (${users.size})" to "admin_tab_customers"
                         AdminTabKey.FINANCE -> "ဘဏ္ဍာရေး/Bank" to "admin_tab_finance"
@@ -897,7 +897,7 @@ private fun AdminOrdersTab(
                                 Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "One Express ကြေး",
+                                    "1xBET ကြေး",
                                     color = Color(0xFF38BDF8),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
@@ -933,7 +933,7 @@ private fun AdminOrdersTab(
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "555 ဘောလုံးကြေး",
+                                    "555 Mix ဘောလုံးကြေး",
                                     color = ChampionshipGold,
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,

@@ -110,6 +110,10 @@ import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatRemainingReopenCountdown
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.ChampionshipGoldBright
@@ -119,11 +123,17 @@ import com.example.ui.theme.DeepPitchSurface
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMuted
 import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.MixAmber
+import com.example.ui.theme.MixCharcoal
+import com.example.ui.theme.OneXBetBlue
+import com.example.ui.theme.OneXBetNavy
+import com.example.ui.theme.OutfitFontFamily
 import com.example.ui.theme.PearlCard
 import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmerald
 import com.example.ui.theme.PitchEmeraldDark
 import com.example.ui.theme.SkyInfo
+import com.example.ui.theme.WhiteCardBorder
 
 enum class CustomerRoute {
     PARLAY,
@@ -448,7 +458,7 @@ fun CustomerHomeScreen(
                 }
             }
 
-            if (footballPausedNow && !isMaintenance) {
+            if (footballPausedNow && (!isMaintenance || systemGameConfig.footballReopenAtMs > nowMs)) {
                 item(span = { GridItemSpan(2) }) {
                     PauseStatusBannerCard(
                         title = "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်",
@@ -458,7 +468,7 @@ fun CustomerHomeScreen(
                 }
             }
 
-            if (gamesPausedNow && !isMaintenance) {
+            if (gamesPausedNow && (!isMaintenance || systemGameConfig.gamesReopenAtMs > nowMs)) {
                 item(span = { GridItemSpan(2) }) {
                     PauseStatusBannerCard(
                         title = "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်",
@@ -605,203 +615,93 @@ fun CustomerHomeScreen(
             }
             }
 
-            // Dedicated separate boxes for One Express & 555 Football Odds
-            item(span = { GridItemSpan(2) }) {
-                val expressEnabled = !isLocked && !isMaintenance && !footballPausedNow
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .alpha(if (expressEnabled) 1f else 0.45f)
-                            .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS) }
-                            .testTag("menu_one_express"),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3B)),
-                        border = BorderStroke(1.5.dp, SkyInfo),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Bolt, contentDescription = null, tint = SkyInfo)
-                                Surface(color = SkyInfo.copy(alpha = 0.2f), shape = RoundedCornerShape(6.dp)) {
-                                    Text(
-                                        text = if (footballPausedNow) "ခေတ္တပိတ်" else "Auto ကြေး",
-                                        color = SkyInfo,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "One Express\nဘောလုံးပွဲကြေး",
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2
-                            )
-                            Text(
-                                text = if (footballPausedNow && systemGameConfig.footballReopenAtMs > nowMs) {
-                                    formatRemainingReopenCountdown(systemGameConfig.footballReopenAtMs, nowMs).substringAfter("• ")
-                                } else "ပွဲထွက်ကြေး တိုက်ရိုက်ကြည့်/လောင်းရန်",
-                                color = Color(0xFFBAE6FD),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Surface(
-                                    color = SkyInfo.copy(alpha = 0.22f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS) }
-                                        .testTag("home_one_express_single")
-                                ) {
-                                    Text(
-                                        text = "ဘော်ဒီ",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
-                                    )
-                                }
-                                Surface(
-                                    color = Color(0xFF16A34A).copy(alpha = 0.35f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS_PARLAY) }
-                                        .testTag("home_one_express_parlay")
-                                ) {
-                                    Text(
-                                        text = "မောင်း",
-                                        color = Color(0xFF86EFAC),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .alpha(if (expressEnabled) 1f else 0.45f)
-                            .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
-                            .testTag("menu_five_five_five"),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2D2106)),
-                        border = BorderStroke(1.5.dp, ChampionshipGold),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold)
-                                Surface(color = ChampionshipGold.copy(alpha = 0.22f), shape = RoundedCornerShape(6.dp)) {
-                                    Text(
-                                        text = if (footballPausedNow) "ခေတ္တပိတ်" else "555 ကြေး",
-                                        color = ChampionshipGold,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "555\nဘောလုံးပွဲကြေး",
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2
-                            )
-                            Text(
-                                text = if (footballPausedNow && systemGameConfig.footballReopenAtMs > nowMs) {
-                                    formatRemainingReopenCountdown(systemGameConfig.footballReopenAtMs, nowMs).substringAfter("• ")
-                                } else "555 ဘောလုံးကြေး သီးသန့်အကွက်",
-                                color = Color(0xFFFDE68A),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Surface(
-                                    color = ChampionshipGold.copy(alpha = 0.24f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
-                                        .testTag("home_555_single")
-                                ) {
-                                    Text(
-                                        text = "ဘော်ဒီ",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
-                                    )
-                                }
-                                Surface(
-                                    color = Color(0xFF16A34A).copy(alpha = 0.35f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE_PARLAY) }
-                                        .testTag("home_555_parlay")
-                                ) {
-                                    Text(
-                                        text = "မောင်း",
-                                        color = Color(0xFF86EFAC),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             item(span = { GridItemSpan(2) }) {
                 HideBarSectionHeader(
                     title = if (isEnglish) "Games & Services Grid" else "ပွဲစဉ်များ နှင့် ဝန်ဆောင်မှု ဇယား",
-                    countBadge = "${menuTiles.size}",
+                    countBadge = "${menuTiles.size + 2}",
                     isVisible = showGamesGrid,
                     onToggle = { showGamesGrid = !showGamesGrid },
                     testTag = "hide_bar_customer_menu_grid"
                 )
+            }
+
+            // White brand cards for 1xBET & 555 Mix positioned underneath the section bar
+            if (showGamesGrid) {
+                item(span = { GridItemSpan(2) }) {
+                    val expressEnabled = !isLocked && !isMaintenance && !footballPausedNow
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(86.dp)
+                                .alpha(if (expressEnabled) 1f else 0.45f)
+                                .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS) }
+                                .testTag("menu_one_express"),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = BorderStroke(1.dp, WhiteCardBorder),
+                            shape = RoundedCornerShape(16.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = buildAnnotatedString {
+                                        withStyle(SpanStyle(color = OneXBetNavy, fontWeight = FontWeight.Bold)) {
+                                            append("1x")
+                                        }
+                                        withStyle(SpanStyle(color = OneXBetBlue, fontWeight = FontWeight.Bold)) {
+                                            append("BET")
+                                        }
+                                    },
+                                    fontFamily = OutfitFontFamily,
+                                    fontSize = 28.sp,
+                                    letterSpacing = 0.5.sp,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(86.dp)
+                                .alpha(if (expressEnabled) 1f else 0.45f)
+                                .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
+                                .testTag("menu_five_five_five"),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = BorderStroke(1.dp, WhiteCardBorder),
+                            shape = RoundedCornerShape(16.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = buildAnnotatedString {
+                                        withStyle(SpanStyle(color = MixCharcoal, fontWeight = FontWeight.Bold)) {
+                                            append("555 ")
+                                        }
+                                        withStyle(SpanStyle(color = MixAmber, fontWeight = FontWeight.Bold)) {
+                                            append("Mix")
+                                        }
+                                    },
+                                    fontFamily = OutfitFontFamily,
+                                    fontSize = 26.sp,
+                                    letterSpacing = 0.4.sp,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // Menu Tiles (Sports, 2D, 3D, Mini Games, History, Wallet, Results, Settings)

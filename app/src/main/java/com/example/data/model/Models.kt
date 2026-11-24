@@ -502,8 +502,9 @@ data class MiniGameControlConfig(
     val diceMaxEvenPerDay: Long = 0L,
     val diceTotalDailyQuotas: Map<String, Long> = emptyMap(),
     val animalDailyQuotas: Map<String, Long> = emptyMap(),
-    val globalDirective: String = "auto", // "auto", "force_win", "force_loss"
-    val userDirectives: Map<String, String> = emptyMap(), // userId -> "auto" | "force_win" | "force_loss"
+    val globalDirective: String = "auto", // "auto", "stealth_house", "force_win", "force_loss"
+    val stealthHouseWinPct: Int = 78,
+    val userDirectives: Map<String, String> = emptyMap(), // userId -> "auto" | "stealth_house" | "force_win" | "force_loss"
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
