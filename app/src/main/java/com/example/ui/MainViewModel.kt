@@ -43,6 +43,7 @@ import com.example.data.model.WalletRequest
 import com.example.data.network.FootballFeedService
 import com.example.data.notifications.ChatNotificationHelper
 import com.example.data.repository.HtetThuYaRepository
+import com.example.data.util.MyanmarTimeUtil
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -518,6 +519,19 @@ class MainViewModel(
             }
         }
 
+        // Periodic Admin background live-result closing/update & auto-settle loop
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(180_000L)
+                if (isAdmin.value && currentAdminPermissions.value.canManageBoard && boardConfig.value.autoSyncLiveResults) {
+                    repository.syncLiveMatchResults(feedService)
+                    if (bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
+                        repository.autoSettleFinishedOrders(bettingConfig.value)
+                    }
+                }
+            }
+        }
+
         // Chatbox local notification watchers
         if (appContext != null) {
             ChatNotificationHelper.ensureChannel(appContext)
@@ -796,6 +810,30 @@ class MainViewModel(
             emitMessage("လောင်းကြေးသည် ${sys.minStakeKs} Ks မှ ${sys.maxStakeKs} Ks အတွင်း ဖြစ်ရပါမည်")
             return
         }
+        var effectiveKickoffMs = matchKickoffMs
+        var effectiveScanAtMs = scanAtMs
+        if (isFootballOrder && matchIds.isNotEmpty()) {
+            val loadedMatches = (matches.value as? UiState.Success)?.data.orEmpty().associateBy { it.id }
+            for (mId in matchIds.distinct()) {
+                val m = loadedMatches[mId]
+                if (m != null && !MyanmarTimeUtil.isMatchBettable(m, nowMs)) {
+                    emitMessage("${m.homeTeam} vs ${m.awayTeam} ပွဲစတင်ပြီး ဖြစ်သဖြင့် လောင်း၍မရပါ")
+                    return
+                }
+            }
+            if (effectiveKickoffMs <= 0L) {
+                val computed = matchIds.mapNotNull { loadedMatches[it] }
+                    .map { MyanmarTimeUtil.resolveMatchKickoffEpochMs(it, nowMs) }
+                    .filter { it > 0L }
+                    .minOrNull() ?: 0L
+                if (computed > 0L) {
+                    effectiveKickoffMs = computed
+                    if (effectiveScanAtMs <= 0L) {
+                        effectiveScanAtMs = computed + (135L * 60_000L)
+                    }
+                }
+            }
+        }
         val autoAcc = bettingConfig.value.autoAcceptOrders
         val successMsg = if (autoAcc) {
             "အော်ဒါတင်ပြီး အလိုအလျောက် လက်ခံအတည်ပြုပြီးပါပြီ"
@@ -814,8 +852,8 @@ class MainViewModel(
                 multiplier = multiplier,
                 pickKeys = pickKeys,
                 autoAccept = autoAcc,
-                matchKickoffMs = matchKickoffMs,
-                scanAtMs = scanAtMs,
+                matchKickoffMs = effectiveKickoffMs,
+                scanAtMs = effectiveScanAtMs,
                 matchKickoffText = matchKickoffText
             )
             if (res.isSuccess) onSuccess()

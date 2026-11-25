@@ -65,6 +65,7 @@ import coil.compose.SubcomposeAsyncImage
 import com.example.R
 import com.example.data.model.BetOrder
 import com.example.data.model.BrandingConfig
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.theme.CinzelFontFamily
 import com.example.ui.theme.PadaukFontFamily
 import com.example.ui.theme.AdminCrimson
@@ -95,17 +96,9 @@ fun formatKs(amount: Long): String {
     return "${formatter.format(amount)} Ks"
 }
 
-fun formatTimestamp(ts: Timestamp?): String {
-    if (ts == null) return "Just now"
-    val fmt = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault())
-    return fmt.format(ts.toDate())
-}
+fun formatTimestamp(ts: Timestamp?): String = MyanmarTimeUtil.formatTimestamp(ts)
 
-fun formatEpochDateTime(epochMs: Long): String {
-    if (epochMs <= 0L) return "-"
-    val fmt = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault())
-    return fmt.format(Date(epochMs))
-}
+fun formatEpochDateTime(epochMs: Long): String = MyanmarTimeUtil.formatEpochDateTime(epochMs)
 
 fun formatKickoffCountdown(matchKickoffMs: Long, nowMs: Long = System.currentTimeMillis()): String {
     if (matchKickoffMs <= 0L) return ""

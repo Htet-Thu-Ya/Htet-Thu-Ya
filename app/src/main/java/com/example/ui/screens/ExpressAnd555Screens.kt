@@ -75,17 +75,18 @@ import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.network.FootballFeedService
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.BoardGreenAccent
 import com.example.ui.components.BoardMatchInfoDialog
 import com.example.ui.components.BoardTopBarBg
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.LeagueHideBarHeader
 import com.example.ui.components.MatchPick
 import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.ScreenshotMatchRowCard
 import com.example.ui.components.SportsBetBottomBar
 import com.example.ui.components.SportsLeagueFilterDialog
-import com.example.ui.components.SportsLeagueHeaderRow
 import com.example.ui.components.SportsModeSwitchStrip
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.TeamLogoAvatar
@@ -145,13 +146,17 @@ fun ExpressOddsOrderScreen(
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showBoardTable by remember { mutableStateOf(true) }
+    val expandedLeagues = remember(boardMode) { mutableStateMapOf<String, Boolean>() }
 
     val isFootballPaused = systemGameConfig.maintenanceMode || systemGameConfig.isFootballPausedNow(nowMs)
+    val timeBucket = nowMs / 10_000L
 
-    val openMatches = remember(matchesState, boardMode, boardConfig.allowedLeagues) {
+    val openMatches = remember(matchesState, boardMode, boardConfig.allowedLeagues, timeBucket) {
         val allOpen = when (matchesState) {
             is UiState.Success -> matchesState.data.filter {
-                it.status == "open" && it.visibility == "public" && it.boardSource == boardMode
+                it.boardSource == boardMode &&
+                    it.visibility == "public" &&
+                    MyanmarTimeUtil.isMatchBettable(it, nowMs)
             }
             else -> emptyList()
         }
@@ -160,6 +165,12 @@ fun ExpressOddsOrderScreen(
         else allOpen.filter { m ->
             allowed.any { lg -> m.league.equals(lg, ignoreCase = true) || m.league.contains(lg, ignoreCase = true) }
         }
+    }
+
+    LaunchedEffect(openMatches) {
+        val validIds = openMatches.map { it.id }.toSet()
+        val staleKeys = selectedPicks.keys.filter { it !in validIds }
+        staleKeys.forEach { selectedPicks.remove(it) }
     }
 
     val availableLeagues = remember(openMatches) {
@@ -194,11 +205,13 @@ fun ExpressOddsOrderScreen(
     val scheduledScanAtMs = remember(earliestKickoffMs) {
         if (earliestKickoffMs > 0L) earliestKickoffMs + (135L * 60_000L) else 0L
     }
+    val hasExpiredPick = earliestKickoffMs in 1L..nowMs
     val minSelections = if (isParlay) 2 else 1
     val minAllowedStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxAllowedStake = systemGameConfig.maxStakeKs.coerceAtLeast(minAllowedStake)
     val canSubmit = !busy &&
         !isFootballPaused &&
+        !hasExpiredPick &&
         selectedPicks.size >= minSelections &&
         parsedStake in minAllowedStake..maxAllowedStake &&
         parsedStake <= balanceKs
@@ -297,6 +310,7 @@ fun ExpressOddsOrderScreen(
                 busy = busy,
                 stakeTestTag = "express_${boardMode}_stake_input",
                 submitTestTag = "submit_${boardMode}_order_button",
+                nowMs = nowMs,
                 onSubmit = {
                     val ordered = selectedPicks.values.toList()
                     val pickedMatches = openMatches.filter { it.id in selectedPicks.keys }
@@ -396,7 +410,10 @@ fun ExpressOddsOrderScreen(
                                 contentPadding = PaddingValues(bottom = 16.dp)
                             ) {
                             item(key = "hide_bar_express_table") {
-                                Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     HideBarSectionHeader(
                                         title = if (isParlay) "$boardName မောင်း ပွဲစဉ်ဇယား" else "$boardName ပွဲစဉ်ဇယား",
                                         countBadge = "${filteredMatches.size} ပွဲ",
@@ -404,31 +421,73 @@ fun ExpressOddsOrderScreen(
                                         onToggle = { showBoardTable = !showBoardTable },
                                         testTag = "hide_bar_express_${boardMode}_list"
                                     )
+                                    if (showBoardTable) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "မြန်မာစံတော်ချိန် (MMT) • အာရှကြေး",
+                                                color = InkMuted,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                TextButton(
+                                                    onClick = {
+                                                        groupedByLeague.keys.forEach { expandedLeagues[it] = true }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("အားလုံးဖွင့်", color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                }
+                                                TextButton(
+                                                    onClick = {
+                                                        groupedByLeague.keys.forEach { expandedLeagues[it] = false }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("အားလုံးဝှက်", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             if (showBoardTable) {
+                                val singleLeagueMode = groupedByLeague.size == 1 || selectedLeagueFilter != null
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
+                                    val isExpanded = expandedLeagues[leagueName] ?: singleLeagueMode
                                     item(key = "express_league_hdr_$leagueName") {
-                                        SportsLeagueHeaderRow(leagueName = leagueName)
+                                        LeagueHideBarHeader(
+                                            leagueName = leagueName,
+                                            matchCount = leagueMatches.size,
+                                            isExpanded = isExpanded,
+                                            onToggle = { expandedLeagues[leagueName] = !isExpanded }
+                                        )
                                     }
 
-                                    items(leagueMatches, key = { it.id }) { match ->
-                                        val currentPick = selectedPicks[match.id]
-                                        ScreenshotMatchRowCard(
-                                            match = match,
-                                            selectedPickKey = currentPick?.pickKey,
-                                            onShowInfo = { infoMatch = match },
-                                            onSelect = { label, odds, pickKey ->
-                                                if (!isFootballPaused) {
-                                                    if (currentPick?.pickKey == pickKey) {
-                                                        selectedPicks.remove(match.id)
-                                                    } else {
-                                                        if (!isParlay) selectedPicks.clear()
-                                                        selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
+                                    if (isExpanded) {
+                                        items(leagueMatches, key = { it.id }) { match ->
+                                            val currentPick = selectedPicks[match.id]
+                                            ScreenshotMatchRowCard(
+                                                match = match,
+                                                selectedPickKey = currentPick?.pickKey,
+                                                onShowInfo = { infoMatch = match },
+                                                nowMs = nowMs,
+                                                onSelect = { label, odds, pickKey ->
+                                                    if (!isFootballPaused && MyanmarTimeUtil.isMatchBettable(match, nowMs)) {
+                                                        if (currentPick?.pickKey == pickKey) {
+                                                            selectedPicks.remove(match.id)
+                                                        } else {
+                                                            if (!isParlay) selectedPicks.clear()
+                                                            selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
+                                                        }
                                                     }
                                                 }
-                                            }
-                                        )
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -514,6 +573,17 @@ fun AdminExpressBoardTab(
 
     var showAutoSyncCard by remember(boardMode) { mutableStateOf(true) }
     var showMatchesTable by remember(boardMode) { mutableStateOf(true) }
+    val adminExpandedLeagues = remember(boardMode) { mutableStateMapOf<String, Boolean>() }
+    var adminNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            adminNowMs = System.currentTimeMillis()
+        }
+    }
+    val groupedAdminMatches = remember(filteredMatches) {
+        filteredMatches.groupBy { it.league.ifBlank { "Football" } }
+    }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var deleteConfirmMatch by remember { mutableStateOf<SportMatch?>(null) }
@@ -819,86 +889,142 @@ fun AdminExpressBoardTab(
                     )
                 }
             } else {
-                items(filteredMatches, key = { it.id }) { m ->
-                    val kyay = if (isOneExpress) {
-                        m.oneExpressKyay.ifBlank { KyayFormatter.formatOneExpressKyay(m.handicapLine, m.goalLine) }
-                    } else {
-                        m.fiveFiveFiveKyay.ifBlank { KyayFormatter.formatFiveFiveFiveKyay(m.handicapLine, m.goalLine) }
-                    }
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { editingMatch = m },
-                        colors = CardDefaults.cardColors(containerColor = PearlCard),
-                        shape = RoundedCornerShape(14.dp)
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${m.league} • ${m.kickoffLabel}",
-                                    color = InkMuted,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                StatusBadge(status = m.status)
+                        Text(
+                            text = "ဖလား/လိဂ် (${groupedAdminMatches.size}) • MMT",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = {
+                                groupedAdminMatches.keys.forEach { adminExpandedLeagues[it] = true }
+                            }) {
+                                Text("အားလုံးဖွင့်", color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
-                            Spacer(Modifier.height(6.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                TeamLogoAvatar(logoUrl = m.homeLogoUrl, teamName = m.homeTeam, size = 22.dp)
-                                Text(
-                                    text = "${m.homeTeam} vs ${m.awayTeam} (${m.homeScore}-${m.awayScore}${if (m.liveClock.isNotBlank()) " ${m.liveClock}" else ""})",
-                                    color = InkDark,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                TeamLogoAvatar(logoUrl = m.awayLogoUrl, teamName = m.awayTeam, size = 22.dp)
+                            TextButton(onClick = {
+                                groupedAdminMatches.keys.forEach { adminExpandedLeagues[it] = false }
+                            }) {
+                                Text("အားလုံးဝှက်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelSmall)
                             }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = kyay,
-                                color = PitchEmeraldDark,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "Body: ${m.handicapLine} (${m.bodyOdds}x) • Goal: ${m.goalLine} (${m.goalOdds}x)" +
-                                    if (m.autoUpdatedAtMs > 0L) " • Update: ${formatEpochDateTime(m.autoUpdatedAtMs)}" else "",
-                                color = InkMuted,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
+                        }
+                    }
+                }
+                val defaultExpand = groupedAdminMatches.size <= 3
+                groupedAdminMatches.forEach { (leagueName, leagueMatches) ->
+                    val isExpanded = adminExpandedLeagues[leagueName] ?: defaultExpand
+                    item(key = "admin_exp_league_$leagueName") {
+                        LeagueHideBarHeader(
+                            leagueName = leagueName,
+                            matchCount = leagueMatches.size,
+                            isExpanded = isExpanded,
+                            onToggle = { adminExpandedLeagues[leagueName] = !isExpanded }
+                        )
+                    }
+                    if (isExpanded) {
+                        items(leagueMatches, key = { it.id }) { m ->
+                            val kyay = if (isOneExpress) {
+                                m.oneExpressKyay.ifBlank { KyayFormatter.formatOneExpressKyay(m.handicapLine, m.goalLine) }
+                            } else {
+                                m.fiveFiveFiveKyay.ifBlank { KyayFormatter.formatFiveFiveFiveKyay(m.handicapLine, m.goalLine) }
+                            }
+                            val resolvedKickoff = MyanmarTimeUtil.resolveMatchKickoffEpochMs(m, adminNowMs)
+                            val isExpiredOpen = m.status == "open" && resolvedKickoff in 1L..adminNowMs
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { editingMatch = m },
+                                colors = CardDefaults.cardColors(containerColor = PearlCard),
+                                shape = RoundedCornerShape(14.dp)
                             ) {
-                                OutlinedButton(
-                                    onClick = { editingMatch = m },
-                                    modifier = Modifier.testTag("edit_express_match_${m.id}")
-                                ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("ပြုပြင် / ရလဒ်ထည့်")
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                IconButton(
-                                    onClick = { deleteConfirmMatch = m },
-                                    modifier = Modifier.testTag("delete_express_match_${m.id}")
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = Color(0xFFB91C1C))
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${m.league} • ${m.kickoffLabel} (MMT)",
+                                            color = InkMuted,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        StatusBadge(status = m.status)
+                                    }
+                                    if (isExpiredOpen) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Surface(
+                                            color = Color(0xFFFEE2E2),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "အချိန်ကျော်/ပိတ်သင့် (MMT)",
+                                                color = Color(0xFFB91C1C),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        TeamLogoAvatar(logoUrl = m.homeLogoUrl, teamName = m.homeTeam, size = 22.dp)
+                                        Text(
+                                            text = "${m.homeTeam} vs ${m.awayTeam} (${m.homeScore}-${m.awayScore}${if (m.liveClock.isNotBlank()) " ${m.liveClock}" else ""})",
+                                            color = InkDark,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        TeamLogoAvatar(logoUrl = m.awayLogoUrl, teamName = m.awayTeam, size = 22.dp)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = kyay,
+                                        color = PitchEmeraldDark,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Text(
+                                        text = "Body: ${m.handicapLine} (${m.bodyOdds}x) • Goal: ${m.goalLine} (${m.goalOdds}x)" +
+                                            if (m.autoUpdatedAtMs > 0L) " • Update (MMT): ${formatEpochDateTime(m.autoUpdatedAtMs)}" else "",
+                                        color = InkMuted,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { editingMatch = m },
+                                            modifier = Modifier.testTag("edit_express_match_${m.id}")
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("ပြုပြင် / ရလဒ်ထည့်")
+                                        }
+                                        Spacer(Modifier.width(6.dp))
+                                        IconButton(
+                                            onClick = { deleteConfirmMatch = m },
+                                            modifier = Modifier.testTag("delete_express_match_${m.id}")
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = Color(0xFFB91C1C))
+                                        }
+                                    }
                                 }
                             }
                         }

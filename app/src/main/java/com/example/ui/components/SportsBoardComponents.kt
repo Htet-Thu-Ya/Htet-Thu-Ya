@@ -21,11 +21,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.betting.KyayFormatter
 import com.example.data.model.SportMatch
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMuted
@@ -198,12 +205,125 @@ fun SportsLeagueHeaderRow(leagueName: String) {
 }
 
 @Composable
+fun LeagueHideBarHeader(
+    leagueName: String,
+    matchCount: Int,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val low = leagueName.lowercase(Locale.US)
+    val isCup = low.contains("champions") || low.contains("cup") || low.contains("uefa") || low.contains("afc")
+    val isShort = low.contains("short") || low.contains("student") || low.contains("fifa") || low.contains("4x4") || low.contains("3x3") || low.contains("5x5")
+    val badgeBg = when {
+        isCup -> Color(0xFFFEF3C7)
+        isShort -> Color(0xFFFEE2E2)
+        else -> Color(0xFFDCFCE7)
+    }
+    val badgeTint = when {
+        isCup -> Color(0xFFB45309)
+        isShort -> Color(0xFFB91C1C)
+        else -> PitchEmeraldDark
+    }
+    val safeTag = remember(leagueName) {
+        leagueName.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "_").trim('_').take(32)
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onToggle)
+            .testTag("league_hide_bar_$safeTag"),
+        color = Color.White,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isExpanded) BoardGreenAccent.copy(alpha = 0.65f) else BoardBorderGray
+        ),
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(badgeBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = when {
+                            isCup -> Icons.Default.EmojiEvents
+                            isShort -> Icons.Default.SportsSoccer
+                            else -> Icons.Default.Public
+                        },
+                        contentDescription = null,
+                        tint = badgeTint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "$leagueName ($matchCount)",
+                    color = InkDark,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                color = if (isExpanded) BoardGreenAccent.copy(alpha = 0.14f) else Color(0xFFF3F4F6),
+                shape = RoundedCornerShape(999.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isExpanded) "ဝှက်မည်" else "ပြမည်",
+                        color = if (isExpanded) PitchEmeraldDark else InkMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Hide league matches" else "Show league matches",
+                        tint = if (isExpanded) PitchEmeraldDark else InkMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun ScreenshotMatchRowCard(
     match: SportMatch,
     selectedPickKey: String?,
     onShowInfo: () -> Unit,
-    onSelect: (String, Double, String) -> Unit
+    onSelect: (String, Double, String) -> Unit,
+    nowMs: Long = System.currentTimeMillis()
 ) {
+    val bettable = remember(match.id, match.status, match.liveClock, match.kickoffLabel, match.kickoffEpochMs, nowMs / 10_000L) {
+        MyanmarTimeUtil.isMatchBettable(match, nowMs)
+    }
     val handicapInfo = remember(match.id, match.handicapLine, match.homeTeam, match.awayTeam) {
         KyayFormatter.formatHandicap(match)
     }
@@ -224,12 +344,13 @@ fun ScreenshotMatchRowCard(
     val overSelected = selectedPickKey == "over"
     val underSelected = selectedPickKey == "under"
 
-    val kickoffDisplay = remember(match.kickoffLabel, match.liveClock, match.status, match.homeScore, match.awayScore) {
+    val kickoffDisplay = remember(match.kickoffLabel, match.liveClock, match.status, match.homeScore, match.awayScore, bettable) {
         val base = "ပွဲချိန် : ${match.kickoffLabel}"
         when {
             match.liveClock.isNotBlank() -> "$base • ${match.homeScore}-${match.awayScore} (${match.liveClock})"
-            match.status == "finished" -> "$base •FT ${match.homeScore}-${match.awayScore}"
-            else -> base
+            match.status == "finished" -> "$base • FT ${match.homeScore}-${match.awayScore}"
+            !bettable -> "$base (ပိတ်ပြီး)"
+            else -> "$base (MMT)"
         }
     }
 
@@ -241,7 +362,7 @@ fun ScreenshotMatchRowCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(BoardHeaderDark)
+                .background(if (bettable) BoardHeaderDark else Color(0xFF6B3A3A))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -285,8 +406,8 @@ fun ScreenshotMatchRowCard(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(if (homeSelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(homePick, match.bodyOdds, "home") }
+                    .background(if (homeSelected) BoardCellSelectedBg else if (bettable) BoardCellDefaultBg else Color(0xFFF3F4F6))
+                    .clickable(enabled = bettable) { onSelect(homePick, match.bodyOdds, "home") }
                     .padding(horizontal = 8.dp, vertical = 10.dp)
                     .testTag("match_home_${match.id}"),
                 verticalAlignment = Alignment.CenterVertically,
@@ -324,8 +445,8 @@ fun ScreenshotMatchRowCard(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(if (awaySelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(awayPick, match.bodyOdds, "away") }
+                    .background(if (awaySelected) BoardCellSelectedBg else if (bettable) BoardCellDefaultBg else Color(0xFFF3F4F6))
+                    .clickable(enabled = bettable) { onSelect(awayPick, match.bodyOdds, "away") }
                     .padding(horizontal = 8.dp, vertical = 10.dp)
                     .testTag("match_away_${match.id}"),
                 verticalAlignment = Alignment.CenterVertically,
@@ -371,8 +492,8 @@ fun ScreenshotMatchRowCard(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(if (overSelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(overPick, match.goalOdds, "over") }
+                    .background(if (overSelected) BoardCellSelectedBg else if (bettable) BoardCellDefaultBg else Color(0xFFF3F4F6))
+                    .clickable(enabled = bettable) { onSelect(overPick, match.goalOdds, "over") }
                     .testTag("match_over_${match.id}"),
                 contentAlignment = Alignment.Center
             ) {
@@ -411,8 +532,8 @@ fun ScreenshotMatchRowCard(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(if (underSelected) BoardCellSelectedBg else BoardCellDefaultBg)
-                    .clickable { onSelect(underPick, match.goalOdds, "under") }
+                    .background(if (underSelected) BoardCellSelectedBg else if (bettable) BoardCellDefaultBg else Color(0xFFF3F4F6))
+                    .clickable(enabled = bettable) { onSelect(underPick, match.goalOdds, "under") }
                     .testTag("match_under_${match.id}"),
                 contentAlignment = Alignment.Center
             ) {
@@ -464,7 +585,8 @@ fun SportsBetBottomBar(
     busy: Boolean,
     onSubmit: () -> Unit,
     stakeTestTag: String = "sports_stake_input",
-    submitTestTag: String = "submit_sports_order_button"
+    submitTestTag: String = "submit_sports_order_button",
+    nowMs: Long = System.currentTimeMillis()
 ) {
     Surface(
         color = BoardTopBarBg,
@@ -501,10 +623,16 @@ fun SportsBetBottomBar(
                 )
             }
             if (earliestKickoffMs > 0L) {
+                val expired = nowMs >= earliestKickoffMs
                 Text(
-                    text = "${formatKickoffCountdown(earliestKickoffMs)} • စကန်ချိန်: ${formatEpochDateTime(scheduledScanAtMs)}",
-                    color = Color(0xFF93C5FD),
+                    text = if (expired) {
+                        "ပွဲစတင်ပြီးဖြစ်၍ လောင်းကြေးတင်၍မရပါ"
+                    } else {
+                        "${formatKickoffCountdown(earliestKickoffMs, nowMs)} • စကန်ချိန် (MMT): ${formatEpochDateTime(scheduledScanAtMs)}"
+                    },
+                    color = if (expired) Color(0xFFFCA5A5) else Color(0xFF93C5FD),
                     style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (expired) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -680,10 +808,16 @@ fun BoardMatchInfoDialog(
         title = { Text("${match.homeTeam} vs ${match.awayTeam}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("လိဂ်: ${match.league} • ${match.kickoffLabel}", fontWeight = FontWeight.SemiBold)
+                Text("လိဂ်: ${match.league} • ${match.kickoffLabel} (MMT)", fontWeight = FontWeight.SemiBold)
                 if (!boardSourceLabel.isNullOrBlank()) {
                     Text("စနစ်: $boardSourceLabel • လိုတရ APK ကြေး", color = InkMuted, style = MaterialTheme.typography.bodySmall)
                 }
+                Text(
+                    "အာရှကြေး: ${KyayFormatter.formatAsianMarketTag(match.handicapLine, match.goalLine)}",
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = Color(0xFF047857),
+                    style = MaterialTheme.typography.bodySmall
+                )
                 Text("ဘော်ဒီကြေး: ${hInfo.summaryText}", color = PitchEmeraldDark)
                 Text(gInfo, color = Color(0xFF92400E))
                 if (sourceKyay.isNotBlank()) {

@@ -99,6 +99,7 @@
         "visibility": { "type": "string", "enum": ["public", "hidden"] },
         "externalId": { "type": "string" },
         "matchDate": { "type": "string" },
+        "kickoffEpochMs": { "type": "integer" },
         "liveClock": { "type": "string" },
         "boardSource": { "type": "string", "enum": ["standard", "one_express", "five_five_five"] },
         "oneExpressKyay": { "type": "string" },

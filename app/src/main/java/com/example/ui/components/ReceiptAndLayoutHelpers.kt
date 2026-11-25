@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.SportMatch
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.theme.AmberPending
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.ChampionshipGoldBright
@@ -457,44 +458,7 @@ fun PauseStatusBannerCard(
     }
 }
 
-fun parseMatchKickoffEpochMs(match: SportMatch): Long {
-    val label = match.kickoffLabel.trim()
-    val dateStr = match.matchDate.trim()
-    val timeMatch = Regex("""(\d{1,2}):(\d{2})(?:\s*(AM|PM))?""", RegexOption.IGNORE_CASE).find(label)
-        ?: return 0L
-    var hour = timeMatch.groupValues[1].toIntOrNull() ?: return 0L
-    val minute = timeMatch.groupValues[2].toIntOrNull() ?: 0
-    val amPm = timeMatch.groupValues[3].uppercase()
-    if (amPm == "PM" && hour < 12) hour += 12
-    else if (amPm == "AM" && hour == 12) hour = 0
-
-    val cal = java.util.Calendar.getInstance()
-    val fullDateMatch = Regex("""(\d{4})-(\d{2})-(\d{2})""").find(dateStr)
-        ?: Regex("""(\d{4})-(\d{2})-(\d{2})""").find(label)
-    if (fullDateMatch != null) {
-        val y = fullDateMatch.groupValues[1].toInt()
-        val m = fullDateMatch.groupValues[2].toInt() - 1
-        val d = fullDateMatch.groupValues[3].toInt()
-        cal.set(y, m, d, hour, minute, 0)
-    } else {
-        val dmyMatch = Regex("""(\d{1,2})-(\d{1,2})-(\d{4})""").find(label)
-        if (dmyMatch != null) {
-            val d = dmyMatch.groupValues[1].toInt()
-            val m = dmyMatch.groupValues[2].toInt() - 1
-            val y = dmyMatch.groupValues[3].toInt()
-            cal.set(y, m, d, hour, minute, 0)
-        } else {
-            if (label.contains("tomorrow", ignoreCase = true) || label.contains("မနက်ဖြန်")) {
-                cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
-            }
-            cal.set(java.util.Calendar.HOUR_OF_DAY, hour)
-            cal.set(java.util.Calendar.MINUTE, minute)
-            cal.set(java.util.Calendar.SECOND, 0)
-        }
-    }
-    cal.set(java.util.Calendar.MILLISECOND, 0)
-    return cal.timeInMillis
-}
+fun parseMatchKickoffEpochMs(match: SportMatch): Long = MyanmarTimeUtil.resolveMatchKickoffEpochMs(match)
 
 fun buildOrderKickoffSummaryText(pickedMatches: List<SportMatch>): String {
     if (pickedMatches.isEmpty()) return ""

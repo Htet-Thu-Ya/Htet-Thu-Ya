@@ -431,4 +431,121 @@ class AutoSettleAndPauseTest {
         assertTrue(decision is AutoSettleDecision.Win)
         assertEquals(19_000L, (decision as AutoSettleDecision.Win).grossPayoutKs)
     }
+
+    @Test
+    fun myanmarTimeUtil_resolvesKickoffEpochAndBettabilityInYangonTimezone() {
+        val cal = java.util.Calendar.getInstance(com.example.data.util.MyanmarTimeUtil.YANGON_TZ).apply {
+            set(2026, java.util.Calendar.NOVEMBER, 25, 2, 30, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val expectedNov25 = cal.timeInMillis
+
+        val crossMidnightMatch = SportMatch(
+            id = "ucl_1",
+            kickoffLabel = "25 Nov 02:30 AM",
+            matchDate = "2026-11-24",
+            status = "open"
+        )
+        val resolvedMs = com.example.data.util.MyanmarTimeUtil.resolveMatchKickoffEpochMs(
+            crossMidnightMatch,
+            expectedNov25 - 7_200_000L
+        )
+        assertEquals(expectedNov25, resolvedMs)
+        assertEquals(expectedNov25 + 135L * 60_000L, resolvedMs + 135L * 60_000L)
+
+        // Open before kickoff -> bettable; at or after kickoff -> not bettable
+        assertTrue(com.example.data.util.MyanmarTimeUtil.isMatchBettable(crossMidnightMatch, expectedNov25 - 60_000L))
+        assertFalse(com.example.data.util.MyanmarTimeUtil.isMatchBettable(crossMidnightMatch, expectedNov25))
+        assertFalse(com.example.data.util.MyanmarTimeUtil.isMatchBettable(crossMidnightMatch, expectedNov25 + 60_000L))
+        assertFalse(
+            com.example.data.util.MyanmarTimeUtil.isMatchBettable(
+                crossMidnightMatch.copy(status = "closed"),
+                expectedNov25 - 60_000L
+            )
+        )
+        assertFalse(
+            com.example.data.util.MyanmarTimeUtil.isMatchBettable(
+                crossMidnightMatch.copy(liveClock = "12'"),
+                expectedNov25 - 60_000L
+            )
+        )
+
+        // Dec -> Jan year rollover
+        val janCal = java.util.Calendar.getInstance(com.example.data.util.MyanmarTimeUtil.YANGON_TZ).apply {
+            set(2027, java.util.Calendar.JANUARY, 1, 2, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val janMatch = SportMatch(
+            id = "ny_1",
+            kickoffLabel = "01 Jan 02:00 AM",
+            matchDate = "2026-12-31",
+            status = "open"
+        )
+        assertEquals(
+            janCal.timeInMillis,
+            com.example.data.util.MyanmarTimeUtil.resolveMatchKickoffEpochMs(janMatch, janCal.timeInMillis - 7_200_000L)
+        )
+    }
+
+    @Test
+    fun oneXBetFixture_setsKickoffEpochMsAndClosesStartedMatch() {
+        val nowMs = 1_700_000_000_000L
+        val pastStartSec = (nowMs / 1000L) - 300L
+        val pastNonLiveFeedFix = com.example.data.network.FootballFeedService.buildOneXBetFixture(
+            gameId = "99100",
+            league = "AFC Champions League Elite",
+            homeTeam = "Vissel Kobe",
+            awayTeam = "Buriram United",
+            homeImgFile = "",
+            awayImgFile = "",
+            startEpochSec = pastStartSec,
+            homeScore = 0L,
+            awayScore = 0L,
+            livePeriodClock = "",
+            isFinished = false,
+            isLiveFeed = false,
+            outcomes = emptyList(),
+            origin = "https://1xlite-19808.pro",
+            nowMs = nowMs
+        )!!
+        assertEquals(pastStartSec * 1000L, pastNonLiveFeedFix.kickoffEpochMs)
+        assertEquals("closed", pastNonLiveFeedFix.status)
+        assertEquals("LIVE", pastNonLiveFeedFix.liveClock)
+
+        val futureStartSec = (nowMs / 1000L) + 7200L
+        val futureFix = com.example.data.network.FootballFeedService.buildOneXBetFixture(
+            gameId = "99101",
+            league = "Thai League 1",
+            homeTeam = "BG Pathum",
+            awayTeam = "Muangthong",
+            homeImgFile = "",
+            awayImgFile = "",
+            startEpochSec = futureStartSec,
+            homeScore = 0L,
+            awayScore = 0L,
+            livePeriodClock = "",
+            isFinished = false,
+            isLiveFeed = false,
+            outcomes = emptyList(),
+            origin = "https://1xlite-19808.pro",
+            nowMs = nowMs
+        )!!
+        assertEquals(futureStartSec * 1000L, futureFix.kickoffEpochMs)
+        assertEquals("open", futureFix.status)
+        assertEquals(
+            com.example.data.util.MyanmarTimeUtil.formatKickoffLabel(futureStartSec * 1000L),
+            futureFix.kickoffLabel
+        )
+        assertEquals(
+            com.example.data.util.MyanmarTimeUtil.formatMatchDateIso(futureStartSec * 1000L),
+            futureFix.matchDate
+        )
+    }
+
+    @Test
+    fun formatAsianMarketTag_formatsHandicapAndGoalLine() {
+        assertEquals("AH H-0.5 • O/U 2.5", KyayFormatter.formatAsianMarketTag("Home -0.5", "2.5"))
+        assertEquals("AH A-0.25 • O/U 2.5/3", KyayFormatter.formatAsianMarketTag("Away -0.25", "2.5/3"))
+        assertEquals("AH 0 • O/U 2.5", KyayFormatter.formatAsianMarketTag("Home -0", "2.5"))
+    }
 }

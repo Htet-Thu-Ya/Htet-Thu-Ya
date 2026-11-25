@@ -195,6 +195,7 @@ data class SportMatch(
     val visibility: String = "public",
     val externalId: String = "",
     val matchDate: String = "",
+    val kickoffEpochMs: Long = 0L,
     val liveClock: String = "",
     val boardSource: String = "standard", // "standard", "one_express", "five_five_five"
     val oneExpressKyay: String = "",
@@ -518,6 +519,7 @@ data class LiveFootballFixture(
     val awayLogoUrl: String = "",
     val kickoffLabel: String,
     val matchDate: String,
+    val kickoffEpochMs: Long = 0L,
     val handicapLine: String,
     val goalLine: String,
     val bodyOdds: Double,

@@ -5,6 +5,7 @@ import com.example.data.betting.KyayFormatter
 import com.example.data.model.GitHubReleaseInfo
 import com.example.data.model.Live2DStatus
 import com.example.data.model.LiveFootballFixture
+import com.example.data.util.MyanmarTimeUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,7 +16,6 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.net.URI
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -34,21 +34,47 @@ class FootballFeedService(
         .build()
 ) {
     private val espnLeagues = listOf(
-        "eng.1" to "Premier League",
-        "esp.1" to "La Liga",
-        "ger.1" to "Bundesliga",
-        "ita.1" to "Serie A",
-        "fra.1" to "Ligue 1",
-        "uefa.champions" to "Champions League",
+        "uefa.champions" to "UEFA Champions League",
         "uefa.europa" to "Europa League",
+        "uefa.europa.conf" to "UEFA Conference League",
+        "uefa.youth" to "UEFA Youth League",
+        "eng.1" to "Premier League",
         "eng.fa" to "FA Cup",
         "eng.league_cup" to "Carabao Cup",
+        "esp.1" to "La Liga",
+        "esp.copa_del_rey" to "Copa del Rey",
+        "ger.1" to "Bundesliga",
+        "ita.1" to "Serie A",
+        "ita.coppa_italia" to "Coppa Italia",
+        "fra.1" to "Ligue 1",
+        "afc.champions" to "AFC Champions League Elite",
+        "tha.1" to "Thai League 1",
+        "jpn.1" to "J1 League (Japan)",
+        "kor.1" to "K League 1 (Korea)",
+        "sau.1" to "Saudi Pro League",
+        "chn.1" to "Chinese Super League",
+        "aus.1" to "A-League",
+        "rus.1" to "Russian Premier League",
+        "bra.1" to "Brasileirao Serie A",
         "fifa.world" to "World Cup Qualifiers"
     )
 
-    fun todayDateIso(): String {
-        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        return fmt.format(Date())
+    fun todayDateIso(): String = MyanmarTimeUtil.todayIsoDate()
+
+    private fun statusRank(status: String): Int = when (status) {
+        "finished" -> 3
+        "closed" -> 2
+        else -> 1
+    }
+
+    private fun mergeFixture(
+        map: MutableMap<String, LiveFootballFixture>,
+        fix: LiveFootballFixture
+    ) {
+        val existing = map[fix.externalId]
+        if (existing == null || statusRank(fix.status) >= statusRank(existing.status)) {
+            map[fix.externalId] = fix
+        }
     }
 
     suspend fun fetchFixturesForDays(
@@ -56,39 +82,60 @@ class FootballFeedService(
         allowedLeagues: List<String> = emptyList()
     ): Result<List<LiveFootballFixture>> = withContext(Dispatchers.IO) {
         try {
+            val nowMs = MyanmarTimeUtil.nowMs()
             val allowedSet = allowedLeagues.map { it.trim().lowercase(Locale.US) }.filter { it.isNotBlank() }.toSet()
             val targetLeagues = if (allowedSet.isEmpty()) {
                 espnLeagues
             } else {
-                espnLeagues.filter { (_, name) -> name.lowercase(Locale.US) in allowedSet }
-                    .ifEmpty { espnLeagues }
+                espnLeagues.filter { (_, name) ->
+                    val low = name.lowercase(Locale.US)
+                    allowedSet.any { a -> low == a || low.contains(a) || a.contains(low) }
+                }.ifEmpty { espnLeagues }
             }
             val allFixtures = linkedMapOf<String, LiveFootballFixture>()
-            for (offset in dayOffsets) {
-                val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) }
-                val espnDate = SimpleDateFormat("yyyyMMdd", Locale.US).format(cal.time)
-                val isoDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
 
-                val espnResults = coroutineScope {
-                    targetLeagues.map { (slug, leagueName) ->
-                        async { fetchEspnLeague(slug, leagueName, espnDate, isoDate) }
-                    }.awaitAll().flatten()
-                }
-                espnResults.forEach { fix ->
-                    if (allowedSet.isEmpty() || fix.league.lowercase(Locale.US) in allowedSet) {
-                        allFixtures[fix.externalId] = fix
-                    }
-                }
-
-                if (espnResults.isEmpty()) {
-                    val tsdbResults = fetchTheSportsDbDay(isoDate)
-                    tsdbResults.forEach { fix ->
-                        if (allowedSet.isEmpty() || fix.league.lowercase(Locale.US) in allowedSet) {
-                            allFixtures.putIfAbsent(fix.externalId, fix)
-                        }
-                    }
+            // Include previous UTC day when fetching today (offset 0) so early Yangon morning kickoffs (00:00-06:29 MMT) are included
+            val espnDateSet = linkedSetOf<String>()
+            val tsdbDateSet = linkedSetOf<String>()
+            dayOffsets.forEach { offset ->
+                espnDateSet.add(MyanmarTimeUtil.espnDateForOffset(offset, nowMs))
+                tsdbDateSet.add(MyanmarTimeUtil.isoDateForOffset(offset, nowMs))
+                tsdbDateSet.add(MyanmarTimeUtil.utcIsoDateForOffset(offset, nowMs))
+                if (offset == 0) {
+                    espnDateSet.add(
+                        MyanmarTimeUtil.utcIsoDateForOffset(-1, nowMs).replace("-", "")
+                    )
+                    tsdbDateSet.add(MyanmarTimeUtil.utcIsoDateForOffset(-1, nowMs))
                 }
             }
+
+            val espnJobs = coroutineScope {
+                espnDateSet.flatMap { espnDate ->
+                    targetLeagues.map { (slug, leagueName) ->
+                        async { fetchEspnLeague(slug, leagueName, espnDate, nowMs) }
+                    }
+                }.awaitAll().flatten()
+            }
+            espnJobs.forEach { fix ->
+                val lLow = fix.league.lowercase(Locale.US)
+                if (allowedSet.isEmpty() || allowedSet.any { lLow.contains(it) || it.contains(lLow) }) {
+                    mergeFixture(allFixtures, fix)
+                }
+            }
+
+            // Always pull TheSportsDB for broader cup/regional/Asian coverage & finished match completion
+            val tsdbJobs = coroutineScope {
+                tsdbDateSet.map { isoDate ->
+                    async { fetchTheSportsDbDay(isoDate, nowMs) }
+                }.awaitAll().flatten()
+            }
+            tsdbJobs.forEach { fix ->
+                val lLow = fix.league.lowercase(Locale.US)
+                if (allowedSet.isEmpty() || allowedSet.any { lLow.contains(it) || it.contains(lLow) }) {
+                    mergeFixture(allFixtures, fix)
+                }
+            }
+
             Result.success(allFixtures.values.toList())
         } catch (e: Exception) {
             Log.w(TAG, "Failed to fetch live football feed: ${e.message}", e)
@@ -109,8 +156,8 @@ class FootballFeedService(
                 val lineDeferred = async {
                     fetchOneXBetEndpoint(
                         urls = listOf(
-                            "$origin/service-api/LineFeed/Get1x2_VZip?sports=1&count=80&lng=$lng&tf=2200000&tz=6&mode=4&country=190&partner=1&getEmpty=true",
-                            "$origin/LineFeed/Get1x2_VZip?sports=1&count=80&lng=$lng&tf=2200000&tz=6&mode=4&country=190&partner=1&getEmpty=true"
+                            "$origin/service-api/LineFeed/Get1x2_VZip?sports=1&count=250&lng=$lng&tf=2200000&tz=6&mode=4&country=190&partner=1&getEmpty=true",
+                            "$origin/LineFeed/Get1x2_VZip?sports=1&count=250&lng=$lng&tf=2200000&tz=6&mode=4&country=190&partner=1&getEmpty=true"
                         ),
                         refererUrl = normalizedUrl,
                         origin = origin,
@@ -120,8 +167,8 @@ class FootballFeedService(
                 val liveDeferred = async {
                     fetchOneXBetEndpoint(
                         urls = listOf(
-                            "$origin/service-api/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true",
-                            "$origin/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true"
+                            "$origin/service-api/LiveFeed/Get1x2_VZip?sports=1&count=120&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true",
+                            "$origin/LiveFeed/Get1x2_VZip?sports=1&count=120&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true"
                         ),
                         refererUrl = normalizedUrl,
                         origin = origin,
@@ -132,8 +179,8 @@ class FootballFeedService(
             }
 
             val merged = linkedMapOf<String, LiveFootballFixture>()
-            lineFixtures.forEach { merged[it.externalId] = it }
-            liveFixtures.forEach { merged[it.externalId] = it }
+            lineFixtures.forEach { mergeFixture(merged, it) }
+            liveFixtures.forEach { mergeFixture(merged, it) }
 
             if (merged.isNotEmpty()) {
                 val allowedSet = allowedLeagues
@@ -181,8 +228,8 @@ class FootballFeedService(
         try {
             fetchOneXBetEndpoint(
                 urls = listOf(
-                    "$origin/service-api/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true",
-                    "$origin/LiveFeed/Get1x2_VZip?sports=1&count=50&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true"
+                    "$origin/service-api/LiveFeed/Get1x2_VZip?sports=1&count=120&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true",
+                    "$origin/LiveFeed/Get1x2_VZip?sports=1&count=120&lng=$lng&gr=44&mode=4&country=190&partner=1&getEmpty=true"
                 ),
                 refererUrl = normalizedUrl,
                 origin = origin,
@@ -228,7 +275,7 @@ class FootballFeedService(
             val root = JSONObject(trimmed)
             val valueArr = root.optJSONArray("Value") ?: return emptyList()
             val list = mutableListOf<LiveFootballFixture>()
-            for (i in 0 until valueArr.length().coerceAtMost(80)) {
+            for (i in 0 until valueArr.length().coerceAtMost(250)) {
                 val obj = valueArr.optJSONObject(i) ?: continue
                 val gameId = obj.optLong("I", 0L).takeIf { it > 0L }?.toString()
                     ?: obj.optString("CI").trim()
@@ -304,9 +351,9 @@ class FootballFeedService(
         slug: String,
         leagueName: String,
         espnDate: String,
-        isoDate: String
+        nowMs: Long
     ): List<LiveFootballFixture> {
-        val url = "https://site.api.espn.com/apis/site/v2/sports/soccer/$slug/scoreboard?dates=$espnDate&limit=30"
+        val url = "https://site.api.espn.com/apis/site/v2/sports/soccer/$slug/scoreboard?dates=$espnDate&limit=50"
         val body = httpGet(url) ?: return emptyList()
         val root = JSONObject(body)
         val events = root.optJSONArray("events") ?: return emptyList()
@@ -358,14 +405,34 @@ class FootballFeedService(
                 .orEmpty()
 
             if (statusName.contains("POSTPONED", ignoreCase = true) ||
-                statusName.contains("CANCELED", ignoreCase = true)
+                statusName.contains("CANCELED", ignoreCase = true) ||
+                statusName.contains("ABANDONED", ignoreCase = true)
             ) {
                 continue
             }
 
+            val isoUtc = ev.optString("date")
+            val kickoffEpochMs = MyanmarTimeUtil.parseIsoUtcEpochMs(isoUtc)
+            val yangonDate = if (kickoffEpochMs > 0L) {
+                MyanmarTimeUtil.formatMatchDateIso(kickoffEpochMs)
+            } else {
+                MyanmarTimeUtil.todayIsoDate(nowMs)
+            }
+
+            val isFinished = completed ||
+                state == "post" ||
+                statusName == "STATUS_FINAL" ||
+                statusName == "STATUS_FULL_TIME" ||
+                statusName == "STATUS_FINAL_AET" ||
+                statusName == "STATUS_FINAL_PEN"
+            val isLiveOrStarted = state == "in" ||
+                statusName == "STATUS_IN_PROGRESS" ||
+                statusName == "STATUS_HALFTIME" ||
+                (!isFinished && kickoffEpochMs in 1L..nowMs)
+
             val mappedStatus = when {
-                completed || state == "post" || statusName == "STATUS_FINAL" || statusName == "STATUS_FULL_TIME" -> "finished"
-                state == "in" || statusName == "STATUS_IN_PROGRESS" || statusName == "STATUS_HALFTIME" -> "closed"
+                isFinished -> "finished"
+                isLiveOrStarted -> "closed"
                 else -> "open"
             }
 
@@ -375,11 +442,13 @@ class FootballFeedService(
                 else -> ""
             }
 
-            val isoUtc = ev.optString("date")
             val kickoffLabel = if (mappedStatus == "open") {
-                formatUtcToLocalLabel(isoUtc)
+                if (kickoffEpochMs > 0L) MyanmarTimeUtil.formatKickoffLabel(kickoffEpochMs)
+                else formatUtcToLocalLabel(isoUtc)
             } else {
-                liveClock.ifBlank { formatUtcToLocalLabel(isoUtc) }
+                liveClock.ifBlank {
+                    if (kickoffEpochMs > 0L) MyanmarTimeUtil.formatKickoffLabel(kickoffEpochMs) else "LIVE"
+                }
             }
 
             var homeAbbr = ""
@@ -435,7 +504,8 @@ class FootballFeedService(
                     homeLogoUrl = homeLogoUrl.take(300),
                     awayLogoUrl = awayLogoUrl.take(300),
                     kickoffLabel = kickoffLabel.take(40),
-                    matchDate = isoDate,
+                    matchDate = yangonDate.take(20),
+                    kickoffEpochMs = kickoffEpochMs.coerceAtLeast(0L),
                     handicapLine = handicapLine.take(40),
                     goalLine = goalLine.take(20),
                     bodyOdds = derivedBodyOdds,
@@ -450,14 +520,14 @@ class FootballFeedService(
         return list
     }
 
-    private fun fetchTheSportsDbDay(isoDate: String): List<LiveFootballFixture> {
+    private fun fetchTheSportsDbDay(isoDate: String, nowMs: Long): List<LiveFootballFixture> {
         val url = "https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=$isoDate&s=Soccer"
         val body = httpGet(url) ?: return emptyList()
         val root = JSONObject(body)
         val events = root.optJSONArray("events") ?: return emptyList()
         val list = mutableListOf<LiveFootballFixture>()
 
-        for (i in 0 until events.length().coerceAtMost(35)) {
+        for (i in 0 until events.length().coerceAtMost(120)) {
             val ev = events.optJSONObject(i) ?: continue
             val eventId = ev.optString("idEvent").trim()
             val home = ev.optString("strHomeTeam").trim()
@@ -472,18 +542,39 @@ class FootballFeedService(
             val homeScore = ev.optString("intHomeScore").toLongOrNull() ?: 0L
             val awayScore = ev.optString("intAwayScore").toLongOrNull() ?: 0L
 
+            val dateStr = ev.optString("dateEvent").ifBlank { isoDate }
+            val timeStr = ev.optString("strTime").trim().take(8)
+            val timestampStr = ev.optString("strTimestamp").trim()
+            val kickoffEpochMs = MyanmarTimeUtil.parseIsoUtcEpochMs(timestampStr)
+                .takeIf { it > 0L }
+                ?: MyanmarTimeUtil.parseDateAndUtcTimeEpochMs(dateStr, timeStr)
+
+            val isFinished = rawStatus.contains("Finished", ignoreCase = true) ||
+                rawStatus.equals("FT", ignoreCase = true) ||
+                rawStatus.equals("AOT", ignoreCase = true) ||
+                rawStatus.equals("AP", ignoreCase = true)
+            val isLiveOrStarted = rawStatus.contains("Half", ignoreCase = true) ||
+                rawStatus.contains("Live", ignoreCase = true) ||
+                rawStatus.endsWith("'") ||
+                (!isFinished && kickoffEpochMs in 1L..nowMs)
+
             val mappedStatus = when {
-                rawStatus.contains("Finished", ignoreCase = true) || rawStatus.equals("FT", ignoreCase = true) -> "finished"
-                rawStatus.contains("Half", ignoreCase = true) || rawStatus.contains("Live", ignoreCase = true) ||
-                    rawStatus.endsWith("'") -> "closed"
+                isFinished -> "finished"
+                isLiveOrStarted -> "closed"
                 else -> "open"
             }
 
-            val dateStr = ev.optString("dateEvent").ifBlank { isoDate }
-            val timeStr = ev.optString("strTime").take(5)
-            val kickoff = if (mappedStatus == "finished") "FT"
-            else if (mappedStatus == "closed") "LIVE ${rawStatus.take(12)}".trim()
-            else formatDateAndUtcTime(dateStr, timeStr)
+            val yangonDate = if (kickoffEpochMs > 0L) {
+                MyanmarTimeUtil.formatMatchDateIso(kickoffEpochMs)
+            } else {
+                dateStr.take(20)
+            }
+            val kickoff = when (mappedStatus) {
+                "finished" -> "FT"
+                "closed" -> "LIVE ${rawStatus.take(12)}".trim()
+                else -> if (kickoffEpochMs > 0L) MyanmarTimeUtil.formatKickoffLabel(kickoffEpochMs)
+                else formatDateAndUtcTime(dateStr, timeStr.take(5))
+            }
 
             list.add(
                 LiveFootballFixture(
@@ -494,13 +585,14 @@ class FootballFeedService(
                     homeLogoUrl = homeBadge.take(300),
                     awayLogoUrl = awayBadge.take(300),
                     kickoffLabel = kickoff.take(40),
-                    matchDate = dateStr.take(20),
+                    matchDate = yangonDate.take(20),
+                    kickoffEpochMs = kickoffEpochMs.coerceAtLeast(0L),
                     handicapLine = "Home -0.5",
                     goalLine = "2.5",
                     bodyOdds = 1.92,
                     goalOdds = 1.90,
                     status = mappedStatus,
-                    liveClock = if (mappedStatus == "finished") "FT" else if (mappedStatus == "closed") rawStatus.take(20) else "",
+                    liveClock = if (mappedStatus == "finished") "FT" else if (mappedStatus == "closed") rawStatus.take(20).ifBlank { "LIVE" } else "",
                     homeScore = homeScore.coerceIn(0L, 99L),
                     awayScore = awayScore.coerceIn(0L, 99L)
                 )
@@ -650,37 +742,14 @@ class FootballFeedService(
 
     private fun formatUtcToLocalLabel(isoUtc: String): String {
         if (isoUtc.isBlank()) return "Today"
-        val patterns = listOf("yyyy-MM-dd'T'HH:mm'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'")
-        for (pattern in patterns) {
-            try {
-                val parser = SimpleDateFormat(pattern, Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }
-                val parsed = parser.parse(isoUtc) ?: continue
-                val outFmt = SimpleDateFormat("dd MMM hh:mm a", Locale.US).apply {
-                    timeZone = TimeZone.getDefault()
-                }
-                return outFmt.format(parsed)
-            } catch (_: Exception) {
-            }
-        }
-        return isoUtc.take(16)
+        val epochMs = MyanmarTimeUtil.parseIsoUtcEpochMs(isoUtc)
+        return if (epochMs > 0L) MyanmarTimeUtil.formatKickoffLabel(epochMs) else isoUtc.take(16)
     }
 
     private fun formatDateAndUtcTime(dateStr: String, timeStr: String): String {
         if (timeStr.isBlank()) return dateStr
-        return try {
-            val parser = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            val parsed = parser.parse("$dateStr $timeStr") ?: return "$dateStr $timeStr"
-            val outFmt = SimpleDateFormat("dd MMM hh:mm a", Locale.US).apply {
-                timeZone = TimeZone.getDefault()
-            }
-            outFmt.format(parsed)
-        } catch (_: Exception) {
-            "$dateStr $timeStr"
-        }
+        val epochMs = MyanmarTimeUtil.parseDateAndUtcTimeEpochMs(dateStr, timeStr)
+        return if (epochMs > 0L) MyanmarTimeUtil.formatKickoffLabel(epochMs) else "$dateStr $timeStr"
     }
 
     companion object {
@@ -690,15 +759,30 @@ class FootballFeedService(
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
         val DEFAULT_LEAGUE_OPTIONS = listOf(
-            "Premier League",
-            "La Liga",
-            "Bundesliga",
-            "Serie A",
-            "Ligue 1",
-            "Champions League",
+            "UEFA Champions League",
             "Europa League",
+            "UEFA Conference League",
+            "UEFA Youth League",
+            "Premier League",
             "FA Cup",
             "Carabao Cup",
+            "La Liga",
+            "Copa del Rey",
+            "Bundesliga",
+            "Serie A",
+            "Coppa Italia",
+            "Ligue 1",
+            "AFC Champions League Elite",
+            "AFC Champions League 2",
+            "Thai League 1",
+            "J1 League (Japan)",
+            "K League 1 (Korea)",
+            "Saudi Pro League",
+            "Chinese Super League",
+            "A-League",
+            "Russian Cup",
+            "Egypt. Premier League",
+            "Gulf Club Championship",
             "World Cup Qualifiers"
         )
 
@@ -764,7 +848,7 @@ class FootballFeedService(
             val startMs = if (startEpochSec > 0L) startEpochSec * 1000L else 0L
             val status = when {
                 isFinished -> "finished"
-                isLiveFeed || (startMs in 1 until nowMs) -> "closed"
+                isLiveFeed || (startMs in 1L..nowMs) -> "closed"
                 else -> "open"
             }
             val liveClock = when (status) {
@@ -774,18 +858,15 @@ class FootballFeedService(
             }
 
             val kickoffLabel = if (status == "open" && startMs > 0L) {
-                val outFmt = SimpleDateFormat("dd MMM hh:mm a", Locale.US).apply {
-                    timeZone = TimeZone.getDefault()
-                }
-                outFmt.format(Date(startMs))
+                MyanmarTimeUtil.formatKickoffLabel(startMs)
             } else {
                 liveClock.ifBlank { "LIVE" }
             }
 
             val matchDate = if (startMs > 0L) {
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(startMs))
+                MyanmarTimeUtil.formatMatchDateIso(startMs)
             } else {
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+                MyanmarTimeUtil.formatMatchDateIso(nowMs)
             }
 
             val parsedLines = KyayFormatter.parseOneXBetOutcomesToLines(outcomes)
@@ -805,6 +886,7 @@ class FootballFeedService(
                 awayLogoUrl = awayLogoUrl.take(300),
                 kickoffLabel = kickoffLabel.take(40),
                 matchDate = matchDate.take(20),
+                kickoffEpochMs = startMs.coerceAtLeast(0L),
                 handicapLine = parsedLines.handicapLine.take(40),
                 goalLine = parsedLines.goalLine.take(20),
                 bodyOdds = parsedLines.bodyOdds,

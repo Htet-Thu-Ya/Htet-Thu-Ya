@@ -69,9 +69,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -112,9 +114,11 @@ import com.example.data.model.UserAccount
 import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
 import com.example.data.network.FootballFeedService
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.BrandLogoAvatar
 import com.example.ui.components.FullScreenReceiptDialog
 import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.LeagueHideBarHeader
 import com.example.ui.components.LoTaYaBrandLogo
 import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
@@ -1827,6 +1831,17 @@ private fun AdminBoardTab(
     var showAutoSyncCard by remember { mutableStateOf(false) }
     var showDrawsSection by remember { mutableStateOf(true) }
     var showMatchesSection by remember { mutableStateOf(true) }
+    val adminExpandedLeagues = remember { mutableStateMapOf<String, Boolean>() }
+    var adminNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            adminNowMs = System.currentTimeMillis()
+        }
+    }
+    val groupedStandardMatches = remember(standardMatches) {
+        standardMatches.groupBy { it.league.ifBlank { "Football" } }
+    }
     var selectedLeagues by remember(boardConfig.allowedLeagues) {
         mutableStateOf(boardConfig.allowedLeagues.toSet())
     }
@@ -2077,50 +2092,107 @@ private fun AdminBoardTab(
             )
         }
         if (showMatchesSection) {
-            items(standardMatches, key = { it.id }) { match ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = PearlCard),
-                    modifier = Modifier.fillMaxWidth().clickable { editingMatch = match }
-                ) {
+            if (standardMatches.isNotEmpty()) {
+                item {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                TeamLogoAvatar(logoUrl = match.homeLogoUrl, teamName = match.homeTeam, size = 22.dp)
-                                Text(
-                                    text = "${match.homeTeam} vs ${match.awayTeam}",
-                                    color = InkDark,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                TeamLogoAvatar(logoUrl = match.awayLogoUrl, teamName = match.awayTeam, size = 22.dp)
+                        Text(
+                            text = "ဖလား/လိဂ် (${groupedStandardMatches.size}) • MMT",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = {
+                                groupedStandardMatches.keys.forEach { adminExpandedLeagues[it] = true }
+                            }) {
+                                Text("အားလုံးဖွင့်", color = ChampionshipGold, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
-                            Text("${match.league} • ${match.kickoffLabel}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
-                            Text("${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = {
+                                groupedStandardMatches.keys.forEach { adminExpandedLeagues[it] = false }
+                            }) {
+                                Text("အားလုံးဝှက်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelSmall)
+                            }
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Column(horizontalAlignment = Alignment.End) {
-                                StatusBadge(match.status)
-                                if (match.status == "finished" || match.liveClock.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        text = "${match.homeScore} - ${match.awayScore} ${match.liveClock}".trim(),
-                                        color = if (match.status == "closed") AdminCrimson else InkDark,
-                                        fontFamily = JetBrainsMonoFontFamily,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            IconButton(
-                                onClick = { deletingMatch = match },
-                                modifier = Modifier.testTag("delete_match_${match.id}")
+                    }
+                }
+            }
+            val defaultExpand = groupedStandardMatches.size <= 3
+            groupedStandardMatches.forEach { (leagueName, leagueMatches) ->
+                val isExpanded = adminExpandedLeagues[leagueName] ?: defaultExpand
+                item(key = "admin_std_league_$leagueName") {
+                    LeagueHideBarHeader(
+                        leagueName = leagueName,
+                        matchCount = leagueMatches.size,
+                        isExpanded = isExpanded,
+                        onToggle = { adminExpandedLeagues[leagueName] = !isExpanded }
+                    )
+                }
+                if (isExpanded) {
+                    items(leagueMatches, key = { it.id }) { match ->
+                        val resolvedKickoff = MyanmarTimeUtil.resolveMatchKickoffEpochMs(match, adminNowMs)
+                        val isExpiredOpen = match.status == "open" && resolvedKickoff in 1L..adminNowMs
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = PearlCard),
+                            modifier = Modifier.fillMaxWidth().clickable { editingMatch = match }
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = AdminCrimson)
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TeamLogoAvatar(logoUrl = match.homeLogoUrl, teamName = match.homeTeam, size = 22.dp)
+                                        Text(
+                                            text = "${match.homeTeam} vs ${match.awayTeam}",
+                                            color = InkDark,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        TeamLogoAvatar(logoUrl = match.awayLogoUrl, teamName = match.awayTeam, size = 22.dp)
+                                    }
+                                    Text("${match.league} • ${match.kickoffLabel} (MMT)", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
+                                    Text("${match.handicapLine} • ဂိုး ${match.goalLine}", color = InkMuted, style = MaterialTheme.typography.bodyMedium)
+                                    if (isExpiredOpen) {
+                                        Surface(
+                                            color = Color(0xFFFEE2E2),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "အချိန်ကျော်/ပိတ်သင့် (MMT)",
+                                                color = AdminCrimson,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        StatusBadge(match.status)
+                                        if (match.status == "finished" || match.liveClock.isNotBlank()) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "${match.homeScore} - ${match.awayScore} ${match.liveClock}".trim(),
+                                                color = if (match.status == "closed") AdminCrimson else InkDark,
+                                                fontFamily = JetBrainsMonoFontFamily,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { deletingMatch = match },
+                                        modifier = Modifier.testTag("delete_match_${match.id}")
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = AdminCrimson)
+                                    }
+                                }
                             }
                         }
                     }

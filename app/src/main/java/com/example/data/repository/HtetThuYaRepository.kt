@@ -36,6 +36,7 @@ import com.example.data.model.UserAccount
 import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
 import com.example.data.network.FootballFeedService
+import com.example.data.util.MyanmarTimeUtil
 import com.google.firebase.Firebase
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
@@ -679,6 +680,33 @@ class HtetThuYaRepository(
 
             db.runTransaction { tx ->
                 val userSnap = tx.get(userRef)
+                val nowMs = MyanmarTimeUtil.nowMs()
+                val isFootballOrder = orderType in listOf("parlay", "body_goal", "one_express", "five_five_five")
+                if (isFootballOrder && safeMatchIds.isNotEmpty()) {
+                    safeMatchIds.distinct().forEach { mId ->
+                        val mSnap = tx.get(db.collection("matches").document(mId))
+                        if (!mSnap.exists()) {
+                            throw IllegalStateException("ရွေးချယ်ထားသော ပွဲစဉ်ကို မတွေ့ရှိပါ")
+                        }
+                        val mStatus = mSnap.getString("status").orEmpty()
+                        val mLiveClock = mSnap.getString("liveClock").orEmpty().trim()
+                        val mKickoffLabel = mSnap.getString("kickoffLabel").orEmpty()
+                        val mDate = mSnap.getString("matchDate").orEmpty()
+                        val mKickoffEpoch = mSnap.getLong("kickoffEpochMs") ?: 0L
+                        val mObj = SportMatch(
+                            id = mId,
+                            kickoffLabel = mKickoffLabel,
+                            matchDate = mDate,
+                            kickoffEpochMs = mKickoffEpoch,
+                            status = mStatus,
+                            liveClock = mLiveClock
+                        )
+                        val resolvedMs = MyanmarTimeUtil.resolveMatchKickoffEpochMs(mObj, nowMs)
+                        if (mStatus != "open" || mLiveClock.isNotBlank() || (resolvedMs in 1L..nowMs)) {
+                            throw IllegalStateException("ပွဲစတင်ပြီး သို့မဟုတ် ပြီးဆုံးပြီး ဖြစ်သဖြင့် လောင်းကြေးတင်၍မရပါ")
+                        }
+                    }
+                }
                 val curBalance = userSnap.getLong("balanceKs") ?: 0L
                 val curActive = userSnap.getLong("activeStakeKs") ?: 0L
                 if (curBalance < stakeKs) {
@@ -1569,6 +1597,18 @@ class HtetThuYaRepository(
             val safeSource = boardSource.takeIf { it in listOf("standard", "one_express", "five_five_five") } ?: "standard"
             val safeHandicap = handicapLine.trim().ifBlank { "Home -0.5" }.take(40)
             val safeGoal = goalLine.trim().ifBlank { "2.5" }.take(20)
+            val cleanKickoff = kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40)
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val todayIso = MyanmarTimeUtil.todayIsoDate(nowMs)
+            val resolvedKickoffMs = MyanmarTimeUtil.resolveMatchKickoffEpochMs(
+                SportMatch(kickoffLabel = cleanKickoff, matchDate = todayIso, status = "open"),
+                nowMs
+            )
+            val computedMatchDate = if (resolvedKickoffMs > 0L) {
+                MyanmarTimeUtil.formatMatchDateIso(resolvedKickoffMs)
+            } else {
+                todayIso
+            }
             val resolvedOneExp = oneExpressKyay.trim().ifBlank {
                 if (safeSource == "one_express") com.example.data.betting.KyayFormatter.formatOneExpressKyay(safeHandicap, safeGoal) else ""
             }.take(60)
@@ -1580,7 +1620,9 @@ class HtetThuYaRepository(
                     "league" to league.trim().take(60),
                     "homeTeam" to homeTeam.trim().take(60),
                     "awayTeam" to awayTeam.trim().take(60),
-                    "kickoffLabel" to kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40),
+                    "kickoffLabel" to cleanKickoff,
+                    "matchDate" to computedMatchDate,
+                    "kickoffEpochMs" to resolvedKickoffMs.coerceAtLeast(0L),
                     "handicapLine" to safeHandicap,
                     "goalLine" to safeGoal,
                     "bodyOdds" to bodyOdds.coerceIn(1.05, 50.0),
@@ -1592,7 +1634,7 @@ class HtetThuYaRepository(
                     "boardSource" to safeSource,
                     "oneExpressKyay" to resolvedOneExp,
                     "fiveFiveFiveKyay" to resolved555,
-                    "autoUpdatedAtMs" to System.currentTimeMillis(),
+                    "autoUpdatedAtMs" to nowMs,
                     "createdBy" to adminUid,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -1629,11 +1671,19 @@ class HtetThuYaRepository(
             require(matchId.isNotBlank() && ID_REGEX.matches(matchId)) { "Invalid match ID" }
             require(league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank()) { "အသင်းနှင့် လိဂ်အမည် ဖြည့်စွက်ပါ" }
             require(status in listOf("open", "closed", "finished"))
+            val cleanKickoff = kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40)
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val resolvedKickoffMs = if (status == "open") {
+                MyanmarTimeUtil.resolveMatchKickoffEpochMs(
+                    SportMatch(kickoffLabel = cleanKickoff, status = status),
+                    nowMs
+                )
+            } else 0L
             val fields = mutableMapOf<String, Any>(
                 "league" to league.trim().take(60),
                 "homeTeam" to homeTeam.trim().take(60),
                 "awayTeam" to awayTeam.trim().take(60),
-                "kickoffLabel" to kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40),
+                "kickoffLabel" to cleanKickoff,
                 "handicapLine" to handicapLine.trim().ifBlank { "Home -0.5" }.take(40),
                 "goalLine" to goalLine.trim().ifBlank { "2.5" }.take(20),
                 "bodyOdds" to bodyOdds.coerceIn(1.0, 50.0),
@@ -1641,9 +1691,16 @@ class HtetThuYaRepository(
                 "status" to status,
                 "homeScore" to homeScore.coerceIn(0L, 99L),
                 "awayScore" to awayScore.coerceIn(0L, 99L),
-                "autoUpdatedAtMs" to System.currentTimeMillis(),
+                "autoUpdatedAtMs" to nowMs,
                 "updatedAt" to FieldValue.serverTimestamp()
             )
+            if (resolvedKickoffMs > 0L) {
+                fields["kickoffEpochMs"] = resolvedKickoffMs
+                fields["matchDate"] = MyanmarTimeUtil.formatMatchDateIso(resolvedKickoffMs)
+            }
+            if (status == "finished") {
+                fields["liveClock"] = "FT"
+            }
             if (oneExpressKyay != null) {
                 fields["oneExpressKyay"] = oneExpressKyay.trim().take(60)
             }
@@ -2951,6 +3008,7 @@ class HtetThuYaRepository(
                                 "visibility" to "public",
                                 "externalId" to fix.externalId,
                                 "matchDate" to fix.matchDate,
+                                "kickoffEpochMs" to fix.kickoffEpochMs.coerceAtLeast(0L),
                                 "liveClock" to fix.liveClock,
                                 "boardSource" to "standard",
                                 "oneExpressKyay" to "",
@@ -2974,6 +3032,7 @@ class HtetThuYaRepository(
                                 "awayScore" to fix.awayScore,
                                 "liveClock" to fix.liveClock,
                                 "matchDate" to fix.matchDate,
+                                "kickoffEpochMs" to fix.kickoffEpochMs.coerceAtLeast(0L),
                                 "autoUpdatedAtMs" to nowMs,
                                 "updatedAt" to FieldValue.serverTimestamp()
                             )
@@ -3093,6 +3152,7 @@ class HtetThuYaRepository(
                                 "visibility" to "public",
                                 "externalId" to fix.externalId,
                                 "matchDate" to fix.matchDate,
+                                "kickoffEpochMs" to fix.kickoffEpochMs.coerceAtLeast(0L),
                                 "liveClock" to fix.liveClock,
                                 "boardSource" to boardSource,
                                 "oneExpressKyay" to oneExpKyay,
@@ -3114,6 +3174,7 @@ class HtetThuYaRepository(
                             "awayScore" to fix.awayScore,
                             "liveClock" to fix.liveClock,
                             "matchDate" to fix.matchDate,
+                            "kickoffEpochMs" to fix.kickoffEpochMs.coerceAtLeast(0L),
                             "autoUpdatedAtMs" to nowMs,
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
@@ -3166,31 +3227,46 @@ class HtetThuYaRepository(
         }
     }
 
+    private fun extractTeamCategoryTag(name: String): String {
+        val low = name.lowercase(java.util.Locale.US)
+        return when {
+            low.contains("women") || low.contains("(w)") || low.endsWith(" w") -> "W"
+            low.contains("u23") -> "U23"
+            low.contains("u21") -> "U21"
+            low.contains("u20") -> "U20"
+            low.contains("u19") -> "U19"
+            low.contains("u18") -> "U18"
+            low.contains("reserve") || low.contains("ii") -> "RES"
+            else -> "SR"
+        }
+    }
+
     suspend fun syncLiveMatchResults(
         feedService: FootballFeedService
     ): Result<Int> {
         val path = "matches/live_sync"
         return try {
             requireUserId()
-            val espnFixtures = feedService.fetchFixturesForDays(listOf(-1, 0, 1)).getOrDefault(emptyList())
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val espnFixtures = feedService.fetchFixturesForDays(listOf(-3, -2, -1, 0, 1)).getOrDefault(emptyList())
             val oneXBetLiveFixtures = feedService.fetchOneXBetLiveUpdates()
             val allFixtures = espnFixtures + oneXBetLiveFixtures
-            if (allFixtures.isEmpty()) return Result.success(0)
 
             val byExternalId = allFixtures.associateBy { it.externalId }
             val byNormalizedTeams = espnFixtures.associateBy {
-                "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}"
+                "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}_${extractTeamCategoryTag(it.homeTeam)}"
             }
             val oneXBetByNormalizedTeams = oneXBetLiveFixtures.associateBy {
-                "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}"
+                "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}_${extractTeamCategoryTag(it.homeTeam)}"
             }
 
             val existingMatches = db.collection("matches").get().await()
                 .toObjects(SportMatch::class.java)
 
-            val updates = mutableListOf<Pair<String, LiveFootballFixture>>()
+            val fixtureUpdates = mutableListOf<Pair<String, LiveFootballFixture>>()
+            val autoCloseIds = mutableListOf<Pair<String, Long>>()
             existingMatches.forEach { m ->
-                val teamKey = "${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}"
+                val teamKey = "${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}_${extractTeamCategoryTag(m.homeTeam)}"
                 val matched = byExternalId[m.externalId]
                     ?: (if (m.boardSource == "one_express") oneXBetByNormalizedTeams[teamKey] else null)
                     ?: byNormalizedTeams[teamKey]
@@ -3200,35 +3276,58 @@ class HtetThuYaRepository(
                         m.status != matched.status ||
                         m.liveClock != matched.liveClock ||
                         m.kickoffLabel != matched.kickoffLabel ||
+                        (matched.kickoffEpochMs > 0L && m.kickoffEpochMs != matched.kickoffEpochMs) ||
                         (matched.homeLogoUrl.isNotBlank() && m.homeLogoUrl != matched.homeLogoUrl) ||
                         (matched.awayLogoUrl.isNotBlank() && m.awayLogoUrl != matched.awayLogoUrl)
                     if (changed) {
-                        updates.add(m.id to matched)
+                        fixtureUpdates.add(m.id to matched)
+                    }
+                } else if (m.status == "open") {
+                    val resolvedMs = MyanmarTimeUtil.resolveMatchKickoffEpochMs(m, nowMs)
+                    if (resolvedMs in 1L..nowMs) {
+                        autoCloseIds.add(m.id to resolvedMs)
                     }
                 }
             }
 
-            updates.chunked(200).forEach { chunk ->
+            fixtureUpdates.chunked(200).forEach { chunk ->
                 val batch = db.batch()
                 chunk.forEach { (docId, fix) ->
+                    val map = mutableMapOf<String, Any>(
+                        "homeLogoUrl" to fix.homeLogoUrl,
+                        "awayLogoUrl" to fix.awayLogoUrl,
+                        "status" to fix.status,
+                        "homeScore" to fix.homeScore,
+                        "awayScore" to fix.awayScore,
+                        "liveClock" to fix.liveClock,
+                        "kickoffLabel" to fix.kickoffLabel,
+                        "matchDate" to fix.matchDate,
+                        "externalId" to fix.externalId,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    if (fix.kickoffEpochMs > 0L) {
+                        map["kickoffEpochMs"] = fix.kickoffEpochMs
+                    }
+                    batch.update(db.collection("matches").document(docId), map)
+                }
+                batch.commit().await()
+            }
+            autoCloseIds.chunked(200).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { (docId, resolvedMs) ->
                     batch.update(
                         db.collection("matches").document(docId),
                         mapOf(
-                            "homeLogoUrl" to fix.homeLogoUrl,
-                            "awayLogoUrl" to fix.awayLogoUrl,
-                            "status" to fix.status,
-                            "homeScore" to fix.homeScore,
-                            "awayScore" to fix.awayScore,
-                            "liveClock" to fix.liveClock,
-                            "kickoffLabel" to fix.kickoffLabel,
-                            "externalId" to fix.externalId,
+                            "status" to "closed",
+                            "liveClock" to "LIVE",
+                            "kickoffEpochMs" to resolvedMs,
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
                     )
                 }
                 batch.commit().await()
             }
-            Result.success(updates.size)
+            Result.success(fixtureUpdates.size + autoCloseIds.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -3240,13 +3339,19 @@ class HtetThuYaRepository(
     suspend fun seedSampleBoard(): Result<Unit> {
         return try {
             val adminUid = requireUserId()
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val k1 = nowMs + 2L * 3_600_000L
+            val k2 = nowMs + 4L * 3_600_000L
+            val k3 = nowMs + 6L * 3_600_000L
             val batch = db.batch()
             val sampleMatches = listOf(
                 mapOf(
                     "league" to "Premier League",
                     "homeTeam" to "Arsenal",
                     "awayTeam" to "Chelsea",
-                    "kickoffLabel" to "Tonight 21:00",
+                    "kickoffLabel" to MyanmarTimeUtil.formatKickoffLabel(k1),
+                    "matchDate" to MyanmarTimeUtil.formatMatchDateIso(k1),
+                    "kickoffEpochMs" to k1,
                     "handicapLine" to "Home -0.5",
                     "goalLine" to "2.5/3",
                     "bodyOdds" to 1.92,
@@ -3260,10 +3365,12 @@ class HtetThuYaRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 ),
                 mapOf(
-                    "league" to "Premier League",
-                    "homeTeam" to "Liverpool",
-                    "awayTeam" to "Man City",
-                    "kickoffLabel" to "Tonight 23:30",
+                    "league" to "Thai League 1",
+                    "homeTeam" to "Buriram United",
+                    "awayTeam" to "BG Pathum",
+                    "kickoffLabel" to MyanmarTimeUtil.formatKickoffLabel(k2),
+                    "matchDate" to MyanmarTimeUtil.formatMatchDateIso(k2),
+                    "kickoffEpochMs" to k2,
                     "handicapLine" to "Home -0+50",
                     "goalLine" to "3.0",
                     "bodyOdds" to 1.95,
@@ -3280,7 +3387,9 @@ class HtetThuYaRepository(
                     "league" to "La Liga",
                     "homeTeam" to "Real Madrid",
                     "awayTeam" to "Barcelona",
-                    "kickoffLabel" to "01:30 AM",
+                    "kickoffLabel" to MyanmarTimeUtil.formatKickoffLabel(k3),
+                    "matchDate" to MyanmarTimeUtil.formatMatchDateIso(k3),
+                    "kickoffEpochMs" to k3,
                     "handicapLine" to "Home -0.5",
                     "goalLine" to "3-30",
                     "bodyOdds" to 1.90,
@@ -3298,6 +3407,8 @@ class HtetThuYaRepository(
                     "homeTeam" to "Inter Milan",
                     "awayTeam" to "AC Milan",
                     "kickoffLabel" to "Finished",
+                    "matchDate" to MyanmarTimeUtil.todayIsoDate(nowMs),
+                    "kickoffEpochMs" to 0L,
                     "handicapLine" to "Home -0.5",
                     "goalLine" to "2.5",
                     "bodyOdds" to 1.90,
@@ -3357,19 +3468,21 @@ class HtetThuYaRepository(
         return try {
             val adminUid = requireUserId()
             require(boardSource in listOf("one_express", "five_five_five")) { "Unsupported board source" }
-            val nowMs = System.currentTimeMillis()
-            val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(nowMs))
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val today = MyanmarTimeUtil.todayIsoDate(nowMs)
             val docPrefix = if (boardSource == "one_express") "sample_1x_" else "sample_555_"
             val specs = listOf(
-                Triple("La Liga", "Athletic Club" to "Espanyol", Triple("Tonight 21:30", "Home -1-20", "3+45")),
-                Triple("Bundesliga", "Darmstadt" to "FC Heidenheim", Triple("Tonight 23:00", "Away -0.75", "3-20")),
-                Triple("Premier League", "Arsenal" to "Chelsea", Triple("01:30 AM", "Home -0.5", "2.5/3")),
-                Triple("Serie A", "Inter Milan" to "AC Milan", Triple("Finished", "Home -0.5", "2.5"))
+                Triple("UEFA Champions League", "Arsenal" to "Inter Milan", Triple(nowMs + 2L * 3_600_000L, "Home -1-20", "3+45")),
+                Triple("AFC Champions League Elite", "Vissel Kobe" to "Ulsan HD", Triple(nowMs + 4L * 3_600_000L, "Home -0.75", "3-20")),
+                Triple("Thai League 1", "Buriram United" to "Port FC", Triple(nowMs + 6L * 3_600_000L, "Home -0.5", "2.5/3")),
+                Triple("Serie A", "Inter Milan" to "AC Milan", Triple(0L, "Home -0.5", "2.5"))
             )
             val batch = db.batch()
             specs.forEachIndexed { idx, (league, teams, info) ->
-                val (kickoff, handicap, goalLine) = info
-                val isFinished = kickoff == "Finished"
+                val (kickoffMs, handicap, goalLine) = info
+                val isFinished = kickoffMs <= 0L
+                val kickoffLabel = if (isFinished) "Finished" else MyanmarTimeUtil.formatKickoffLabel(kickoffMs)
+                val matchDateStr = if (isFinished) today else MyanmarTimeUtil.formatMatchDateIso(kickoffMs)
                 val bodyOdds = com.example.data.betting.KyayFormatter.LOTAYA_STANDARD_BODY_ODDS
                 val goalOdds = com.example.data.betting.KyayFormatter.LOTAYA_STANDARD_GOAL_ODDS
                 val oneExpKyay = if (boardSource == "one_express") {
@@ -3385,7 +3498,7 @@ class HtetThuYaRepository(
                         "league" to league,
                         "homeTeam" to teams.first,
                         "awayTeam" to teams.second,
-                        "kickoffLabel" to kickoff,
+                        "kickoffLabel" to kickoffLabel,
                         "handicapLine" to handicap,
                         "goalLine" to goalLine,
                         "bodyOdds" to bodyOdds,
@@ -3394,7 +3507,8 @@ class HtetThuYaRepository(
                         "homeScore" to if (isFinished) 2L else 0L,
                         "awayScore" to if (isFinished) 1L else 0L,
                         "visibility" to "public",
-                        "matchDate" to today,
+                        "matchDate" to matchDateStr,
+                        "kickoffEpochMs" to kickoffMs.coerceAtLeast(0L),
                         "boardSource" to boardSource,
                         "oneExpressKyay" to oneExpKyay,
                         "fiveFiveFiveKyay" to fffKyay,

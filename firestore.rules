@@ -153,6 +153,7 @@ service cloud.firestore {
              data.visibility in ['public', 'hidden'] &&
              (!('externalId' in data) || (data.externalId is string && data.externalId.size() <= 80)) &&
              (!('matchDate' in data) || (data.matchDate is string && data.matchDate.size() <= 20)) &&
+             (!('kickoffEpochMs' in data) || (data.kickoffEpochMs is int && data.kickoffEpochMs >= 0)) &&
              (!('liveClock' in data) || (data.liveClock is string && data.liveClock.size() <= 24)) &&
              (!('boardSource' in data) || data.boardSource in ['standard', 'one_express', 'five_five_five']) &&
              (!('oneExpressKyay' in data) || (data.oneExpressKyay is string && data.oneExpressKyay.size() <= 60)) &&
@@ -635,7 +636,7 @@ service cloud.firestore {
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().keys().hasAll(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'liveClock', 'boardSource', 'oneExpressKyay', 'fiveFiveFiveKyay', 'autoUpdatedAtMs', 'createdBy', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'kickoffEpochMs', 'liveClock', 'boardSource', 'oneExpressKyay', 'fiveFiveFiveKyay', 'autoUpdatedAtMs', 'createdBy', 'createdAt', 'updatedAt']);
       allow update: if hasAdminPerm('canManageBoard') &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&

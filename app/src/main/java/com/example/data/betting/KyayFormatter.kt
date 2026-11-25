@@ -418,4 +418,35 @@ object KyayFormatter {
             else -> formatCleanDecimal(snappedValue)
         }
     }
+
+    fun formatAsianMarketTag(handicapLine: String, goalLine: String): String {
+        val norm = normalizeLegacyHandicap(SportMatch(handicapLine = handicapLine))
+        val lower = norm.lowercase(Locale.US)
+        val hasLeadingPlus = Regex("""(?:^|\s)\+\s*\d""").containsMatchIn(lower)
+        val favIsHome = when {
+            lower.startsWith("away") -> hasLeadingPlus
+            lower.startsWith("home") -> !hasLeadingPlus
+            else -> !norm.startsWith("+")
+        }
+        val cleanSpec = norm
+            .replace("home", "", ignoreCase = true)
+            .replace("away", "", ignoreCase = true)
+            .replace("draw", "", ignoreCase = true)
+            .replace("even", "0", ignoreCase = true)
+            .replace("=", "")
+            .replace("(", "")
+            .replace(")", "")
+            .trim()
+            .removePrefix("-")
+            .removePrefix("+")
+            .trim()
+            .ifBlank { "0.5" }
+        val favLabel = if (favIsHome) "H" else "A"
+        val cleanGoal = goalLine.trim().ifBlank { "2.5" }
+        return if (cleanSpec == "0" || cleanSpec == "0.0") {
+            "AH 0 • O/U $cleanGoal"
+        } else {
+            "AH $favLabel-$cleanSpec • O/U $cleanGoal"
+        }
+    }
 }

@@ -68,16 +68,17 @@ import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.BoardGreenAccent
 import com.example.ui.components.BoardMatchInfoDialog
 import com.example.ui.components.BoardTopBarBg
 import com.example.ui.components.HideBarSectionHeader
+import com.example.ui.components.LeagueHideBarHeader
 import com.example.ui.components.MatchPick
 import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.ScreenshotMatchRowCard
 import com.example.ui.components.SportsBetBottomBar
 import com.example.ui.components.SportsLeagueFilterDialog
-import com.example.ui.components.SportsLeagueHeaderRow
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.components.buildOrderKickoffSummaryText
 import com.example.ui.components.formatKs
@@ -134,11 +135,14 @@ fun SportsOrderScreen(
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showSportsTable by remember { mutableStateOf(true) }
+    val expandedLeagues = remember { mutableStateMapOf<String, Boolean>() }
+    val timeBucket = nowMs / 10_000L
 
-    val openMatches = remember(matchesState, boardConfig.allowedLeagues) {
+    val openMatches = remember(matchesState, boardConfig.allowedLeagues, timeBucket) {
         val allOpen = when (matchesState) {
             is UiState.Success -> matchesState.data.filter {
-                it.status == "open" && (it.boardSource.isBlank() || it.boardSource == "standard")
+                (it.boardSource.isBlank() || it.boardSource == "standard") &&
+                    MyanmarTimeUtil.isMatchBettable(it, nowMs)
             }
             else -> emptyList()
         }
@@ -147,6 +151,12 @@ fun SportsOrderScreen(
         else allOpen.filter { m ->
             allowed.any { lg -> m.league.equals(lg, ignoreCase = true) || m.league.contains(lg, ignoreCase = true) }
         }
+    }
+
+    LaunchedEffect(openMatches) {
+        val validIds = openMatches.map { it.id }.toSet()
+        val staleKeys = selectedPicks.keys.filter { it !in validIds }
+        staleKeys.forEach { selectedPicks.remove(it) }
     }
 
     val availableLeagues = remember(openMatches) {
@@ -181,11 +191,13 @@ fun SportsOrderScreen(
     val scheduledScanAtMs = remember(earliestKickoffMs) {
         if (earliestKickoffMs > 0L) earliestKickoffMs + (135L * 60_000L) else 0L
     }
+    val hasExpiredPick = earliestKickoffMs in 1L..nowMs
     val minSelections = if (isParlay) 2 else 1
     val minAllowedStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxAllowedStake = systemGameConfig.maxStakeKs.coerceAtLeast(minAllowedStake)
     val canSubmit = !busy &&
         !isFootballPaused &&
+        !hasExpiredPick &&
         selectedPicks.size >= minSelections &&
         parsedStake in minAllowedStake..maxAllowedStake &&
         parsedStake <= balanceKs
@@ -265,6 +277,7 @@ fun SportsOrderScreen(
                 onStakeChange = { stakeInput = it },
                 canSubmit = canSubmit,
                 busy = busy,
+                nowMs = nowMs,
                 onSubmit = {
                     val ordered = selectedPicks.values.toList()
                     val pickedMatches = openMatches.filter { it.id in selectedPicks.keys }
@@ -358,7 +371,10 @@ fun SportsOrderScreen(
                                 contentPadding = PaddingValues(bottom = 16.dp)
                             ) {
                             item(key = "hide_bar_sports_table") {
-                                Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     HideBarSectionHeader(
                                         title = if (isParlay) "မောင်း ပွဲစဉ်ဇယား" else "ဘော်ဒီ/ဂိုးပေါင်း ပွဲစဉ်ဇယား",
                                         countBadge = "${filteredMatches.size} ပွဲ",
@@ -366,31 +382,73 @@ fun SportsOrderScreen(
                                         onToggle = { showSportsTable = !showSportsTable },
                                         testTag = "hide_bar_sports_matches_table"
                                     )
+                                    if (showSportsTable) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "မြန်မာစံတော်ချိန် (MMT) • အာရှကြေး",
+                                                color = InkMuted,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                androidx.compose.material3.TextButton(
+                                                    onClick = {
+                                                        groupedByLeague.keys.forEach { expandedLeagues[it] = true }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("အားလုံးဖွင့်", color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                }
+                                                androidx.compose.material3.TextButton(
+                                                    onClick = {
+                                                        groupedByLeague.keys.forEach { expandedLeagues[it] = false }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("အားလုံးဝှက်", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             if (showSportsTable) {
+                                val singleLeagueMode = groupedByLeague.size == 1 || selectedLeagueFilter != null
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
+                                    val isExpanded = expandedLeagues[leagueName] ?: singleLeagueMode
                                     item(key = "league_hdr_$leagueName") {
-                                        SportsLeagueHeaderRow(leagueName = leagueName)
+                                        LeagueHideBarHeader(
+                                            leagueName = leagueName,
+                                            matchCount = leagueMatches.size,
+                                            isExpanded = isExpanded,
+                                            onToggle = { expandedLeagues[leagueName] = !isExpanded }
+                                        )
                                     }
 
-                                    items(leagueMatches, key = { it.id }) { match ->
-                                        val currentPick = selectedPicks[match.id]
-                                        ScreenshotMatchRowCard(
-                                            match = match,
-                                            selectedPickKey = currentPick?.pickKey,
-                                            onShowInfo = { infoMatch = match },
-                                            onSelect = { label, odds, pickKey ->
-                                                if (!isFootballPaused) {
-                                                    if (currentPick?.pickKey == pickKey) {
-                                                        selectedPicks.remove(match.id)
-                                                    } else {
-                                                        if (!isParlay) selectedPicks.clear()
-                                                        selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
+                                    if (isExpanded) {
+                                        items(leagueMatches, key = { it.id }) { match ->
+                                            val currentPick = selectedPicks[match.id]
+                                            ScreenshotMatchRowCard(
+                                                match = match,
+                                                selectedPickKey = currentPick?.pickKey,
+                                                onShowInfo = { infoMatch = match },
+                                                nowMs = nowMs,
+                                                onSelect = { label, odds, pickKey ->
+                                                    if (!isFootballPaused && MyanmarTimeUtil.isMatchBettable(match, nowMs)) {
+                                                        if (currentPick?.pickKey == pickKey) {
+                                                            selectedPicks.remove(match.id)
+                                                        } else {
+                                                            if (!isParlay) selectedPicks.clear()
+                                                            selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
+                                                        }
                                                     }
                                                 }
-                                            }
-                                        )
+                                            )
+                                        }
                                     }
                                 }
                             }
