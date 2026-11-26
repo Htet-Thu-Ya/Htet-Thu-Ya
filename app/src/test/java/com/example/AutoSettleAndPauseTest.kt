@@ -548,4 +548,139 @@ class AutoSettleAndPauseTest {
         assertEquals("AH A-0.25 • O/U 2.5/3", KyayFormatter.formatAsianMarketTag("Away -0.25", "2.5/3"))
         assertEquals("AH 0 • O/U 2.5", KyayFormatter.formatAsianMarketTag("Home -0", "2.5"))
     }
+
+    @Test
+    fun oneXBet1x2AndOverUnder_formatsParsesAndAutoSettlesCorrectly() {
+        assertEquals("3.38", KyayFormatter.formatOneXBetOdds(3.38))
+        assertEquals("3.74", KyayFormatter.formatOneXBetOdds(3.74))
+        assertEquals("1.975", KyayFormatter.formatOneXBetOdds(1.975))
+        assertEquals("1.90", KyayFormatter.formatOneXBetOdds(1.9))
+
+        val parsed = KyayFormatter.parseOneXBetOutcomesToLines(
+            listOf(
+                KyayFormatter.OneXBetMarketOutcome(type = 1, param = null, coef = 3.38),
+                KyayFormatter.OneXBetMarketOutcome(type = 2, param = null, coef = 3.74),
+                KyayFormatter.OneXBetMarketOutcome(type = 3, param = null, coef = 1.975),
+                KyayFormatter.OneXBetMarketOutcome(type = 9, param = 2.5, coef = 1.85),
+                KyayFormatter.OneXBetMarketOutcome(type = 10, param = 2.5, coef = 1.96)
+            )
+        )
+        assertEquals(3.38, parsed.win1Odds, 0.001)
+        assertEquals(3.74, parsed.drawOdds, 0.001)
+        assertEquals(1.975, parsed.win2Odds, 0.001)
+        assertEquals(1.85, parsed.overOdds, 0.001)
+        assertEquals(1.96, parsed.underOdds, 0.001)
+
+        val homeWinMatch = SportMatch(
+            id = "1x_m1",
+            homeTeam = "AC Taipei",
+            awayTeam = "Hang Yuen",
+            goalLine = "2.5",
+            win1Odds = 3.38,
+            drawOdds = 3.74,
+            win2Odds = 1.975,
+            overOdds = 1.85,
+            underOdds = 1.96,
+            status = "finished",
+            homeScore = 2L,
+            awayScore = 1L,
+            boardSource = "one_express"
+        )
+        val drawMatch = homeWinMatch.copy(id = "1x_m2", homeScore = 1L, awayScore = 1L)
+        val awayWinMatch = homeWinMatch.copy(id = "1x_m3", homeScore = 0L, awayScore = 2L)
+        val matchMap = mapOf(
+            "1x_m1" to homeWinMatch,
+            "1x_m2" to drawMatch,
+            "1x_m3" to awayWinMatch
+        )
+
+        val w1Win = AutoSettleEngine.evaluate(
+            BetOrder(
+                id = "1x_o1",
+                orderType = "one_express",
+                selections = listOf("AC Taipei • W1"),
+                matchIds = listOf("1x_m1"),
+                pickKeys = listOf("w1"),
+                stakeKs = 10_000L,
+                multiplier = 3.38,
+                potentialPayoutKs = 33_800L,
+                status = "accepted"
+            ),
+            matchMap,
+            emptyList()
+        )
+        assertTrue(w1Win is AutoSettleDecision.Win)
+        assertEquals(33_800L, (w1Win as AutoSettleDecision.Win).grossPayoutKs)
+
+        val drawWin = AutoSettleEngine.evaluate(
+            BetOrder(
+                id = "1x_o2",
+                orderType = "one_express",
+                selections = listOf("AC Taipei vs Hang Yuen • သရေ"),
+                matchIds = listOf("1x_m2"),
+                pickKeys = listOf("draw"),
+                stakeKs = 10_000L,
+                multiplier = 3.74,
+                potentialPayoutKs = 37_400L,
+                status = "accepted"
+            ),
+            matchMap,
+            emptyList()
+        )
+        assertTrue(drawWin is AutoSettleDecision.Win)
+        assertEquals(37_400L, (drawWin as AutoSettleDecision.Win).grossPayoutKs)
+
+        val w2Win = AutoSettleEngine.evaluate(
+            BetOrder(
+                id = "1x_o3",
+                orderType = "one_express",
+                selections = listOf("Hang Yuen • W2"),
+                matchIds = listOf("1x_m3"),
+                pickKeys = listOf("w2"),
+                stakeKs = 10_000L,
+                multiplier = 1.975,
+                potentialPayoutKs = 19_750L,
+                status = "accepted"
+            ),
+            matchMap,
+            emptyList()
+        )
+        assertTrue(w2Win is AutoSettleDecision.Win)
+        assertEquals(19_750L, (w2Win as AutoSettleDecision.Win).grossPayoutKs)
+
+        val w1OnDrawLoss = AutoSettleEngine.evaluate(
+            BetOrder(
+                id = "1x_o4",
+                orderType = "one_express",
+                selections = listOf("AC Taipei • W1"),
+                matchIds = listOf("1x_m2"),
+                pickKeys = listOf("w1"),
+                stakeKs = 10_000L,
+                multiplier = 3.38,
+                potentialPayoutKs = 33_800L,
+                status = "accepted"
+            ),
+            matchMap,
+            emptyList()
+        )
+        assertTrue(w1OnDrawLoss is AutoSettleDecision.Loss)
+
+        val mixedParlayWin = AutoSettleEngine.evaluate(
+            BetOrder(
+                id = "1x_o5",
+                orderType = "one_express",
+                selections = listOf("AC Taipei • W1", "ဂိုးအောက် 2.5"),
+                matchIds = listOf("1x_m1", "1x_m3"),
+                pickKeys = listOf("w1", "under"),
+                stakeKs = 1_000L,
+                multiplier = 6.625,
+                potentialPayoutKs = 6_625L,
+                status = "accepted"
+            ),
+            matchMap,
+            emptyList()
+        )
+        assertTrue(mixedParlayWin is AutoSettleDecision.Win)
+        assertEquals(6_625L, (mixedParlayWin as AutoSettleDecision.Win).grossPayoutKs)
+    }
 }

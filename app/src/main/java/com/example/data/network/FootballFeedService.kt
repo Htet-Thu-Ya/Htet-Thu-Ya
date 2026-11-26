@@ -464,6 +464,11 @@ class FootballFeedService(
             var handicapLine = "Home -0.5"
             var derivedBodyOdds = 1.93
             var derivedGoalOdds = 1.90
+            var derivedWin1Odds = 1.95
+            var derivedDrawOdds = 3.45
+            var derivedWin2Odds = 3.70
+            var derivedOverOdds = 1.90
+            var derivedUnderOdds = 1.90
             val oddsArr = comp.optJSONArray("odds")
             if (oddsArr != null && oddsArr.length() > 0) {
                 val firstOdds = oddsArr.optJSONObject(0)
@@ -483,16 +488,35 @@ class FootballFeedService(
                 )
                 val homeOddsObj = firstOdds?.optJSONObject("homeTeamOdds")
                 val awayOddsObj = firstOdds?.optJSONObject("awayTeamOdds")
+                val drawOddsObj = firstOdds?.optJSONObject("drawOdds")
+                val hMl = homeOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN
+                val dMl = drawOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN
+                val aMl = awayOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN
+                val oVal = firstOdds?.optDouble("overOdds", Double.NaN) ?: Double.NaN
+                val uVal = firstOdds?.optDouble("underOdds", Double.NaN) ?: Double.NaN
                 val (bOdds, gOdds) = KyayFormatter.deriveRealOddsFromEspn(
-                    homeMoneyLine = homeOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN,
-                    awayMoneyLine = awayOddsObj?.optDouble("moneyLine", Double.NaN) ?: Double.NaN,
+                    homeMoneyLine = hMl,
+                    awayMoneyLine = aMl,
                     homeSpreadOdds = homeOddsObj?.optDouble("spreadOdds", Double.NaN) ?: Double.NaN,
                     awaySpreadOdds = awayOddsObj?.optDouble("spreadOdds", Double.NaN) ?: Double.NaN,
-                    overOdds = firstOdds?.optDouble("overOdds", Double.NaN) ?: Double.NaN,
-                    underOdds = firstOdds?.optDouble("underOdds", Double.NaN) ?: Double.NaN
+                    overOdds = oVal,
+                    underOdds = uVal
                 )
                 derivedBodyOdds = bOdds
                 derivedGoalOdds = gOdds
+                val oneX2List = KyayFormatter.deriveOneX2AndGoalFromEspn(
+                    handicapLine = handicapLine,
+                    homeMoneyLine = hMl,
+                    drawMoneyLine = dMl,
+                    awayMoneyLine = aMl,
+                    overOdds = oVal,
+                    underOdds = uVal
+                )
+                derivedWin1Odds = oneX2List[0]
+                derivedDrawOdds = oneX2List[1]
+                derivedWin2Odds = oneX2List[2]
+                derivedOverOdds = oneX2List[3]
+                derivedUnderOdds = oneX2List[4]
             }
 
             list.add(
@@ -510,6 +534,11 @@ class FootballFeedService(
                     goalLine = goalLine.take(20),
                     bodyOdds = derivedBodyOdds,
                     goalOdds = derivedGoalOdds,
+                    win1Odds = derivedWin1Odds,
+                    drawOdds = derivedDrawOdds,
+                    win2Odds = derivedWin2Odds,
+                    overOdds = derivedOverOdds,
+                    underOdds = derivedUnderOdds,
                     status = mappedStatus,
                     liveClock = liveClock.take(24),
                     homeScore = homeScore.coerceIn(0L, 99L),
@@ -591,6 +620,11 @@ class FootballFeedService(
                     goalLine = "2.5",
                     bodyOdds = 1.92,
                     goalOdds = 1.90,
+                    win1Odds = 1.95,
+                    drawOdds = 3.45,
+                    win2Odds = 3.70,
+                    overOdds = 1.90,
+                    underOdds = 1.90,
                     status = mappedStatus,
                     liveClock = if (mappedStatus == "finished") "FT" else if (mappedStatus == "closed") rawStatus.take(20).ifBlank { "LIVE" } else "",
                     homeScore = homeScore.coerceIn(0L, 99L),
@@ -891,6 +925,11 @@ class FootballFeedService(
                 goalLine = parsedLines.goalLine.take(20),
                 bodyOdds = parsedLines.bodyOdds,
                 goalOdds = parsedLines.goalOdds,
+                win1Odds = parsedLines.win1Odds,
+                drawOdds = parsedLines.drawOdds,
+                win2Odds = parsedLines.win2Odds,
+                overOdds = parsedLines.overOdds,
+                underOdds = parsedLines.underOdds,
                 status = status,
                 liveClock = liveClock.take(24),
                 homeScore = homeScore.coerceIn(0L, 99L),

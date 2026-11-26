@@ -503,10 +503,12 @@ private fun AuthenticatedRoot(
                             onAutoSettleNow = vm::autoSettleFinishedOrdersNow,
                             onAutoSettleCustomer = vm::autoSettleCustomerOrdersNow,
                             onAutoSettleOrder = vm::autoSettleSingleOrderNow,
-                            onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay ->
-                                vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay)
+                            onSaveNewMatch = { l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay, xBetOdds ->
+                                vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay, xBetOdds)
                             },
-                            onUpdateMatchDetails = vm::updateMatchDetails,
+                            onUpdateMatchDetails = { id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds ->
+                                vm.updateMatchDetails(id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds)
+                            },
                             onDeleteMatch = vm::deleteMatch,
                             onSaveNewDraw = { t, c, m, drawType -> vm.saveNewLotteryDraw(t, c, m, drawType) },
                             onUpdateLotteryDraw = vm::updateLotteryDraw,

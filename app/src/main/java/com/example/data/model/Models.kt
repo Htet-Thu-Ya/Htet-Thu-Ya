@@ -189,6 +189,11 @@ data class SportMatch(
     val goalLine: String = "",
     val bodyOdds: Double = 1.90,
     val goalOdds: Double = 1.90,
+    val win1Odds: Double = 1.90,
+    val drawOdds: Double = 3.20,
+    val win2Odds: Double = 1.90,
+    val overOdds: Double = 1.90,
+    val underOdds: Double = 1.90,
     val status: String = "open",
     val homeScore: Long = 0L,
     val awayScore: Long = 0L,
@@ -204,6 +209,14 @@ data class SportMatch(
     val createdBy: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+data class OneXBetOddsSpec(
+    val win1Odds: Double = 1.90,
+    val drawOdds: Double = 3.20,
+    val win2Odds: Double = 1.90,
+    val overOdds: Double = 1.90,
+    val underOdds: Double = 1.90
 )
 
 @Keep
@@ -524,6 +537,11 @@ data class LiveFootballFixture(
     val goalLine: String,
     val bodyOdds: Double,
     val goalOdds: Double,
+    val win1Odds: Double = 1.90,
+    val drawOdds: Double = 3.20,
+    val win2Odds: Double = 1.90,
+    val overOdds: Double = 1.90,
+    val underOdds: Double = 1.90,
     val status: String,
     val liveClock: String,
     val homeScore: Long,

@@ -83,6 +83,13 @@ import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.LeagueHideBarHeader
 import com.example.ui.components.MatchPick
+import com.example.ui.components.OneXBetCanvasBg
+import com.example.ui.components.OneXBetHeaderBlue
+import com.example.ui.components.OneXBetLeagueHideBarHeader
+import com.example.ui.components.OneXBetRoyalBlue
+import com.example.ui.components.OneXBetScreenshotMatchCard
+import com.example.ui.components.OneXBetSectionHeader
+import com.example.ui.components.OneXBetStripBlue
 import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.ScreenshotMatchRowCard
 import com.example.ui.components.SportsBetBottomBar
@@ -129,7 +136,6 @@ fun ExpressOddsOrderScreen(
 ) {
     val isOneExpress = boardMode == "one_express"
     val boardName = if (isOneExpress) "1xBET" else "555 Mix"
-    val accentColor = if (isOneExpress) BoardGreenAccent else ChampionshipGold
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -216,14 +222,19 @@ fun ExpressOddsOrderScreen(
         parsedStake in minAllowedStake..maxAllowedStake &&
         parsedStake <= balanceKs
 
+    val accentColor = if (isOneExpress) OneXBetRoyalBlue else ChampionshipGold
+    val topBarBg = if (isOneExpress) OneXBetHeaderBlue else BoardTopBarBg
+    val stripBg = if (isOneExpress) OneXBetStripBlue else BoardTopBarBg
+    val screenBg = if (isOneExpress) OneXBetCanvasBg else Color(0xFFEBEFED)
+
     Scaffold(
-        containerColor = Color(0xFFEBEFED),
+        containerColor = screenBg,
         topBar = {
             Column {
                 TopAppBar(
                     title = {
                         Text(
-                            text = if (isParlay) "$boardName • မောင်း" else "$boardName • ဘော်ဒီ/ဂိုးပေါင်း",
+                            text = if (isParlay) "$boardName • မောင်း" else "$boardName • ဘောလုံး",
                             color = Color.White,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
@@ -273,13 +284,14 @@ fun ExpressOddsOrderScreen(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = BoardTopBarBg,
+                        containerColor = topBarBg,
                         titleContentColor = Color.White
                     )
                 )
                 SportsModeSwitchStrip(
                     isParlay = isParlay,
                     accentColor = accentColor,
+                    containerColor = stripBg,
                     onSelectMode = { targetParlay ->
                         isParlay = targetParlay
                         if (!targetParlay && selectedPicks.size > 1) {
@@ -410,45 +422,54 @@ fun ExpressOddsOrderScreen(
                                 contentPadding = PaddingValues(bottom = 16.dp)
                             ) {
                             item(key = "hide_bar_express_table") {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    HideBarSectionHeader(
-                                        title = if (isParlay) "$boardName မောင်း ပွဲစဉ်ဇယား" else "$boardName ပွဲစဉ်ဇယား",
-                                        countBadge = "${filteredMatches.size} ပွဲ",
+                                if (isOneExpress) {
+                                    OneXBetSectionHeader(
                                         isVisible = showBoardTable,
+                                        matchCount = filteredMatches.size,
                                         onToggle = { showBoardTable = !showBoardTable },
                                         testTag = "hide_bar_express_${boardMode}_list"
                                     )
-                                    if (showBoardTable) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "မြန်မာစံတော်ချိန် (MMT) • အာရှကြေး",
-                                                color = InkMuted,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                TextButton(
-                                                    onClick = {
-                                                        groupedByLeague.keys.forEach { expandedLeagues[it] = true }
-                                                    },
-                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text("အားလုံးဖွင့်", color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                                }
-                                                TextButton(
-                                                    onClick = {
-                                                        groupedByLeague.keys.forEach { expandedLeagues[it] = false }
-                                                    },
-                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text("အားလုံးဝှက်", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Column(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        HideBarSectionHeader(
+                                            title = if (isParlay) "$boardName မောင်း ပွဲစဉ်ဇယား" else "$boardName ပွဲစဉ်ဇယား",
+                                            countBadge = "${filteredMatches.size} ပွဲ",
+                                            isVisible = showBoardTable,
+                                            onToggle = { showBoardTable = !showBoardTable },
+                                            testTag = "hide_bar_express_${boardMode}_list"
+                                        )
+                                        if (showBoardTable) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "မြန်မာစံတော်ချိန် (MMT) • အာရှကြေး",
+                                                    color = InkMuted,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    TextButton(
+                                                        onClick = {
+                                                            groupedByLeague.keys.forEach { expandedLeagues[it] = true }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("အားလုံးဖွင့်", color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                    }
+                                                    TextButton(
+                                                        onClick = {
+                                                            groupedByLeague.keys.forEach { expandedLeagues[it] = false }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("အားလုံးဝှက်", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
                                             }
                                         }
@@ -460,33 +481,53 @@ fun ExpressOddsOrderScreen(
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
                                     val isExpanded = expandedLeagues[leagueName] ?: singleLeagueMode
                                     item(key = "express_league_hdr_$leagueName") {
-                                        LeagueHideBarHeader(
-                                            leagueName = leagueName,
-                                            matchCount = leagueMatches.size,
-                                            isExpanded = isExpanded,
-                                            onToggle = { expandedLeagues[leagueName] = !isExpanded }
-                                        )
+                                        if (isOneExpress) {
+                                            OneXBetLeagueHideBarHeader(
+                                                leagueName = leagueName,
+                                                matchCount = leagueMatches.size,
+                                                isExpanded = isExpanded,
+                                                onToggle = { expandedLeagues[leagueName] = !isExpanded }
+                                            )
+                                        } else {
+                                            LeagueHideBarHeader(
+                                                leagueName = leagueName,
+                                                matchCount = leagueMatches.size,
+                                                isExpanded = isExpanded,
+                                                onToggle = { expandedLeagues[leagueName] = !isExpanded }
+                                            )
+                                        }
                                     }
 
                                     if (isExpanded) {
                                         items(leagueMatches, key = { it.id }) { match ->
                                             val currentPick = selectedPicks[match.id]
-                                            ScreenshotMatchRowCard(
-                                                match = match,
-                                                selectedPickKey = currentPick?.pickKey,
-                                                onShowInfo = { infoMatch = match },
-                                                nowMs = nowMs,
-                                                onSelect = { label, odds, pickKey ->
-                                                    if (!isFootballPaused && MyanmarTimeUtil.isMatchBettable(match, nowMs)) {
-                                                        if (currentPick?.pickKey == pickKey) {
-                                                            selectedPicks.remove(match.id)
-                                                        } else {
-                                                            if (!isParlay) selectedPicks.clear()
-                                                            selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
-                                                        }
+                                            val handleSelect: (String, Double, String) -> Unit = { label, odds, pickKey ->
+                                                if (!isFootballPaused && MyanmarTimeUtil.isMatchBettable(match, nowMs)) {
+                                                    if (currentPick?.pickKey == pickKey) {
+                                                        selectedPicks.remove(match.id)
+                                                    } else {
+                                                        if (!isParlay) selectedPicks.clear()
+                                                        selectedPicks[match.id] = MatchPick(match.id, label, odds, pickKey)
                                                     }
                                                 }
-                                            )
+                                            }
+                                            if (isOneExpress) {
+                                                OneXBetScreenshotMatchCard(
+                                                    match = match,
+                                                    selectedPickKey = currentPick?.pickKey,
+                                                    onShowInfo = { infoMatch = match },
+                                                    nowMs = nowMs,
+                                                    onSelect = handleSelect
+                                                )
+                                            } else {
+                                                ScreenshotMatchRowCard(
+                                                    match = match,
+                                                    selectedPickKey = currentPick?.pickKey,
+                                                    onShowInfo = { infoMatch = match },
+                                                    nowMs = nowMs,
+                                                    onSelect = handleSelect
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -543,7 +584,8 @@ fun AdminExpressBoardTab(
         goalOdds: Double,
         boardSource: String,
         oneExpressKyay: String,
-        fiveFiveFiveKyay: String
+        fiveFiveFiveKyay: String,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
     ) -> Unit,
     onUpdateMatchDetails: (
         matchId: String,
@@ -559,7 +601,8 @@ fun AdminExpressBoardTab(
         homeScore: Long,
         awayScore: Long,
         oneExpressKyay: String?,
-        fiveFiveFiveKyay: String?
+        fiveFiveFiveKyay: String?,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
     ) -> Unit,
     onDeleteMatch: (String) -> Unit
 ) {
@@ -998,8 +1041,12 @@ fun AdminExpressBoardTab(
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                     Text(
-                                        text = "Body: ${m.handicapLine} (${m.bodyOdds}x) • Goal: ${m.goalLine} (${m.goalOdds}x)" +
-                                            if (m.autoUpdatedAtMs > 0L) " • Update (MMT): ${formatEpochDateTime(m.autoUpdatedAtMs)}" else "",
+                                        text = if (isOneExpress) {
+                                            "W1: ${KyayFormatter.formatOneXBetOdds(m.win1Odds)} • သရေ: ${KyayFormatter.formatOneXBetOdds(m.drawOdds)} • W2: ${KyayFormatter.formatOneXBetOdds(m.win2Odds)} • ဂိုး(${m.goalLine}): ${KyayFormatter.formatOneXBetOdds(m.overOdds)}/${KyayFormatter.formatOneXBetOdds(m.underOdds)}"
+                                        } else {
+                                            "Body: ${m.handicapLine} (${m.bodyOdds}x) • Goal: ${m.goalLine} (${m.goalOdds}x)" +
+                                                if (m.autoUpdatedAtMs > 0L) " • Update (MMT): ${formatEpochDateTime(m.autoUpdatedAtMs)}" else ""
+                                        },
                                         color = InkMuted,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -1038,10 +1085,10 @@ fun AdminExpressBoardTab(
         AddMatchDialog(
             boardMode = boardMode,
             onDismiss = { showAddDialog = false },
-            onSave = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, oneExpKyay, fffKyay ->
+            onSave = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, oneExpKyay, fffKyay, xBetOdds ->
                 onSaveNewMatch(
                     league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
-                    boardMode, oneExpKyay, fffKyay
+                    boardMode, oneExpKyay, fffKyay, xBetOdds
                 )
                 showAddDialog = false
             }
@@ -1053,10 +1100,10 @@ fun AdminExpressBoardTab(
             match = match,
             boardMode = boardMode,
             onDismiss = { editingMatch = null },
-            onUpdate = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, status, hScore, aScore, oneExpKyay, fffKyay ->
+            onUpdate = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds ->
                 onUpdateMatchDetails(
                     match.id, league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
-                    status, hScore, aScore, oneExpKyay, fffKyay
+                    status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds
                 )
                 editingMatch = null
             },

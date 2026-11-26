@@ -31,6 +31,7 @@ import com.example.data.model.LiveFootballFixture
 import com.example.data.model.LotteryDraw
 import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
+import com.example.data.model.OneXBetOddsSpec
 import com.example.data.model.PaymentAccount
 import com.example.data.model.SecurityConfig
 import com.example.data.model.SportMatch
@@ -269,27 +270,50 @@ class MainViewModel(
     ) { fsCfg, ghRel ->
         val fsNewer = fsCfg != null && fsCfg.latestVersionCode > BuildConfig.VERSION_CODE
         val ghNewer = ghRel != null && ghRel.updatedAtEpochMs > (BuildConfig.BUILD_EPOCH_MS + 180_000L)
+        fun sanitizeReleaseNotes(raw: String, label: String): String {
+            val cleaned = raw.lines()
+                .filterNot { line ->
+                    val low = line.lowercase(java.util.Locale.US)
+                    low.contains("htet thu ya") ||
+                        low.contains("htet-thu-ya") ||
+                        low.contains("direct android apk") ||
+                        low.contains("github.com") ||
+                        low.contains("github auto") ||
+                        low.contains("customer & admin")
+                }
+                .joinToString("\n")
+                .trim()
+            return cleaned.ifBlank {
+                "🔥 စနစ်သစ် ($label) အဆင်သင့်ဖြစ်ပါပြီ!\n• 1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေးနှုန်းများ ပိုမိုမြန်ဆန်တိကျ\n• တိုက်ရိုက်ပွဲစဉ်ရလဒ်နှင့် ငွေသွင်း/ငွေထုတ် ပိုမိုချောမွေ့\n• အကောင်းဆုံးစွမ်းဆောင်ရည်အတွက် ယခုပဲ Update တင်လိုက်ပါ!"
+            }
+        }
         when {
-            fsNewer && fsCfg != null -> AvailableApkUpdate(
-                versionLabel = "v${fsCfg.latestVersionName} (Build ${fsCfg.latestVersionCode})",
-                releaseNotes = fsCfg.releaseNotes.ifBlank {
-                    "🔥 စနစ်သစ် v${fsCfg.latestVersionName} အဆင်သင့်ဖြစ်ပါပြီ!\n• 1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေးနှုန်းများ ပိုမိုမြန်ဆန်တိကျ\n• တိုက်ရိုက်ပွဲစဉ်ရလဒ်နှင့် ငွေသွင်း/ငွေထုတ် ပိုမိုချောမွေ့\n• အကောင်းဆုံးစွမ်းဆောင်ရည်အတွက် ယခုပဲ Update တင်လိုက်ပါ!"
-                },
-                downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(
-                    fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
-                ),
-                forceUpdate = fsCfg.forceUpdate,
-                source = "Admin Push"
-            )
-            ghNewer && ghRel != null -> AvailableApkUpdate(
-                versionLabel = "Latest Release (${ghRel.tagName})",
-                releaseNotes = ghRel.releaseNotes.ifBlank {
-                    "✨ ဗားရှင်းအသစ် (${ghRel.tagName}) ထွက်ရှိနေပါပြီ!\n• တိုက်ရိုက် 1xBET / 555 Mix ကြေးနှုန်းနှင့် Live ရလဒ်များ ပိုမိုတိကျမြန်ဆန်\n• လုံခြုံစိတ်ချရသော စနစ်မြှင့်တင်မှုများ ပါဝင်ပါသည် — ယခုပဲ Update ရယူလိုက်ပါ!"
-                },
-                downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(ghRel.downloadUrl),
-                forceUpdate = false,
-                source = "GitHub Auto"
-            )
+            fsNewer && fsCfg != null -> {
+                val lbl = "v${fsCfg.latestVersionName} (Build ${fsCfg.latestVersionCode})"
+                AvailableApkUpdate(
+                    versionLabel = lbl,
+                    releaseNotes = sanitizeReleaseNotes(fsCfg.releaseNotes, lbl),
+                    downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(
+                        fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
+                    ),
+                    forceUpdate = fsCfg.forceUpdate,
+                    source = "Admin Push"
+                )
+            }
+            ghNewer && ghRel != null -> {
+                val lbl = if (ghRel.tagName.equals("latest", ignoreCase = true) || ghRel.tagName.isBlank()) {
+                    "ဗားရှင်းအသစ်"
+                } else {
+                    "ဗားရှင်း ${ghRel.tagName}"
+                }
+                AvailableApkUpdate(
+                    versionLabel = lbl,
+                    releaseNotes = sanitizeReleaseNotes(ghRel.releaseNotes, lbl),
+                    downloadUrl = com.example.data.network.ApkDownloadHelper.toDirectDownloadUrl(ghRel.downloadUrl),
+                    forceUpdate = false,
+                    source = "Auto Update"
+                )
+            }
             else -> null
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
@@ -1624,6 +1648,7 @@ class MainViewModel(
         boardSource: String = "standard",
         oneExpressKyay: String = "",
         fiveFiveFiveKyay: String = "",
+        oneXBetOdds: OneXBetOddsSpec? = null,
         onSuccess: () -> Unit = {}
     ) = runAction("ပွဲစဉ်အသစ် ထည့်သွင်းပြီးပါပြီ") {
         val res = repository.saveNewMatch(
@@ -1637,7 +1662,8 @@ class MainViewModel(
             goalOdds = goalOdds,
             boardSource = boardSource,
             oneExpressKyay = oneExpressKyay,
-            fiveFiveFiveKyay = fiveFiveFiveKyay
+            fiveFiveFiveKyay = fiveFiveFiveKyay,
+            oneXBetOdds = oneXBetOdds
         )
         if (res.isSuccess) {
             logAuditAsync("Added football match", "board", "", "$homeTeam vs $awayTeam", "$league ($boardSource)")
@@ -1660,7 +1686,8 @@ class MainViewModel(
         homeScore: Long,
         awayScore: Long,
         oneExpressKyay: String? = null,
-        fiveFiveFiveKyay: String? = null
+        fiveFiveFiveKyay: String? = null,
+        oneXBetOdds: OneXBetOddsSpec? = null
     ) {
         viewModelScope.launch {
             _busy.value = true
@@ -1679,7 +1706,8 @@ class MainViewModel(
                     homeScore = homeScore,
                     awayScore = awayScore,
                     oneExpressKyay = oneExpressKyay,
-                    fiveFiveFiveKyay = fiveFiveFiveKyay
+                    fiveFiveFiveKyay = fiveFiveFiveKyay,
+                    oneXBetOdds = oneXBetOdds
                 )
                 res.onSuccess {
                     logAuditAsync("Updated match", "board", matchId, "$homeTeam vs $awayTeam", "$status ($homeScore-$awayScore)")

@@ -16,11 +16,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -30,6 +33,8 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Star
@@ -83,6 +88,15 @@ val BoardCellSelectedBg = Color(0xFF16A34A)
 val BoardCellDefaultBg = Color(0xFFFDFDFD)
 val BoardBorderGray = Color(0xFFD5DCD8)
 
+val OneXBetCanvasBg = Color(0xFFEEF3F8)
+val OneXBetHeaderBlue = Color(0xFF123B6D)
+val OneXBetStripBlue = Color(0xFF184D8C)
+val OneXBetRoyalBlue = Color(0xFF1967D2)
+val OneXBetNavyInk = Color(0xFF162C46)
+val OneXBetSlateInk = Color(0xFF5A7088)
+val OneXBetCardBorder = Color(0xFFDDE6F0)
+val OneXBetTileBg = Color(0xFFEEF3F8)
+
 fun compactKyayText(normalizedLine: String): String {
     val cleanSpec = normalizedLine
         .replace("home", "", ignoreCase = true)
@@ -107,11 +121,12 @@ fun compactKyayText(normalizedLine: String): String {
 fun SportsModeSwitchStrip(
     isParlay: Boolean,
     accentColor: Color = BoardGreenAccent,
+    containerColor: Color = BoardTopBarBg,
     onSelectMode: (Boolean) -> Unit,
     testTagPrefix: String
 ) {
     Surface(
-        color = BoardTopBarBg,
+        color = containerColor,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -121,8 +136,9 @@ fun SportsModeSwitchStrip(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val singleSelected = !isParlay
+            val inactiveTileBg = if (containerColor == BoardTopBarBg) Color(0xFF323D39) else Color.White.copy(alpha = 0.12f)
             Surface(
-                color = if (singleSelected) accentColor else Color(0xFF323D39),
+                color = if (singleSelected) accentColor else inactiveTileBg,
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(
                     width = 1.dp,
@@ -149,7 +165,7 @@ fun SportsModeSwitchStrip(
 
             val parlaySelected = isParlay
             Surface(
-                color = if (parlaySelected) accentColor else Color(0xFF323D39),
+                color = if (parlaySelected) accentColor else inactiveTileBg,
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(
                     width = 1.dp,
@@ -548,6 +564,446 @@ fun ScreenshotMatchRowCard(
     }
 }
 
+private data class OneXBetTileSpec(
+    val pickKey: String,
+    val title: String,
+    val oddsText: String,
+    val oddsValue: Double,
+    val pickLabel: String
+)
+
+@Composable
+fun OneXBetSectionHeader(
+    isVisible: Boolean,
+    matchCount: Int,
+    onToggle: () -> Unit,
+    testTag: String = "one_xbet_section_header"
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.SportsSoccer,
+                contentDescription = null,
+                tint = OneXBetNavyInk,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "ဘောလုံး ($matchCount)",
+                color = OneXBetNavyInk,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Icon(
+            imageVector = if (isVisible) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (isVisible) "Collapse football" else "Expand football",
+            tint = OneXBetSlateInk,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+@Composable
+fun OneXBetLeagueHideBarHeader(
+    leagueName: String,
+    matchCount: Int,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val low = leagueName.lowercase(Locale.US)
+    val isCup = low.contains("champions") || low.contains("cup") || low.contains("uefa") || low.contains("afc")
+    val isShort = low.contains("short") || low.contains("student") || low.contains("fifa") || low.contains("4x4") || low.contains("3x3") || low.contains("5x5")
+    val badgeBg = when {
+        isCup -> Color(0xFFFEF3C7)
+        isShort -> Color(0xFFFEE2E2)
+        else -> Color(0xFFE0ECFF)
+    }
+    val badgeTint = when {
+        isCup -> Color(0xFFB45309)
+        isShort -> Color(0xFFB91C1C)
+        else -> OneXBetRoyalBlue
+    }
+    val safeTag = remember(leagueName) {
+        leagueName.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "_").trim('_').take(32)
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onToggle)
+            .testTag("one_xbet_league_hide_bar_$safeTag"),
+        color = Color.White,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, OneXBetCardBorder),
+        shadowElevation = 0.5.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 50.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(badgeBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = when {
+                            isCup -> Icons.Default.EmojiEvents
+                            isShort -> Icons.Default.SportsSoccer
+                            else -> Icons.Default.Public
+                        },
+                        contentDescription = null,
+                        tint = badgeTint,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "$leagueName ($matchCount)",
+                    color = OneXBetNavyInk,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = if (isExpanded) "Hide league matches" else "Show league matches",
+                tint = OneXBetSlateInk,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun OneXBetScreenshotMatchCard(
+    match: SportMatch,
+    selectedPickKey: String?,
+    onShowInfo: () -> Unit,
+    onSelect: (String, Double, String) -> Unit,
+    nowMs: Long = System.currentTimeMillis()
+) {
+    val bettable = remember(match.id, match.status, match.liveClock, match.kickoffLabel, match.kickoffEpochMs, nowMs / 10_000L) {
+        MyanmarTimeUtil.isMatchBettable(match, nowMs)
+    }
+    val resolvedKickoffMs = remember(match.id, match.kickoffEpochMs, match.kickoffLabel, match.matchDate) {
+        MyanmarTimeUtil.resolveMatchKickoffEpochMs(match, nowMs)
+    }
+    val headerTimeText = remember(match.kickoffLabel, match.liveClock, match.status, bettable, resolvedKickoffMs, nowMs / 30_000L) {
+        when {
+            match.liveClock.isNotBlank() -> match.liveClock
+            match.status == "finished" -> "ပြီးဆုံး (FT)"
+            !bettable -> "${match.kickoffLabel} • ပိတ်ပြီး"
+            resolvedKickoffMs > nowMs -> {
+                val mins = ((resolvedKickoffMs - nowMs) / 60_000L).coerceAtLeast(1L)
+                if (mins < 60L) "$mins မိနစ်တွင် စတင်မည်"
+                else "${match.kickoffLabel} (MMT)"
+            }
+            else -> "${match.kickoffLabel} (MMT)"
+        }
+    }
+    val goalText = remember(match.goalLine) {
+        match.goalLine.trim().ifBlank { "2.5" }
+    }
+    val tiles = remember(
+        match.id,
+        match.homeTeam,
+        match.awayTeam,
+        goalText,
+        match.win1Odds,
+        match.drawOdds,
+        match.win2Odds,
+        match.overOdds,
+        match.underOdds
+    ) {
+        listOf(
+            OneXBetTileSpec(
+                pickKey = "w1",
+                title = "W1",
+                oddsText = KyayFormatter.formatOneXBetOdds(match.win1Odds),
+                oddsValue = match.win1Odds,
+                pickLabel = "${match.homeTeam} (W1) vs ${match.awayTeam}"
+            ),
+            OneXBetTileSpec(
+                pickKey = "draw",
+                title = "သရေ",
+                oddsText = KyayFormatter.formatOneXBetOdds(match.drawOdds),
+                oddsValue = match.drawOdds,
+                pickLabel = "${match.homeTeam} vs ${match.awayTeam} (သရေ)"
+            ),
+            OneXBetTileSpec(
+                pickKey = "w2",
+                title = "W2",
+                oddsText = KyayFormatter.formatOneXBetOdds(match.win2Odds),
+                oddsValue = match.win2Odds,
+                pickLabel = "${match.awayTeam} (W2) vs ${match.homeTeam}"
+            ),
+            OneXBetTileSpec(
+                pickKey = "over",
+                title = "ဂိုးပေါ် $goalText",
+                oddsText = KyayFormatter.formatOneXBetOdds(match.overOdds),
+                oddsValue = match.overOdds,
+                pickLabel = "${match.homeTeam}-${match.awayTeam} ဂိုးပေါ် ($goalText)"
+            ),
+            OneXBetTileSpec(
+                pickKey = "under",
+                title = "ဂိုးအောက် $goalText",
+                oddsText = KyayFormatter.formatOneXBetOdds(match.underOdds),
+                oddsValue = match.underOdds,
+                pickLabel = "${match.homeTeam}-${match.awayTeam} ဂိုးအောက် ($goalText)"
+            )
+        )
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        color = Color.White,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, OneXBetCardBorder),
+        shadowElevation = 0.5.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Card top row: soccer ball + kickoff / countdown + icons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SportsSoccer,
+                        contentDescription = null,
+                        tint = OneXBetNavyInk,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = headerTimeText,
+                        color = if (bettable) OneXBetSlateInk else Color(0xFFB91C1C),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (match.liveClock.isNotBlank()) {
+                        Surface(
+                            color = Color(0xFFDCFCE7),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LiveTv,
+                                contentDescription = "Live",
+                                tint = Color(0xFF15803D),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp).size(14.dp)
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onShowInfo)
+                            .testTag("match_info_${match.id}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "ကြေးအသေးစိတ်",
+                            tint = OneXBetSlateInk,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(thickness = 1.dp, color = OneXBetCanvasBg)
+
+            // Teams + Scores + Subtitle
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        TeamLogoAvatar(
+                            logoUrl = match.homeLogoUrl,
+                            teamName = match.homeTeam,
+                            size = 22.dp
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = match.homeTeam,
+                            color = OneXBetNavyInk,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = match.homeScore.toString(),
+                        color = OneXBetNavyInk,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        TeamLogoAvatar(
+                            logoUrl = match.awayLogoUrl,
+                            teamName = match.awayTeam,
+                            size = 22.dp
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = match.awayTeam,
+                            color = OneXBetNavyInk,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = match.awayScore.toString(),
+                        color = OneXBetNavyInk,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = "${match.kickoffLabel} (MMT) • ဂိုးပေါင်း $goalText",
+                    color = OneXBetRoyalBlue,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Horizontally scrollable betting tiles: W1, သရေ, W2, ဂိုးပေါ်, ဂိုးအောက်
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("one_xbet_odds_row_${match.id}"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(tiles, key = { it.pickKey }) { tile ->
+                        val isSelected = selectedPickKey == tile.pickKey
+                        Surface(
+                            color = when {
+                                isSelected -> OneXBetRoyalBlue
+                                !bettable -> Color(0xFFF3F4F6)
+                                else -> OneXBetTileBg
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) OneXBetRoyalBlue else Color(0xFFE0E8F0)
+                            ),
+                            modifier = Modifier
+                                .widthIn(min = 96.dp)
+                                .heightIn(min = 56.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(enabled = bettable) {
+                                    onSelect(tile.pickLabel, tile.oddsValue, tile.pickKey)
+                                }
+                                .testTag("match_${tile.pickKey}_${match.id}")
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = tile.title,
+                                    color = when {
+                                        isSelected -> Color.White.copy(alpha = 0.92f)
+                                        !bettable -> Color(0xFF9CA3AF)
+                                        else -> OneXBetSlateInk
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = tile.oddsText,
+                                    color = when {
+                                        isSelected -> Color.White
+                                        !bettable -> Color(0xFF9CA3AF)
+                                        else -> OneXBetNavyInk
+                                    },
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun KyayPillBadge(
     text: String,
@@ -812,18 +1268,32 @@ fun BoardMatchInfoDialog(
                 if (!boardSourceLabel.isNullOrBlank()) {
                     Text("စနစ်: $boardSourceLabel • လိုတရ APK ကြေး", color = InkMuted, style = MaterialTheme.typography.bodySmall)
                 }
-                Text(
-                    "အာရှကြေး: ${KyayFormatter.formatAsianMarketTag(match.handicapLine, match.goalLine)}",
-                    fontFamily = JetBrainsMonoFontFamily,
-                    color = Color(0xFF047857),
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text("ဘော်ဒီကြေး: ${hInfo.summaryText}", color = PitchEmeraldDark)
-                Text(gInfo, color = Color(0xFF92400E))
-                if (sourceKyay.isNotBlank()) {
-                    Text(sourceKyay, fontFamily = JetBrainsMonoFontFamily, color = Color(0xFF0369A1))
+                if (match.boardSource == "one_express") {
+                    Text(
+                        text = "W1: ${KyayFormatter.formatOneXBetOdds(match.win1Odds)} • သရေ: ${KyayFormatter.formatOneXBetOdds(match.drawOdds)} • W2: ${KyayFormatter.formatOneXBetOdds(match.win2Odds)}",
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = OneXBetRoyalBlue,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "ဂိုးပေါ် (${match.goalLine}): ${KyayFormatter.formatOneXBetOdds(match.overOdds)} • ဂိုးအောက် (${match.goalLine}): ${KyayFormatter.formatOneXBetOdds(match.underOdds)}",
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = Color(0xFF047857)
+                    )
+                } else {
+                    Text(
+                        "အာရှကြေး: ${KyayFormatter.formatAsianMarketTag(match.handicapLine, match.goalLine)}",
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = Color(0xFF047857),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text("ဘော်ဒီကြေး: ${hInfo.summaryText}", color = PitchEmeraldDark)
+                    Text(gInfo, color = Color(0xFF92400E))
+                    if (sourceKyay.isNotBlank()) {
+                        Text(sourceKyay, fontFamily = JetBrainsMonoFontFamily, color = Color(0xFF0369A1))
+                    }
+                    Text("Body Odds: x${match.bodyOdds} • Goal Odds: x${match.goalOdds}", fontFamily = JetBrainsMonoFontFamily)
                 }
-                Text("Body Odds: x${match.bodyOdds} • Goal Odds: x${match.goalOdds}", fontFamily = JetBrainsMonoFontFamily)
             }
         },
         confirmButton = {

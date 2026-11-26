@@ -147,6 +147,11 @@ service cloud.firestore {
              data.goalLine is string && data.goalLine.size() >= 1 && data.goalLine.size() <= 20 &&
              data.bodyOdds is number && data.bodyOdds >= 1.0 && data.bodyOdds <= 50.0 &&
              data.goalOdds is number && data.goalOdds >= 1.0 && data.goalOdds <= 50.0 &&
+             (!('win1Odds' in data) || (data.win1Odds is number && data.win1Odds >= 1.0 && data.win1Odds <= 100.0)) &&
+             (!('drawOdds' in data) || (data.drawOdds is number && data.drawOdds >= 1.0 && data.drawOdds <= 100.0)) &&
+             (!('win2Odds' in data) || (data.win2Odds is number && data.win2Odds >= 1.0 && data.win2Odds <= 100.0)) &&
+             (!('overOdds' in data) || (data.overOdds is number && data.overOdds >= 1.0 && data.overOdds <= 100.0)) &&
+             (!('underOdds' in data) || (data.underOdds is number && data.underOdds >= 1.0 && data.underOdds <= 100.0)) &&
              data.status in ['open', 'closed', 'finished'] &&
              data.homeScore is int && data.homeScore >= 0 && data.homeScore <= 99 &&
              data.awayScore is int && data.awayScore >= 0 && data.awayScore <= 99 &&
@@ -636,7 +641,7 @@ service cloud.firestore {
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().keys().hasAll(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'kickoffEpochMs', 'liveClock', 'boardSource', 'oneExpressKyay', 'fiveFiveFiveKyay', 'autoUpdatedAtMs', 'createdBy', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'win1Odds', 'drawOdds', 'win2Odds', 'overOdds', 'underOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'kickoffEpochMs', 'liveClock', 'boardSource', 'oneExpressKyay', 'fiveFiveFiveKyay', 'autoUpdatedAtMs', 'createdBy', 'createdAt', 'updatedAt']);
       allow update: if hasAdminPerm('canManageBoard') &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&

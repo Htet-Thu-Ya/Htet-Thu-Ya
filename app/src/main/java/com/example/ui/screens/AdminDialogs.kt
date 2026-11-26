@@ -123,7 +123,8 @@ fun AddMatchDialog(
         bodyOdds: Double,
         goalOdds: Double,
         oneExpressKyay: String,
-        fiveFiveFiveKyay: String
+        fiveFiveFiveKyay: String,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
     ) -> Unit
 ) {
     var league by remember { mutableStateOf("Premier League") }
@@ -134,6 +135,11 @@ fun AddMatchDialog(
     var goalLine by remember { mutableStateOf("2.5") }
     var bodyOdds by remember { mutableStateOf("1.90") }
     var goalOdds by remember { mutableStateOf("1.90") }
+    var win1Odds by remember { mutableStateOf("1.95") }
+    var drawOdds by remember { mutableStateOf("3.45") }
+    var win2Odds by remember { mutableStateOf("3.70") }
+    var overOdds by remember { mutableStateOf("1.90") }
+    var underOdds by remember { mutableStateOf("1.90") }
     var oneExpKyay by remember {
         mutableStateOf(
             if (boardMode == "one_express") KyayFormatter.formatOneExpressKyay("Home -0.5", "2.5") else ""
@@ -168,6 +174,50 @@ fun AddMatchDialog(
                 OutlinedTextField(value = handicap, onValueChange = { handicap = it }, label = { Text("ဘော်ဒီ ကြေး") }, singleLine = true)
                 OutlinedTextField(value = goalLine, onValueChange = { goalLine = it }, label = { Text("ဂိုးပေါင်း") }, singleLine = true)
                 if (boardMode == "one_express") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = win1Odds,
+                            onValueChange = { win1Odds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("W1") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = drawOdds,
+                            onValueChange = { drawOdds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("သရေ") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = win2Odds,
+                            onValueChange = { win2Odds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("W2") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = overOdds,
+                            onValueChange = { overOdds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("ဂိုးပေါ် Odds") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = underOdds,
+                            onValueChange = { underOdds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("ဂိုးအောက် Odds") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                     OutlinedTextField(
                         value = oneExpKyay,
                         onValueChange = { oneExpKyay = it },
@@ -206,6 +256,15 @@ fun AddMatchDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val xBetSpec = if (boardMode == "one_express") {
+                        com.example.data.model.OneXBetOddsSpec(
+                            win1Odds = win1Odds.toDoubleOrNull() ?: 1.95,
+                            drawOdds = drawOdds.toDoubleOrNull() ?: 3.45,
+                            win2Odds = win2Odds.toDoubleOrNull() ?: 3.70,
+                            overOdds = overOdds.toDoubleOrNull() ?: 1.90,
+                            underOdds = underOdds.toDoubleOrNull() ?: 1.90
+                        )
+                    } else null
                     onSave(
                         league,
                         home,
@@ -216,7 +275,8 @@ fun AddMatchDialog(
                         bodyOdds.toDoubleOrNull() ?: 1.90,
                         goalOdds.toDoubleOrNull() ?: 1.90,
                         oneExpKyay,
-                        fffKyay
+                        fffKyay,
+                        xBetSpec
                     )
                 },
                 enabled = league.isNotBlank() && home.isNotBlank() && away.isNotBlank()
@@ -248,7 +308,8 @@ fun EditMatchResultDialog(
         homeScore: Long,
         awayScore: Long,
         oneExpressKyay: String?,
-        fiveFiveFiveKyay: String?
+        fiveFiveFiveKyay: String?,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
     ) -> Unit,
     onRequestDelete: () -> Unit
 ) {
@@ -260,11 +321,17 @@ fun EditMatchResultDialog(
     var goalLine by remember(match.id) { mutableStateOf(match.goalLine) }
     var bodyOdds by remember(match.id) { mutableStateOf(match.bodyOdds.toString()) }
     var goalOdds by remember(match.id) { mutableStateOf(match.goalOdds.toString()) }
+    var win1Odds by remember(match.id) { mutableStateOf(KyayFormatter.formatOneXBetOdds(match.win1Odds)) }
+    var drawOdds by remember(match.id) { mutableStateOf(KyayFormatter.formatOneXBetOdds(match.drawOdds)) }
+    var win2Odds by remember(match.id) { mutableStateOf(KyayFormatter.formatOneXBetOdds(match.win2Odds)) }
+    var overOdds by remember(match.id) { mutableStateOf(KyayFormatter.formatOneXBetOdds(match.overOdds)) }
+    var underOdds by remember(match.id) { mutableStateOf(KyayFormatter.formatOneXBetOdds(match.underOdds)) }
     var status by remember(match.id) { mutableStateOf(match.status) }
     var homeScore by remember(match.id) { mutableStateOf(match.homeScore.toString()) }
     var awayScore by remember(match.id) { mutableStateOf(match.awayScore.toString()) }
     var oneExpKyay by remember(match.id) { mutableStateOf(match.oneExpressKyay) }
     var fffKyay by remember(match.id) { mutableStateOf(match.fiveFiveFiveKyay) }
+    val isOneExpress = boardMode == "one_express" || match.boardSource == "one_express"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -307,7 +374,51 @@ fun EditMatchResultDialog(
                 OutlinedTextField(value = kickoffLabel, onValueChange = { kickoffLabel = it }, label = { Text("ကန်ချိန်") }, singleLine = true)
                 OutlinedTextField(value = handicapLine, onValueChange = { handicapLine = it }, label = { Text("ဘော်ဒီ ကြေး") }, singleLine = true)
                 OutlinedTextField(value = goalLine, onValueChange = { goalLine = it }, label = { Text("ဂိုးပေါင်း") }, singleLine = true)
-                if (boardMode == "one_express" || match.boardSource == "one_express") {
+                if (isOneExpress) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = win1Odds,
+                            onValueChange = { win1Odds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("W1") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = drawOdds,
+                            onValueChange = { drawOdds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("သရေ") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = win2Odds,
+                            onValueChange = { win2Odds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("W2") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = overOdds,
+                            onValueChange = { overOdds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("ဂိုးပေါ် Odds") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = underOdds,
+                            onValueChange = { underOdds = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("ဂိုးအောက် Odds") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                     OutlinedTextField(
                         value = oneExpKyay,
                         onValueChange = { oneExpKyay = it },
@@ -352,6 +463,15 @@ fun EditMatchResultDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val xBetSpec = if (isOneExpress) {
+                        com.example.data.model.OneXBetOddsSpec(
+                            win1Odds = win1Odds.toDoubleOrNull() ?: match.win1Odds,
+                            drawOdds = drawOdds.toDoubleOrNull() ?: match.drawOdds,
+                            win2Odds = win2Odds.toDoubleOrNull() ?: match.win2Odds,
+                            overOdds = overOdds.toDoubleOrNull() ?: match.overOdds,
+                            underOdds = underOdds.toDoubleOrNull() ?: match.underOdds
+                        )
+                    } else null
                     onUpdate(
                         league,
                         homeTeam,
@@ -364,8 +484,9 @@ fun EditMatchResultDialog(
                         status,
                         homeScore.toLongOrNull() ?: 0L,
                         awayScore.toLongOrNull() ?: 0L,
-                        if (boardMode == "one_express" || match.boardSource == "one_express") oneExpKyay else null,
-                        if (boardMode == "five_five_five" || match.boardSource == "five_five_five") fffKyay else null
+                        if (isOneExpress) oneExpKyay else null,
+                        if (boardMode == "five_five_five" || match.boardSource == "five_five_five") fffKyay else null,
+                        xBetSpec
                     )
                 },
                 enabled = league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank(),

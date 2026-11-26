@@ -210,27 +210,29 @@ fun ApkUpdatePromptDialog(
             )
         },
         text = {
+            val cleanReleaseNotes = remember(update.releaseNotes, update.versionLabel) {
+                val filtered = update.releaseNotes.lines()
+                    .filterNot { line ->
+                        val low = line.lowercase(java.util.Locale.US)
+                        low.contains("htet thu ya") ||
+                            low.contains("htet-thu-ya") ||
+                            low.contains("direct android apk") ||
+                            low.contains("github.com") ||
+                            low.contains("github auto") ||
+                            low.contains("customer & admin")
+                    }
+                    .joinToString("\n")
+                    .trim()
+                filtered.ifBlank {
+                    "🔥 စနစ်သစ် (${update.versionLabel}) အဆင်သင့်ဖြစ်ပါပြီ!\n• 1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေးနှုန်းများ ပိုမိုမြန်ဆန်တိကျ\n• တိုက်ရိုက်ပွဲစဉ်ရလဒ်နှင့် ငွေသွင်း/ငွေထုတ် ပိုမိုချောမွေ့\n• အကောင်းဆုံးစွမ်းဆောင်ရည်အတွက် ယခုပဲ Update တင်လိုက်ပါ!"
+                }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = update.releaseNotes,
+                    text = cleanReleaseNotes,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = InkDark
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                Surface(
-                    color = Color(0xFFEFF6F2),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "အရင်းအမြစ်: ${update.source}\nတိုက်ရိုက်ဒေါင်းလုဒ်လင့်: $directUrl",
-                            color = PitchEmeraldDark,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
                 if (downloading) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (progressPct > 0) {

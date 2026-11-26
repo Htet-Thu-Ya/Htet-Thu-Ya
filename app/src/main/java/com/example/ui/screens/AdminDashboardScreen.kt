@@ -221,8 +221,8 @@ fun AdminDashboardScreen(
     onAutoSettleNow: () -> Unit,
     onAutoSettleCustomer: (String, String) -> Unit,
     onAutoSettleOrder: (BetOrder) -> Unit,
-    onSaveNewMatch: (String, String, String, String, String, String, Double, Double, String, String, String) -> Unit,
-    onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?) -> Unit,
+    onSaveNewMatch: (String, String, String, String, String, String, Double, Double, String, String, String, com.example.data.model.OneXBetOddsSpec?) -> Unit,
+    onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, com.example.data.model.OneXBetOddsSpec?) -> Unit,
     onDeleteMatch: (String) -> Unit,
     onSaveNewDraw: (roundTitle: String, closeTimeLabel: String, payoutMultiplier: Double, drawType: String) -> Unit,
     onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
@@ -1806,8 +1806,8 @@ private fun AdminBoardTab(
     draws: List<LotteryDraw>,
     boardConfig: BoardConfig,
     busy: Boolean,
-    onSaveNewMatch: (String, String, String, String, String, String, Double, Double, String, String, String) -> Unit,
-    onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?) -> Unit,
+    onSaveNewMatch: (String, String, String, String, String, String, Double, Double, String, String, String, com.example.data.model.OneXBetOddsSpec?) -> Unit,
+    onUpdateMatchDetails: (String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, com.example.data.model.OneXBetOddsSpec?) -> Unit,
     onDeleteMatch: (String) -> Unit,
     onSaveNewDraw: (roundTitle: String, closeTimeLabel: String, payoutMultiplier: Double, drawType: String) -> Unit,
     onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
@@ -2205,9 +2205,9 @@ private fun AdminBoardTab(
         AddMatchDialog(
             boardMode = "standard",
             onDismiss = { showAddMatch = false },
-            onSave = { l, h, a, k, hand, goal, bOdds, gOdds, oneExpKyay, fffKyay ->
+            onSave = { l, h, a, k, hand, goal, bOdds, gOdds, oneExpKyay, fffKyay, xBetOdds ->
                 showAddMatch = false
-                onSaveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, "standard", oneExpKyay, fffKyay)
+                onSaveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, "standard", oneExpKyay, fffKyay, xBetOdds)
             }
         )
     }
@@ -2216,9 +2216,9 @@ private fun AdminBoardTab(
             match = m,
             boardMode = m.boardSource.ifBlank { "standard" },
             onDismiss = { editingMatch = null },
-            onUpdate = { l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay ->
+            onUpdate = { l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds ->
                 editingMatch = null
-                onUpdateMatchDetails(m.id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay)
+                onUpdateMatchDetails(m.id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds)
             },
             onRequestDelete = {
                 editingMatch = null

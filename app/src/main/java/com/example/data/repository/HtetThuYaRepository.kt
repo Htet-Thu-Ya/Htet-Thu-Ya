@@ -1587,7 +1587,8 @@ class HtetThuYaRepository(
         goalOdds: Double,
         boardSource: String = "standard",
         oneExpressKyay: String = "",
-        fiveFiveFiveKyay: String = ""
+        fiveFiveFiveKyay: String = "",
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec? = null
     ): Result<Unit> {
         val matchId = "m_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val path = "matches/$matchId"
@@ -1615,31 +1616,41 @@ class HtetThuYaRepository(
             val resolved555 = fiveFiveFiveKyay.trim().ifBlank {
                 if (safeSource == "five_five_five") com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(safeHandicap, safeGoal) else ""
             }.take(60)
-            db.collection("matches").document(matchId).set(
-                mapOf(
-                    "league" to league.trim().take(60),
-                    "homeTeam" to homeTeam.trim().take(60),
-                    "awayTeam" to awayTeam.trim().take(60),
-                    "kickoffLabel" to cleanKickoff,
-                    "matchDate" to computedMatchDate,
-                    "kickoffEpochMs" to resolvedKickoffMs.coerceAtLeast(0L),
-                    "handicapLine" to safeHandicap,
-                    "goalLine" to safeGoal,
-                    "bodyOdds" to bodyOdds.coerceIn(1.05, 50.0),
-                    "goalOdds" to goalOdds.coerceIn(1.05, 50.0),
-                    "status" to "open",
-                    "homeScore" to 0L,
-                    "awayScore" to 0L,
-                    "visibility" to "public",
-                    "boardSource" to safeSource,
-                    "oneExpressKyay" to resolvedOneExp,
-                    "fiveFiveFiveKyay" to resolved555,
-                    "autoUpdatedAtMs" to nowMs,
-                    "createdBy" to adminUid,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val est1x2 = com.example.data.betting.KyayFormatter.estimate1x2FromHandicap(safeHandicap)
+            val win1 = (oneXBetOdds?.win1Odds ?: est1x2.first).coerceIn(1.01, 99.0)
+            val draw = (oneXBetOdds?.drawOdds ?: est1x2.second).coerceIn(1.01, 99.0)
+            val win2 = (oneXBetOdds?.win2Odds ?: est1x2.third).coerceIn(1.01, 99.0)
+            val over = (oneXBetOdds?.overOdds ?: goalOdds).coerceIn(1.01, 99.0)
+            val under = (oneXBetOdds?.underOdds ?: goalOdds).coerceIn(1.01, 99.0)
+            val matchDoc = mutableMapOf<String, Any>(
+                "league" to league.trim().take(60),
+                "homeTeam" to homeTeam.trim().take(60),
+                "awayTeam" to awayTeam.trim().take(60),
+                "kickoffLabel" to cleanKickoff,
+                "matchDate" to computedMatchDate,
+                "kickoffEpochMs" to resolvedKickoffMs.coerceAtLeast(0L),
+                "handicapLine" to safeHandicap,
+                "goalLine" to safeGoal,
+                "bodyOdds" to bodyOdds.coerceIn(1.05, 50.0),
+                "goalOdds" to goalOdds.coerceIn(1.05, 50.0),
+                "win1Odds" to win1,
+                "drawOdds" to draw,
+                "win2Odds" to win2,
+                "overOdds" to over,
+                "underOdds" to under,
+                "status" to "open",
+                "homeScore" to 0L,
+                "awayScore" to 0L,
+                "visibility" to "public",
+                "boardSource" to safeSource,
+                "oneExpressKyay" to resolvedOneExp,
+                "fiveFiveFiveKyay" to resolved555,
+                "autoUpdatedAtMs" to nowMs,
+                "createdBy" to adminUid,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("matches").document(matchId).set(matchDoc).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -1663,7 +1674,8 @@ class HtetThuYaRepository(
         homeScore: Long,
         awayScore: Long,
         oneExpressKyay: String? = null,
-        fiveFiveFiveKyay: String? = null
+        fiveFiveFiveKyay: String? = null,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec? = null
     ): Result<Unit> {
         val path = "matches/$matchId"
         return try {
@@ -1706,6 +1718,13 @@ class HtetThuYaRepository(
             }
             if (fiveFiveFiveKyay != null) {
                 fields["fiveFiveFiveKyay"] = fiveFiveFiveKyay.trim().take(60)
+            }
+            if (oneXBetOdds != null) {
+                fields["win1Odds"] = oneXBetOdds.win1Odds.coerceIn(1.01, 99.0)
+                fields["drawOdds"] = oneXBetOdds.drawOdds.coerceIn(1.01, 99.0)
+                fields["win2Odds"] = oneXBetOdds.win2Odds.coerceIn(1.01, 99.0)
+                fields["overOdds"] = oneXBetOdds.overOdds.coerceIn(1.01, 99.0)
+                fields["underOdds"] = oneXBetOdds.underOdds.coerceIn(1.01, 99.0)
             }
             db.collection("matches").document(matchId).update(fields).await()
             Result.success(Unit)
@@ -3146,6 +3165,11 @@ class HtetThuYaRepository(
                                 "goalLine" to fix.goalLine,
                                 "bodyOdds" to appliedBodyOdds,
                                 "goalOdds" to appliedGoalOdds,
+                                "win1Odds" to fix.win1Odds.coerceIn(1.01, 99.0),
+                                "drawOdds" to fix.drawOdds.coerceIn(1.01, 99.0),
+                                "win2Odds" to fix.win2Odds.coerceIn(1.01, 99.0),
+                                "overOdds" to fix.overOdds.coerceIn(1.01, 99.0),
+                                "underOdds" to fix.underOdds.coerceIn(1.01, 99.0),
                                 "status" to fix.status,
                                 "homeScore" to fix.homeScore,
                                 "awayScore" to fix.awayScore,
@@ -3183,6 +3207,11 @@ class HtetThuYaRepository(
                             updateFields["goalLine"] = fix.goalLine
                             updateFields["bodyOdds"] = appliedBodyOdds
                             updateFields["goalOdds"] = appliedGoalOdds
+                            updateFields["win1Odds"] = fix.win1Odds.coerceIn(1.01, 99.0)
+                            updateFields["drawOdds"] = fix.drawOdds.coerceIn(1.01, 99.0)
+                            updateFields["win2Odds"] = fix.win2Odds.coerceIn(1.01, 99.0)
+                            updateFields["overOdds"] = fix.overOdds.coerceIn(1.01, 99.0)
+                            updateFields["underOdds"] = fix.underOdds.coerceIn(1.01, 99.0)
                             if (boardSource == "one_express") {
                                 updateFields["oneExpressKyay"] = oneExpKyay
                             }
@@ -3491,6 +3520,7 @@ class HtetThuYaRepository(
                 val fffKyay = if (boardSource == "five_five_five") {
                     com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(handicap, goalLine, bodyOdds, goalOdds).take(60)
                 } else ""
+                val est1x2 = com.example.data.betting.KyayFormatter.estimate1x2FromHandicap(handicap)
                 val docId = "${docPrefix}${idx + 1}"
                 batch.set(
                     db.collection("matches").document(docId),
@@ -3503,6 +3533,11 @@ class HtetThuYaRepository(
                         "goalLine" to goalLine,
                         "bodyOdds" to bodyOdds,
                         "goalOdds" to goalOdds,
+                        "win1Odds" to est1x2.first,
+                        "drawOdds" to est1x2.second,
+                        "win2Odds" to est1x2.third,
+                        "overOdds" to goalOdds,
+                        "underOdds" to goalOdds,
                         "status" to if (isFinished) "finished" else "open",
                         "homeScore" to if (isFinished) 2L else 0L,
                         "awayScore" to if (isFinished) 1L else 0L,

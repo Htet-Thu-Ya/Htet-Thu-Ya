@@ -112,12 +112,20 @@ object AutoSettleEngine {
                 ?: return AutoSettleDecision.NotReady
 
             val legScoreRatio = when (pickSide) {
+                "w1" -> if (match.homeScore > match.awayScore) 1.0 else -1.0
+                "draw" -> if (match.homeScore == match.awayScore) 1.0 else -1.0
+                "w2" -> if (match.awayScore > match.homeScore) 1.0 else -1.0
                 "home", "away" -> evaluateHandicapLeg(match, pickSide)
                 "over", "under" -> evaluateGoalLineLeg(match, pickSide)
                 else -> null
             } ?: return AutoSettleDecision.NotReady
 
             val legOdds = when (pickSide) {
+                "w1" -> match.win1Odds
+                "draw" -> match.drawOdds
+                "w2" -> match.win2Odds
+                "over" -> if (match.boardSource == "one_express") match.overOdds else match.goalOdds
+                "under" -> if (match.boardSource == "one_express") match.underOdds else match.goalOdds
                 "home", "away" -> match.bodyOdds
                 else -> match.goalOdds
             }.coerceAtLeast(1.0)
@@ -171,13 +179,16 @@ object AutoSettleEngine {
     }
 
     internal fun resolvePickSide(pickKey: String?, selection: String, match: SportMatch): String? {
-        if (!pickKey.isNullOrBlank() && pickKey in listOf("home", "away", "over", "under")) {
+        if (!pickKey.isNullOrBlank() && pickKey in listOf("home", "away", "over", "under", "w1", "draw", "w2")) {
             return pickKey
         }
         val lower = selection.lowercase()
         return when {
-            lower.contains("over (") || lower.contains("ဂိုးပေါင်း over") -> "over"
-            lower.contains("under (") || lower.contains("ဂိုးပေါင်း under") -> "under"
+            lower.contains("ဂိုးပေါ်") || lower.contains("over (") || lower.contains("ဂိုးပေါင်း over") -> "over"
+            lower.contains("ဂိုးအောက်") || lower.contains("under (") || lower.contains("ဂိုးပေါင်း under") -> "under"
+            lower.contains("(w1)") -> "w1"
+            lower.contains("(သရေ)") || lower.contains("(draw)") -> "draw"
+            lower.contains("(w2)") -> "w2"
             selection.startsWith("${match.homeTeam} (") -> "home"
             selection.startsWith("${match.awayTeam} (") -> "away"
             lower.contains(match.homeTeam.lowercase()) && !lower.contains("vs ${match.homeTeam.lowercase()}") -> "home"

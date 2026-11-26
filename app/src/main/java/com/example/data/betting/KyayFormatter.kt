@@ -331,8 +331,78 @@ object KyayFormatter {
         val handicapLine: String,
         val goalLine: String,
         val bodyOdds: Double,
-        val goalOdds: Double
+        val goalOdds: Double,
+        val win1Odds: Double = 1.90,
+        val drawOdds: Double = 3.20,
+        val win2Odds: Double = 1.90,
+        val overOdds: Double = 1.90,
+        val underOdds: Double = 1.90
     )
+
+    private fun roundOdds3(value: Double): Double =
+        kotlin.math.round(value.coerceIn(1.01, 99.0) * 1000.0) / 1000.0
+
+    fun formatOneXBetOdds(odds: Double): String {
+        val rounded = roundOdds3(odds)
+        val three = String.format(Locale.US, "%.3f", rounded)
+        return if (three.endsWith("0")) three.dropLast(1) else three
+    }
+
+    fun americanOddsToDecimalExact(rawOdds: Double): Double? {
+        if (rawOdds.isNaN() || rawOdds == 0.0) return null
+        val dec = when {
+            rawOdds >= 100.0 -> 1.0 + (rawOdds / 100.0)
+            rawOdds <= -100.0 -> 1.0 + (100.0 / abs(rawOdds))
+            rawOdds in 1.01..99.0 -> rawOdds
+            else -> return null
+        }
+        return roundOdds3(dec)
+    }
+
+    fun estimate1x2FromHandicap(handicapLine: String): Triple<Double, Double, Double> {
+        val norm = normalizeLegacyHandicap(SportMatch(handicapLine = handicapLine))
+        val lower = norm.lowercase(Locale.US)
+        val favIsHome = !lower.startsWith("away")
+        val spec = lower
+            .replace("home", "")
+            .replace("away", "")
+            .replace("draw", "")
+            .replace("even", "0")
+            .replace("=", "")
+            .replace("-", "")
+            .replace("+", "")
+            .trim()
+        val favDrawDog = when {
+            spec.startsWith("1.5") || spec.startsWith("2") -> Triple(1.36, 4.85, 7.60)
+            spec.startsWith("1") -> Triple(1.55, 4.10, 5.40)
+            spec.startsWith("0.75") || spec.startsWith("0.5/1") -> Triple(1.72, 3.75, 4.50)
+            spec.startsWith("0.5") -> Triple(1.95, 3.45, 3.70)
+            spec.startsWith("0.25") || spec.startsWith("0/0.5") || spec.startsWith("0+") -> Triple(2.25, 3.25, 3.15)
+            else -> Triple(2.55, 3.20, 2.65)
+        }
+        return if (favIsHome) {
+            favDrawDog
+        } else {
+            Triple(favDrawDog.third, favDrawDog.second, favDrawDog.first)
+        }
+    }
+
+    fun deriveOneX2AndGoalFromEspn(
+        handicapLine: String,
+        homeMoneyLine: Double = Double.NaN,
+        drawMoneyLine: Double = Double.NaN,
+        awayMoneyLine: Double = Double.NaN,
+        overOdds: Double = Double.NaN,
+        underOdds: Double = Double.NaN
+    ): List<Double> {
+        val (estW1, estDraw, estW2) = estimate1x2FromHandicap(handicapLine)
+        val w1 = americanOddsToDecimalExact(homeMoneyLine) ?: estW1
+        val w2 = americanOddsToDecimalExact(awayMoneyLine) ?: estW2
+        val draw = americanOddsToDecimalExact(drawMoneyLine) ?: estDraw
+        val over = americanOddsToDecimalExact(overOdds) ?: 1.90
+        val under = americanOddsToDecimalExact(underOdds) ?: 1.90
+        return listOf(w1, draw, w2, over, under)
+    }
 
     fun parseOneXBetOutcomesToLines(outcomes: List<OneXBetMarketOutcome>): ParsedOneXBetLines {
         val handicapCandidates = outcomes.filter {
@@ -401,11 +471,29 @@ object KyayFormatter {
             "2.5"
         }
 
+        val (estW1, estDraw, estW2) = estimate1x2FromHandicap(handicapLine)
+        val win1Odds = outcomes.firstOrNull { it.type == 1 && it.coef > 1.01 }?.coef?.let(::roundOdds3) ?: estW1
+        val drawOdds = outcomes.firstOrNull { it.type == 2 && it.coef > 1.01 }?.coef?.let(::roundOdds3) ?: estDraw
+        val win2Odds = outcomes.firstOrNull { it.type == 3 && it.coef > 1.01 }?.coef?.let(::roundOdds3) ?: estW2
+
+        val chosenTotalParam = chosenTotal?.param
+        val overOdds = (outcomes.firstOrNull {
+            it.type == 9 && it.coef > 1.01 && (chosenTotalParam == null || it.param == chosenTotalParam)
+        } ?: outcomes.firstOrNull { it.type == 9 && it.coef > 1.01 })?.coef?.let(::roundOdds3) ?: LOTAYA_STANDARD_GOAL_ODDS
+        val underOdds = (outcomes.firstOrNull {
+            it.type == 10 && it.coef > 1.01 && (chosenTotalParam == null || it.param == chosenTotalParam)
+        } ?: outcomes.firstOrNull { it.type == 10 && it.coef > 1.01 })?.coef?.let(::roundOdds3) ?: LOTAYA_STANDARD_GOAL_ODDS
+
         return ParsedOneXBetLines(
             handicapLine = handicapLine,
             goalLine = goalLine,
             bodyOdds = LOTAYA_STANDARD_BODY_ODDS,
-            goalOdds = LOTAYA_STANDARD_GOAL_ODDS
+            goalOdds = LOTAYA_STANDARD_GOAL_ODDS,
+            win1Odds = win1Odds,
+            drawOdds = drawOdds,
+            win2Odds = win2Odds,
+            overOdds = overOdds,
+            underOdds = underOdds
         )
     }
 
