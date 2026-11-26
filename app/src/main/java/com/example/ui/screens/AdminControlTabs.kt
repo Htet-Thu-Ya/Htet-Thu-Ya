@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,12 +30,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.ContactPhone
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,13 +60,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -113,6 +121,8 @@ fun AdminMiniGameControlTab(
     var diceTripleMult by remember { mutableStateOf(config.diceTripleMult.toString()) }
     var diceExactMult by remember { mutableStateOf(config.diceExactMult.toString()) }
     var sixAnimalsMult by remember { mutableStateOf(config.sixAnimalsMult.toString()) }
+    var dragonTigerMult by remember { mutableStateOf(config.dragonTigerMult.toString()) }
+    var luckyWheelMult by remember { mutableStateOf(config.luckyWheelMult.toString()) }
 
     var allowedTotals by remember { mutableStateOf(config.diceAllowedTotals.toSet()) }
     var maxBig by remember { mutableStateOf(config.diceMaxBigPerDay.toString()) }
@@ -139,6 +149,8 @@ fun AdminMiniGameControlTab(
         diceTripleMult = config.diceTripleMult.toString()
         diceExactMult = config.diceExactMult.toString()
         sixAnimalsMult = config.sixAnimalsMult.toString()
+        dragonTigerMult = config.dragonTigerMult.toString()
+        luckyWheelMult = config.luckyWheelMult.toString()
         allowedTotals = config.diceAllowedTotals.toSet()
         maxBig = config.diceMaxBigPerDay.toString()
         maxSmall = config.diceMaxSmallPerDay.toString()
@@ -170,6 +182,8 @@ fun AdminMiniGameControlTab(
                 diceTripleMult = (diceTripleMult.toDoubleOrNull() ?: config.diceTripleMult).coerceIn(1.1, 100.0),
                 diceExactMult = (diceExactMult.toDoubleOrNull() ?: config.diceExactMult).coerceIn(1.1, 100.0),
                 sixAnimalsMult = (sixAnimalsMult.toDoubleOrNull() ?: config.sixAnimalsMult).coerceIn(1.1, 30.0),
+                dragonTigerMult = (dragonTigerMult.toDoubleOrNull() ?: config.dragonTigerMult).coerceIn(1.1, 50.0),
+                luckyWheelMult = (luckyWheelMult.toDoubleOrNull() ?: config.luckyWheelMult).coerceIn(1.1, 50.0),
                 diceAllowedTotals = allowedTotals.sorted(),
                 diceMaxBigPerDay = (maxBig.toLongOrNull() ?: 0L).coerceAtLeast(0L),
                 diceMaxSmallPerDay = (maxSmall.toLongOrNull() ?: 0L).coerceAtLeast(0L),
@@ -201,7 +215,7 @@ fun AdminMiniGameControlTab(
                         Icon(Icons.Default.Casino, contentDescription = null, tint = ChampionshipGold)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "ဂိမ်းခန်း အဆနှင့် ပင်မထိန်းချုပ်မှု (Dice & 6 Animals)",
+                            "ဂိမ်းခန်း အဆနှင့် ထိန်းချုပ်မှု (Dice, 6 Animals, Dragon Tiger & Wheel)",
                             color = ChampionshipGold,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
@@ -299,6 +313,26 @@ fun AdminMiniGameControlTab(
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                             modifier = Modifier.weight(1f).testTag("six_animals_mult_input")
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = dragonTigerMult,
+                            onValueChange = { dragonTigerMult = it.filter { c -> c.isDigit() || c == '.' }.take(6) },
+                            label = { Text("နဂါး vs ကျား အဆ") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            modifier = Modifier.weight(1f).testTag("dragon_tiger_mult_input")
+                        )
+                        OutlinedTextField(
+                            value = luckyWheelMult,
+                            onValueChange = { luckyWheelMult = it.filter { c -> c.isDigit() || c == '.' }.take(6) },
+                            label = { Text("ကံစမ်းဘီး အခြေခံအဆ") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            modifier = Modifier.weight(1f).testTag("lucky_wheel_mult_input")
                         )
                     }
 
@@ -896,6 +930,8 @@ fun AdminAgentSelfProfileTab(
         }
     }
 
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val myAccounts = remember(paymentAccounts, currentUserId, isOwnerAdmin) {
         paymentAccounts.filter { acc ->
             acc.ownerAdminId == currentUserId || (isOwnerAdmin && acc.ownerAdminId.isBlank())
@@ -915,21 +951,73 @@ fun AdminAgentSelfProfileTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.ContactPhone, contentDescription = null, tint = ChampionshipGold)
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                "မိမိ၏ ဆက်သွယ်ရန် နှင့် Online ငွေကြေးအချက်အလက်",
-                                color = ChampionshipGold,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "Customer များ Chat နှင့် Wallet တွင် တိုက်ရိုက်ကြည့်ရှု ဆက်သွယ်နိုင်ပါမည်",
-                                color = Color(0xFFB4C8BE),
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.ContactPhone, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    "မိမိ၏ ဆက်သွယ်ရန် နှင့် Online ငွေကြေးအချက်အလက်",
+                                    color = ChampionshipGold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "Customer များ Chat နှင့် Wallet တွင် တိုက်ရိုက်ကြည့်ရှု ဆက်သွယ်နိုင်ပါမည်",
+                                    color = Color(0xFFB4C8BE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                        StatusBadge(if (active) "active" else "suspended")
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = {
+                                val summary = buildString {
+                                    appendLine("$displayName (${if (isOwnerAdmin) "Main Admin" else "Second Admin"})")
+                                    if (phone.isNotBlank()) appendLine("Phone: $phone")
+                                    if (messagingHandle.isNotBlank()) appendLine("Contact: $messagingHandle")
+                                    if (paymentSummary.isNotBlank()) appendLine("Pay: $paymentSummary")
+                                    myAccounts.filter { it.active }.forEach { acc ->
+                                        appendLine("${acc.providerName}: ${acc.accountName} (${acc.accountNumber})")
+                                    }
+                                }.trim()
+                                clipboard.setText(AnnotatedString(summary))
+                                Toast.makeText(context, "မိမိဆက်သွယ်ရန် & ငွေလွှဲစာရင်း Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f).testTag("copy_self_agent_summary_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("အချက်အလက် ကူး", color = ChampionshipGold, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val summary = buildString {
+                                    appendLine("$displayName (${if (isOwnerAdmin) "Main Admin" else "Second Admin"})")
+                                    if (phone.isNotBlank()) appendLine("Phone: $phone")
+                                    if (messagingHandle.isNotBlank()) appendLine("Contact: $messagingHandle")
+                                    if (paymentSummary.isNotBlank()) appendLine("Pay: $paymentSummary")
+                                    myAccounts.filter { it.active }.forEach { acc ->
+                                        appendLine("${acc.providerName}: ${acc.accountName} (${acc.accountNumber})")
+                                    }
+                                }.trim()
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, summary)
+                                }
+                                context.startActivity(Intent.createChooser(intent, "Share Admin Contact"))
+                            },
+                            modifier = Modifier.weight(1f).testTag("share_self_agent_summary_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Share လုပ်", color = Color(0xFF34D399), maxLines = 1)
                         }
                     }
 

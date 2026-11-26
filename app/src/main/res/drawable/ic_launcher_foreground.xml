@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/lotaya_logo"
+        android:drawable="@drawable/lotaya_app_icon"
         android:gravity="center" />
 </layer-list>

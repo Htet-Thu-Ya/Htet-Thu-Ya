@@ -23,11 +23,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,12 +40,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -57,9 +64,12 @@ import androidx.compose.ui.unit.dp
 import com.example.data.betting.SettlementCalculator
 import com.example.data.betting.SettlementRange
 import com.example.data.model.BetOrder
+import com.example.data.model.OneXBetOddsSpec
+import com.example.data.model.SportMatch
 import com.example.data.model.UserAccount
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.OrderSlipCard
+import com.example.ui.components.StatusBadge
 import com.example.ui.components.formatKs
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.AdminCrimsonSoft
@@ -78,10 +88,12 @@ import kotlin.math.abs
 @Composable
 fun AdminSettlementTab(
     orders: List<BetOrder>,
+    matches: List<SportMatch> = emptyList(),
     usersById: Map<String, UserAccount>,
     busy: Boolean,
     isOwnerAdmin: Boolean = true,
     onAutoSettleAll: () -> Unit,
+    onSyncLiveResultsNow: () -> Unit = {},
     onAutoSettleCustomer: (userId: String, customerName: String) -> Unit,
     onInspectCustomer: (String) -> Unit,
     onAutoSettleOrder: (BetOrder) -> Unit = {},
@@ -90,6 +102,12 @@ fun AdminSettlementTab(
     onSettleLoss: (BetOrder) -> Unit,
     onRejectOrder: (BetOrder) -> Unit,
     onDeleteOrder: (String) -> Unit,
+    onClearCompletedOrders: (List<String>) -> Unit = {},
+    onClearFinishedMatches: (List<String>) -> Unit = {},
+    onUpdateMatchDetails: (
+        String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, OneXBetOddsSpec?
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    onDeleteMatch: (String) -> Unit = {},
     onToggleHideOrder: (BetOrder) -> Unit = {},
     onEditOrder: (
         orderId: String,
@@ -104,12 +122,31 @@ fun AdminSettlementTab(
 ) {
     var range by remember { mutableStateOf(SettlementRange.TODAY) }
     var searchQuery by remember { mutableStateOf("") }
+    var showClearingRoom by remember { mutableStateOf(true) }
     var showSummaryCard by remember { mutableStateOf(true) }
     var showCustomerList by remember { mutableStateOf(true) }
     var showHiddenOrders by remember { mutableStateOf(false) }
     var editingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
+    var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
+    var deletingMatch by remember { mutableStateOf<SportMatch?>(null) }
+    var showClearOrdersConfirm by remember { mutableStateOf(false) }
+    var showClearFinishedMatchesConfirm by remember { mutableStateOf(false) }
     val expandedCustomers = remember { mutableStateMapOf<String, Boolean>() }
+
+    val matchesById = remember(matches) { matches.associateBy { it.id } }
+    val settledOrderIds = remember(orders) {
+        orders.filter { it.status in listOf("won", "lost", "rejected") }.map { it.id }
+    }
+    val finishedMatchIds = remember(matches) {
+        matches.filter { it.status == "finished" }.map { it.id }
+    }
+    val pendingMatchIdsSet = remember(orders) {
+        orders.filter { it.status in listOf("pending", "accepted") }.flatMap { it.matchIds }.toSet()
+    }
+    val clearingMatches = remember(matches, pendingMatchIdsSet) {
+        matches.filter { it.status != "finished" || pendingMatchIdsSet.contains(it.id) }.take(20)
+    }
 
     val hiddenCount = remember(orders) { orders.count { it.isHidden } }
     val visibleOrders = remember(orders, showHiddenOrders) {
@@ -155,6 +192,144 @@ fun AdminSettlementTab(
                         label = { Text(if (showHiddenOrders) "Hidden ပြထား ($hiddenCount)" else "Hidden ကြည့် ($hiddenCount)") },
                         modifier = Modifier.testTag("settlement_show_hidden_chip")
                     )
+                }
+            }
+        }
+
+        // Main Admin Dedicated Clearing Room (Batch + Per-Match Clearing)
+        item {
+            HideBarSectionHeader(
+                title = "ရှင်းလင်းရေးခန်း (Main Admin Only)",
+                countBadge = "ပွဲ ${clearingMatches.size} / ပြီးဆုံး ${finishedMatchIds.size}",
+                isVisible = showClearingRoom,
+                onToggle = { showClearingRoom = !showClearingRoom },
+                testTag = "hide_bar_clearing_room"
+            )
+        }
+        if (showClearingRoom) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.55f)),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("main_admin_clearing_room_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CleaningServices, contentDescription = null, tint = ChampionshipGold)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "တစ်ခါတည်း / တစ်ပွဲချင်း စာရင်းရှင်းလင်းရေး",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onSyncLiveResultsNow,
+                                enabled = !busy,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                modifier = Modifier.weight(1f).testTag("clearing_room_sync_live_button")
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("တိုက်ရိုက်ဂိုး Refresh", maxLines = 1)
+                            }
+                            Button(
+                                onClick = onAutoSettleAll,
+                                enabled = !busy,
+                                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                modifier = Modifier.weight(1f).testTag("clearing_room_auto_settle_button")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Auto ရှင်း (${report.pendingCount})", maxLines = 1)
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { showClearOrdersConfirm = true },
+                                enabled = !busy && settledOrderIds.isNotEmpty(),
+                                border = BorderStroke(1.dp, AdminCrimson.copy(alpha = 0.7f)),
+                                modifier = Modifier.weight(1f).testTag("clearing_room_clear_orders_button")
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("ပြီးဆုံးအော်ဒါ ဖျက် (${settledOrderIds.size})", color = Color(0xFFFCA5A5), maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = { showClearFinishedMatchesConfirm = true },
+                                enabled = !busy && finishedMatchIds.isNotEmpty(),
+                                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                                modifier = Modifier.weight(1f).testTag("clearing_room_clear_matches_button")
+                            ) {
+                                Icon(Icons.Default.CleaningServices, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("ပြီးဆုံးပွဲ ရှင်း (${finishedMatchIds.size})", color = ChampionshipGold, maxLines = 1)
+                            }
+                        }
+
+                        if (clearingMatches.isNotEmpty()) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
+                            Text(
+                                text = "တစ်ပွဲချင်း ရလဒ်ထည့် / ရှင်းလင်းရန် (${clearingMatches.size} ပွဲ):",
+                                color = Color(0xFFD5E3DC),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            clearingMatches.forEach { m ->
+                                Surface(
+                                    color = DeepPitchSurface,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "${m.homeTeam} ${m.homeScore} - ${m.awayScore} ${m.awayTeam}",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${m.league} • ${m.kickoffLabel}${if (m.liveClock.isNotBlank()) " • ${m.liveClock}" else ""}",
+                                                color = Color(0xFFB4C8BE),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            StatusBadge(m.status)
+                                            IconButton(
+                                                onClick = { editingMatch = m },
+                                                modifier = Modifier.testTag("clearing_edit_match_${m.id}")
+                                            ) {
+                                                Icon(Icons.Default.Edit, contentDescription = "Finish or Edit Match", tint = ChampionshipGold)
+                                            }
+                                            IconButton(
+                                                onClick = { deletingMatch = m },
+                                                modifier = Modifier.testTag("clearing_delete_match_${m.id}")
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Match", tint = Color(0xFFFCA5A5))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -527,6 +702,7 @@ fun AdminSettlementTab(
                                     isAdminView = true,
                                     busy = busy,
                                     canDeleteAnyOrder = isOwnerAdmin,
+                                    matchesById = matchesById,
                                     onAccept = onAcceptOrder,
                                     onAutoSettleOrder = onAutoSettleOrder,
                                     onSettleWin = onRequestSettleWin,
@@ -566,6 +742,72 @@ fun AdminSettlementTab(
                 val id = target.id
                 deletingOrder = null
                 onDeleteOrder(id)
+            }
+        )
+    }
+
+    editingMatch?.let { match ->
+        EditMatchResultDialog(
+            match = match,
+            boardMode = match.boardSource.ifBlank { "standard" },
+            onDismiss = { editingMatch = null },
+            onUpdate = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds ->
+                onUpdateMatchDetails(
+                    match.id, league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
+                    status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds
+                )
+                editingMatch = null
+            },
+            onRequestDelete = {
+                deletingMatch = match
+                editingMatch = null
+            }
+        )
+    }
+
+    deletingMatch?.let { target ->
+        ConfirmDeleteDialog(
+            title = "ပွဲစဉ် ဖျက်မည်လား?",
+            message = "${target.homeTeam} vs ${target.awayTeam} ပွဲစဉ်ကို ဖျက်ပစ်ပါမည်။",
+            onDismiss = { deletingMatch = null },
+            onConfirm = {
+                val id = target.id
+                deletingMatch = null
+                onDeleteMatch(id)
+            }
+        )
+    }
+
+    if (showClearOrdersConfirm) {
+        ConfirmDeleteDialog(
+            title = "ပြီးဆုံးပြီးသား အော်ဒါအားလုံး ဖျက်မည်လား?",
+            message = "ပြီးဆုံးပြီးသော အော်ဒါမှတ်တမ်း ${settledOrderIds.size} ခုလုံးကို ရှင်းလင်းဖျက်သိမ်းပါမည်။",
+            onDismiss = { showClearOrdersConfirm = false },
+            onConfirm = {
+                showClearOrdersConfirm = false
+                onClearCompletedOrders(settledOrderIds)
+            }
+        )
+    }
+
+    if (showClearFinishedMatchesConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearFinishedMatchesConfirm = false },
+            title = { Text("ပြီးဆုံးပွဲစဉ်အားလုံး ရှင်းလင်းမည်လား?") },
+            text = { Text("ပြီးဆုံး (finished) အခြေအနေရှိ ပွဲစဉ် ${finishedMatchIds.size} ပွဲလုံးကို Board မှ ရှင်းလင်းဖယ်ရှားပါမည်။") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearFinishedMatchesConfirm = false
+                        onClearFinishedMatches(finishedMatchIds)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AdminCrimson)
+                ) {
+                    Text("ရှင်းလင်းမည်")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearFinishedMatchesConfirm = false }) { Text("မလုပ်ပါ") }
             }
         )
     }

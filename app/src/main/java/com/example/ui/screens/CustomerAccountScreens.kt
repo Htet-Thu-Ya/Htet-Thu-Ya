@@ -111,6 +111,8 @@ import kotlinx.coroutines.delay
 fun OrdersHistoryScreen(
     activeOnly: Boolean,
     ordersState: UiState<List<BetOrder>>,
+    matchesState: UiState<List<SportMatch>> = UiState.Success(emptyList()),
+    onRefreshLiveScores: () -> Unit = {},
     onBack: () -> Unit,
     onDeleteOrder: (String) -> Unit = {},
     onClearCompletedOrders: (List<String>) -> Unit = {}
@@ -120,6 +122,9 @@ fun OrdersHistoryScreen(
     var showClearAllConfirm by remember { mutableStateOf(false) }
     var showOrdersTable by remember { mutableStateOf(true) }
     var tickerNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val matchesById = remember(matchesState) {
+        ((matchesState as? UiState.Success)?.data ?: emptyList()).associateBy { it.id }
+    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(15_000L)
@@ -177,6 +182,19 @@ fun OrdersHistoryScreen(
                                 )
                             }
                             if (showOrdersTable) {
+                                item {
+                                    OutlinedButton(
+                                        onClick = onRefreshLiveScores,
+                                        border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("orders_refresh_live_goals_button")
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("တိုက်ရိုက်ဂိုးရလဒ် Refresh", color = ChampionshipGold, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                                 if (!activeOnly && filtered.isNotEmpty()) {
                                     item {
                                         OutlinedButton(
@@ -194,6 +212,7 @@ fun OrdersHistoryScreen(
                                     OrderSlipCard(
                                         order = order,
                                         isAdminView = false,
+                                        matchesById = matchesById,
                                         onDeleteOrder = if (!activeOnly) { target -> deletingOrder = target } else null
                                     )
                                 }

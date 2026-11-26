@@ -166,12 +166,12 @@
     },
     "MiniGameRound": {
       "title": "MiniGameRound",
-      "description": "Immutable round record for Dice (အံစာတုံး) and 6-Animal Dice (၆ကောင်ဂျင်).",
+      "description": "Immutable round record for Dice, 6-Animal Dice, Dragon Tiger, and Lucky Wheel.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
         "customerName": { "type": "string" },
-        "gameType": { "type": "string", "enum": ["dice", "six_animals"] },
+        "gameType": { "type": "string", "enum": ["dice", "six_animals", "dragon_tiger", "lucky_wheel"] },
         "betLabel": { "type": "string" },
         "outcomeLabel": { "type": "string" },
         "stakeKs": { "type": "integer" },
@@ -241,7 +241,7 @@
     },
     "AuditLogEntry": {
       "title": "AuditLogEntry",
-      "description": "Audit history for Main Admin and Second Admin actions (Main Admin may prune logs).",
+      "description": "Audit history for Main Admin and Second Admin actions (Main Admin may prune any logs; active Second Admins may prune their own logs).",
       "type": "object",
       "properties": {
         "actorId": { "type": "string" },
@@ -298,6 +298,7 @@
         "allowedLeagues": { "type": "array" },
         "autoSyncOneExpress": { "type": "boolean" },
         "autoSyncFiveFiveFive": { "type": "boolean" },
+        "googleSheetCsvUrl": { "type": "string" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -400,6 +401,8 @@
         "diceTripleMult": { "type": "number" },
         "diceExactMult": { "type": "number" },
         "sixAnimalsMult": { "type": "number" },
+        "dragonTigerMult": { "type": "number" },
+        "luckyWheelMult": { "type": "number" },
         "diceAllowedTotals": { "type": "array" },
         "diceMaxBigPerDay": { "type": "integer" },
         "diceMaxSmallPerDay": { "type": "integer" },

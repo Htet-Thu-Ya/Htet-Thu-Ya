@@ -3,6 +3,7 @@ package com.example
 import com.example.data.betting.AutoSettleDecision
 import com.example.data.betting.AutoSettleEngine
 import com.example.data.betting.KyayFormatter
+import com.example.data.betting.MatchSheetCsvCodec
 import com.example.data.betting.MiniGameEngine
 import com.example.data.model.BetOrder
 import com.example.data.model.MiniGameRound
@@ -683,4 +684,110 @@ class AutoSettleAndPauseTest {
         assertTrue(mixedParlayWin is AutoSettleDecision.Win)
         assertEquals(6_625L, (mixedParlayWin as AutoSettleDecision.Win).grossPayoutKs)
     }
+
+    @Test
+    fun matchSheetCsvCodec_roundTripsCsvAndExcelTsv() {
+        val sample = listOf(
+            SportMatch(
+                id = "m_csv_1",
+                league = "French Ligue 1",
+                homeTeam = "Troyes",
+                awayTeam = "Le Havre",
+                kickoffLabel = "24 Nov 02:15",
+                handicapLine = "Home -0.5",
+                goalLine = "2.5",
+                bodyOdds = 1.95,
+                goalOdds = 1.90,
+                win1Odds = 2.15,
+                drawOdds = 3.30,
+                win2Odds = 3.45,
+                overOdds = 1.92,
+                underOdds = 1.88,
+                status = "finished",
+                homeScore = 3L,
+                awayScore = 1L,
+                boardSource = "one_express",
+                matchDate = "2026-11-24",
+                oneExpressKyay = "Home (-0.5) • 2.5"
+            )
+        )
+        val csv = MatchSheetCsvCodec.exportToCsv(sample)
+        val parsedCsv = MatchSheetCsvCodec.parseCsvOrTsv(csv, defaultBoardSource = "standard")
+        assertEquals(1, parsedCsv.size)
+        assertEquals("French Ligue 1", parsedCsv[0].league)
+        assertEquals("Troyes", parsedCsv[0].homeTeam)
+        assertEquals("Le Havre", parsedCsv[0].awayTeam)
+        assertEquals("finished", parsedCsv[0].status)
+        assertEquals(3L, parsedCsv[0].homeScore)
+        assertEquals(1L, parsedCsv[0].awayScore)
+        assertEquals("one_express", parsedCsv[0].boardSource)
+        assertEquals(2.15, parsedCsv[0].win1Odds ?: 0.0, 0.001)
+
+        val tsv = "league\thomeTeam\tawayTeam\tscore\tstatus\nPremier League\tArsenal\tChelsea\t2-1\tft"
+        val parsedTsv = MatchSheetCsvCodec.parseCsvOrTsv(tsv, defaultBoardSource = "five_five_five")
+        assertEquals(1, parsedTsv.size)
+        assertEquals("Arsenal", parsedTsv[0].homeTeam)
+        assertEquals(2L, parsedTsv[0].homeScore)
+        assertEquals(1L, parsedTsv[0].awayScore)
+        assertEquals("finished", parsedTsv[0].status)
+        assertEquals("five_five_five", parsedTsv[0].boardSource)
+    }
+
+    @Test
+    fun miniGameEngine_multiPickSixAnimals_dragonTiger_andLuckyWheel() {
+        // Multi-pick 6 animals payout: stake 1,000 x {0, 2}, roll has 0 twice and 2 once
+        val payout = MiniGameEngine.computeSixAnimalsMultiPickPayout(
+            roll = Triple(0, 0, 2),
+            selectedAnimalIndices = setOf(0, 2),
+            stakePerAnimalKs = 1000L,
+            baseBonus = 1.0
+        )
+        // idx 0 matches twice -> 1000 + 1000*2 = 3000; idx 2 matches once -> 1000 + 1000*1 = 2000
+        assertEquals(5000L, payout)
+
+        val allCombos = buildList {
+            for (a in 0..5) for (b in 0..5) for (c in 0..5) add(Triple(a, b, c))
+        }
+        val winRoll = MiniGameEngine.selectSixAnimalsRollMultiPick(
+            allCombos = allCombos,
+            quotaCombos = allCombos,
+            selectedAnimalIndices = setOf(1, 3, 5),
+            stakePerAnimalKs = 1000L,
+            baseBonus = 1.0,
+            directive = "force_win",
+            stealthHouseWinPct = 75,
+            recentCustomerRounds = emptyList()
+        )
+        assertTrue(
+            MiniGameEngine.computeSixAnimalsMultiPickPayout(winRoll, setOf(1, 3, 5), 1000L, 1.0) > 3000L
+        )
+
+        val dtWin = MiniGameEngine.selectDragonTigerOutcome(
+            pick = "DRAGON",
+            directive = "force_win",
+            stealthHouseWinPct = 75,
+            stakeKs = 1000L,
+            recentCustomerRounds = emptyList()
+        )
+        assertTrue(dtWin.dragonRank > dtWin.tigerRank)
+
+        val segments = MiniGameEngine.buildLuckyWheelSegments(2.0)
+        assertEquals(8, segments.size)
+        val wheelWinIdx = MiniGameEngine.selectLuckyWheelSegmentIndex(
+            segments = segments,
+            directive = "force_win",
+            stealthHouseWinPct = 75,
+            stakeKs = 1000L,
+            recentCustomerRounds = emptyList()
+        )
+        assertTrue(segments[wheelWinIdx].multiplier > 1.0)
+    }
+
+    @Test
+    fun fuzzyTeamMatches_handlesCommonPrefixesAndSuffixes() {
+        assertTrue(com.example.data.network.FootballFeedService.fuzzyTeamMatches("ESTAC Troyes", "Troyes"))
+        assertTrue(com.example.data.network.FootballFeedService.fuzzyTeamMatches("Le Havre AC", "Le Havre"))
+        assertFalse(com.example.data.network.FootballFeedService.fuzzyTeamMatches("Arsenal", "Chelsea"))
+    }
 }
+

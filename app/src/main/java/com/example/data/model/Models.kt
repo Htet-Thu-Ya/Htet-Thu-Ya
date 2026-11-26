@@ -270,7 +270,7 @@ data class MiniGameRound(
     @DocumentId val id: String = "",
     val userId: String = "",
     val customerName: String = "",
-    val gameType: String = "dice", // "dice" or "six_animals"
+    val gameType: String = "dice", // "dice", "six_animals", "dragon_tiger", or "lucky_wheel"
     val betLabel: String = "",
     val outcomeLabel: String = "",
     val stakeKs: Long = 0L,
@@ -403,6 +403,7 @@ data class BoardConfig(
     val autoSyncFiveFiveFive: Boolean = false,
     val lastSyncedDate: String = "",
     val allowedLeagues: List<String> = emptyList(),
+    val googleSheetCsvUrl: String = "",
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -438,7 +439,7 @@ data class BettingConfig(
 @Keep
 @IgnoreExtraProperties
 data class SystemGameConfig(
-    val enabledGames: List<String> = listOf("parlay", "body_goal", "two_d", "three_d", "dice", "six_animals"),
+    val enabledGames: List<String> = listOf("parlay", "body_goal", "two_d", "three_d", "dice", "six_animals", "dragon_tiger", "lucky_wheel"),
     val dualApprovalThresholdKs: Long = 300_000L,
     val minStakeKs: Long = 500L,
     val maxStakeKs: Long = 5_000_000L,
@@ -509,6 +510,8 @@ data class MiniGameControlConfig(
     val diceTripleMult: Double = 24.0,
     val diceExactMult: Double = 6.0,
     val sixAnimalsMult: Double = 2.0,
+    val dragonTigerMult: Double = 2.0,
+    val luckyWheelMult: Double = 2.0,
     val diceAllowedTotals: List<Int> = emptyList(),
     val diceMaxBigPerDay: Long = 0L,
     val diceMaxSmallPerDay: Long = 0L,
@@ -560,8 +563,8 @@ data class Live2DStatus(
 @Keep
 @IgnoreExtraProperties
 data class AppUpdateConfig(
-    val latestVersionCode: Int = 4,
-    val latestVersionName: String = "4.0",
+    val latestVersionCode: Int = 5,
+    val latestVersionName: String = "5.0",
     val downloadUrl: String = DEFAULT_APK_DOWNLOAD_URL,
     val releaseNotes: String = "",
     val forceUpdate: Boolean = false,

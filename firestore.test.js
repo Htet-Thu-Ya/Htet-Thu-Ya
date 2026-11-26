@@ -1226,7 +1226,7 @@ test("Dual approval wallet flow, payment accounts, immutable audit logs, and sys
   await assertFails(aliceDb.collection("payment_accounts").get());
   await assertFails(secondDb.collection("payment_accounts").doc("pay_kpay").delete());
 
-  // Audit logs: sub_admin_2 writes own log, cannot view Owner logs or edit/delete logs
+  // Audit logs: sub_admin_2 writes own log, cannot view/delete Owner logs, can delete own personal logs
   await assertSucceeds(
     ownerDb.collection("audit_logs").doc("log_owner_1").set({
       actorId: OWNER_UID,
@@ -1253,11 +1253,25 @@ test("Dual approval wallet flow, payment accounts, immutable audit logs, and sys
       createdAt: pastDate(3500),
     })
   );
+  await assertSucceeds(
+    secondDb.collection("audit_logs").doc("log_sub_2").set({
+      actorId: "sub_admin_2",
+      actorName: "Sub Wallet",
+      actorRole: "admin",
+      action: "Approved small topup",
+      category: "wallet",
+      targetId: "wr_small_1",
+      targetName: "Alice",
+      details: "5,000 Ks",
+      createdAt: pastDate(3400),
+    })
+  );
   await assertFails(secondDb.collection("audit_logs").doc("log_owner_1").get());
+  await assertFails(secondDb.collection("audit_logs").doc("log_owner_1").delete());
   await assertSucceeds(secondDb.collection("audit_logs").where("actorId", "==", "sub_admin_2").get());
   await assertSucceeds(ownerDb.collection("audit_logs").get());
-  await assertFails(secondDb.collection("audit_logs").doc("log_sub_1").delete());
-  await assertSucceeds(ownerDb.collection("audit_logs").doc("log_sub_1").delete());
+  await assertSucceeds(secondDb.collection("audit_logs").doc("log_sub_1").delete());
+  await assertSucceeds(ownerDb.collection("audit_logs").doc("log_sub_2").delete());
 
   // System & Security Configs
   await assertSucceeds(
@@ -1886,6 +1900,178 @@ test("One Express & 555 boards, orders with kickoff text, wallet receipt image c
     })
   );
 });
+
+test("Dragon Tiger, Lucky Wheel, Multi-Pick Six Animals, 40+ Leagues + Sheet CSV URL, and Second Admin Personal Audit Log Deletion", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const secondDb = testEnv.authenticatedContext("sub_admin_logs", {
+    email: "sublogs@example.com",
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      email: "alice@example.com",
+      balanceKs: 100000,
+      rewardPoints: 100,
+      activeStakeKs: 0,
+      totalWonKs: 0,
+      isLocked: false,
+      createdAt: pastDate(10000),
+      updatedAt: pastDate(10000),
+    });
+    await ctx.firestore().collection("admins").doc("sub_admin_logs").set({
+      userId: "sub_admin_logs",
+      displayName: "Sub Logs",
+      email: "sublogs@example.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "INV_LOGS",
+      permissions: { canViewAllLogs: false, canManageBoard: true },
+      createdAt: pastDate(10000),
+      updatedAt: pastDate(10000),
+    });
+    await ctx.firestore().collection("audit_logs").doc("log_own_1").set({
+      actorId: "sub_admin_logs",
+      actorName: "Sub Logs",
+      actorRole: "admin",
+      action: "MATCH_UPDATE",
+      category: "board",
+      targetId: "m1",
+      targetName: "Troyes vs Le Havre",
+      details: "Updated score",
+      createdAt: pastDate(5000),
+    });
+    await ctx.firestore().collection("audit_logs").doc("log_owner_1").set({
+      actorId: OWNER_UID,
+      actorName: "Owner",
+      actorRole: "owner",
+      action: "CONFIG",
+      category: "settings",
+      targetId: "cfg",
+      targetName: "Config",
+      details: "Owner action",
+      createdAt: pastDate(5000),
+    });
+  });
+
+  // Dragon Tiger & Lucky Wheel & Multi-Pick Six Animals mini_game_rounds allowed
+  await assertSucceeds(
+    aliceDb.collection("mini_game_rounds").doc("mg_dt_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      gameType: "dragon_tiger",
+      betLabel: "🐉 နဂါး • 1,000 Ks",
+      outcomeLabel: "🐉 Q♠ vs 🐯 9♥",
+      stakeKs: 1000,
+      payoutKs: 1950,
+      createdAt: pastDate(3000),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("mini_game_rounds").doc("mg_wheel_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      gameType: "lucky_wheel",
+      betLabel: "🎡 ကံစမ်းဘီး • 1,000 Ks",
+      outcomeLabel: "2.0x",
+      stakeKs: 1000,
+      payoutKs: 2000,
+      createdAt: pastDate(2900),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("mini_game_rounds").doc("mg_6a_multi_1").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      gameType: "six_animals",
+      betLabel: "ကျား (Tiger), ဆင် (Elephant), လိပ် (Turtle), မြင်း (Horse), ငါး (Fish), ကြက် (Rooster) • 1,000 Ks x 6",
+      outcomeLabel: "ကျား (Tiger), လိပ် (Turtle), ငါး (Fish)",
+      stakeKs: 6000,
+      payoutKs: 12000,
+      createdAt: pastDate(2800),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("mini_game_rounds").doc("mg_bad_type").set({
+      userId: ALICE_UID,
+      customerName: "Alice",
+      gameType: "roulette",
+      betLabel: "Red",
+      outcomeLabel: "Black",
+      stakeKs: 1000,
+      payoutKs: 0,
+      createdAt: pastDate(2700),
+    })
+  );
+
+  // Board config accepts 40+ leagues & googleSheetCsvUrl, rejects > 80 leagues
+  const fortyLeagues = Array.from({ length: 42 }, (_, i) => `League ${i + 1}`);
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("board_config").set({
+      autoSyncDailyMatches: true,
+      autoSyncLiveResults: true,
+      lastSyncedDate: "2026-11-26",
+      allowedLeagues: fortyLeagues,
+      autoSyncOneExpress: true,
+      autoSyncFiveFiveFive: true,
+      googleSheetCsvUrl: "https://docs.google.com/spreadsheets/d/e/sample/pub?output=csv",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2600),
+    })
+  );
+  const eightyOneLeagues = Array.from({ length: 81 }, (_, i) => `League ${i + 1}`);
+  await assertFails(
+    ownerDb.collection("app_settings").doc("board_config").update({
+      allowedLeagues: eightyOneLeagues,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2500),
+    })
+  );
+
+  // MiniGameControl accepts dragonTigerMult and luckyWheelMult
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("mini_game_control").set({
+      diceStandardMult: 1.95,
+      diceTripleMult: 24.0,
+      diceExactMult: 6.0,
+      sixAnimalsMult: 2.0,
+      dragonTigerMult: 1.95,
+      luckyWheelMult: 2.0,
+      diceAllowedTotals: [],
+      diceMaxBigPerDay: 0,
+      diceMaxSmallPerDay: 0,
+      diceMaxOddPerDay: 0,
+      diceMaxEvenPerDay: 0,
+      diceTotalDailyQuotas: {},
+      animalDailyQuotas: {},
+      globalDirective: "stealth_house",
+      stealthHouseWinPct: 72,
+      userDirectives: {},
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2400),
+    })
+  );
+  await assertFails(
+    ownerDb.collection("app_settings").doc("mini_game_control").update({
+      dragonTigerMult: 99.0,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2300),
+    })
+  );
+
+  // Second Admin can delete ONLY own audit log, NOT Owner's audit log
+  await assertFails(secondDb.collection("audit_logs").doc("log_owner_1").delete());
+  await assertSucceeds(secondDb.collection("audit_logs").doc("log_own_1").delete());
+  await assertSucceeds(ownerDb.collection("audit_logs").doc("log_owner_1").delete());
+});
+
 
 
 

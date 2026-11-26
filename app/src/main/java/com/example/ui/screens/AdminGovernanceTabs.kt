@@ -665,6 +665,7 @@ fun AdminSubAdminsTab(
     admins: List<AdminMember>,
     invites: List<AdminInvite>,
     supportAgents: List<SupportAgentProfile> = emptyList(),
+    paymentAccounts: List<PaymentAccount> = emptyList(),
     appDisplayName: String = "လိုတရ",
     apkDownloadUrl: String = AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
     onCreateInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
@@ -993,6 +994,9 @@ fun AdminSubAdminsTab(
             val perms = member.resolvedPermissions(member.role == "owner")
             val isSuspended = member.status == "suspended"
             val agent = agentsByUid[member.userId]
+            val memberAccounts = remember(paymentAccounts, member.userId) {
+                paymentAccounts.filter { it.ownerAdminId == member.userId }
+            }
             Card(colors = CardDefaults.cardColors(containerColor = PearlCard), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
@@ -1007,16 +1011,40 @@ fun AdminSubAdminsTab(
                                 color = InkMuted,
                                 style = MaterialTheme.typography.bodySmall
                             )
+                            Text(
+                                text = "ချိတ်ဆက်မှု: ${if (isSuspended) "Suspended" else "ချိတ်ဆက်ပြီး (Active)"} • ဘဏ်/Pay: ${memberAccounts.size} ခု • Support: ${if (agent?.active == true) "ON" else "OFF"}",
+                                color = if (isSuspended) AdminCrimson else PitchEmeraldDark,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
                             if (agent != null && (agent.phone.isNotBlank() || agent.messagingHandle.isNotBlank() || agent.paymentSummary.isNotBlank())) {
                                 val contactLine = listOfNotNull(
                                     agent.phone.takeIf { it.isNotBlank() }?.let { "Ph: $it" },
                                     agent.messagingHandle.takeIf { it.isNotBlank() },
                                     agent.paymentSummary.takeIf { it.isNotBlank() }
                                 ).joinToString(" • ")
-                                Text(contactLine, color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall)
+                                Text(contactLine, color = InkMuted, style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                        StatusBadge(if (member.role == "owner") "active" else member.status)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            IconButton(
+                                onClick = {
+                                    val summary = buildString {
+                                        appendLine("${member.displayName.ifBlank { "Admin" }} (${member.role.uppercase()})")
+                                        if (member.email.isNotBlank()) appendLine("Email: ${member.email}")
+                                        if (agent?.phone?.isNotBlank() == true) appendLine("Phone: ${agent.phone}")
+                                        if (agent?.messagingHandle?.isNotBlank() == true) appendLine("Contact: ${agent.messagingHandle}")
+                                        appendLine("Portal: $adminPortalLink")
+                                    }.trim()
+                                    clipboard.setText(AnnotatedString(summary))
+                                    Toast.makeText(context, "${member.displayName} ချိတ်ဆက်အချက်အလက် Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.testTag("copy_admin_member_contact_${member.userId}")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Admin Contact", tint = PitchEmeraldDark)
+                            }
+                            StatusBadge(if (member.role == "owner") "active" else member.status)
+                        }
                     }
 
                     val activeTags = buildList {
@@ -1568,7 +1596,9 @@ fun AdminSystemSettingsTab(
                         "two_d" to "၂လုံးထီ (2D)",
                         "three_d" to "၃လုံးထီ (3D)",
                         "dice" to "အံစာတုံး (Dice)",
-                        "six_animals" to "၆ကောင်ဂျင် (6 Animals)"
+                        "six_animals" to "၆ကောင်ဂျင် (6 Animals)",
+                        "dragon_tiger" to "နဂါး vs ကျား (Dragon Tiger)",
+                        "lucky_wheel" to "ကံစမ်းဘီး (Lucky Wheel)"
                     )
                     games.forEach { (key, label) ->
                         val active = enabledGames.contains(key)
@@ -1913,6 +1943,7 @@ fun AdminAuditLogsTab(
     logs: List<AuditLogEntry>,
     isOwnerOrCanViewAll: Boolean,
     isOwnerAdmin: Boolean = false,
+    currentUserId: String = "",
     onDeleteAuditLog: (String) -> Unit = {},
     onClearAllAuditLogs: (List<String>) -> Unit = {}
 ) {
@@ -1922,6 +1953,10 @@ fun AdminAuditLogsTab(
     val filteredLogs = remember(logs, categoryFilter) {
         if (categoryFilter == "all") logs
         else logs.filter { it.category == categoryFilter }
+    }
+    val deletableIds = remember(logs, isOwnerAdmin, currentUserId) {
+        logs.filter { isOwnerAdmin || (currentUserId.isNotBlank() && it.actorId == currentUserId) }
+            .map { it.id }
     }
 
     LazyColumn(
@@ -1957,7 +1992,7 @@ fun AdminAuditLogsTab(
                             )
                         }
                     }
-                    if (isOwnerAdmin && logs.isNotEmpty()) {
+                    if (deletableIds.isNotEmpty()) {
                         OutlinedButton(
                             onClick = { showClearAllConfirm = true },
                             border = BorderStroke(1.dp, AdminCrimson.copy(alpha = 0.7f)),
@@ -1965,7 +2000,11 @@ fun AdminAuditLogsTab(
                         ) {
                             Icon(Icons.Default.Delete, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Audit မှတ်တမ်းအားလုံး ရှင်းလင်းမည် (${logs.size})", color = AdminCrimson)
+                            Text(
+                                text = if (isOwnerAdmin) "Audit မှတ်တမ်းအားလုံး ရှင်းလင်းမည် (${deletableIds.size})"
+                                else "မိမိမှတ်တမ်းအားလုံး ရှင်းလင်းမည် (${deletableIds.size})",
+                                color = AdminCrimson
+                            )
                         }
                     }
                 }
@@ -1978,6 +2017,7 @@ fun AdminAuditLogsTab(
             }
         } else {
             items(filteredLogs, key = { it.id }) { entry ->
+                val canDeleteEntry = isOwnerAdmin || (currentUserId.isNotBlank() && entry.actorId == currentUserId)
                 Card(
                     colors = CardDefaults.cardColors(containerColor = PearlCard),
                     shape = RoundedCornerShape(14.dp),
@@ -1999,7 +2039,7 @@ fun AdminAuditLogsTab(
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
-                                if (isOwnerAdmin) {
+                                if (canDeleteEntry) {
                                     IconButton(
                                         onClick = { onDeleteAuditLog(entry.id) },
                                         modifier = Modifier.testTag("delete_audit_log_${entry.id}")
@@ -2030,13 +2070,12 @@ fun AdminAuditLogsTab(
 
     if (showClearAllConfirm) {
         ConfirmDeleteDialog(
-            title = "Audit မှတ်တမ်းအားလုံး ဖျက်မည်လား?",
-            message = "Audit မှတ်တမ်း ${logs.size} ခုလုံးကို အပြီးတိုင် ဖျက်ပစ်ပါမည်။",
+            title = if (isOwnerAdmin) "Audit မှတ်တမ်းအားလုံး ဖျက်မည်လား?" else "မိမိ Audit မှတ်တမ်းများ ဖျက်မည်လား?",
+            message = "မှတ်တမ်း ${deletableIds.size} ခုလုံးကို အပြီးတိုင် ဖျက်ပစ်ပါမည်။",
             onDismiss = { showClearAllConfirm = false },
             onConfirm = {
-                val ids = logs.map { it.id }
                 showClearAllConfirm = false
-                onClearAllAuditLogs(ids)
+                onClearAllAuditLogs(deletableIds)
             }
         )
     }

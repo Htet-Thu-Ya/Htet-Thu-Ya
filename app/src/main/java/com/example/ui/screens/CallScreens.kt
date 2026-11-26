@@ -241,7 +241,7 @@ fun IncomingCallDialog(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = if (isFromAdmin) "Htet Thu Ya Admin မှ ခေါ်ဆိုနေပါသည်..."
+                            text = if (isFromAdmin) "လိုတရ (LoTaYa) Admin မှ ခေါ်ဆိုနေပါသည်..."
                             else "Customer မှ ခေါ်ဆိုနေပါသည်...",
                             color = Color(0xFFC5D7CE),
                             style = MaterialTheme.typography.bodyMedium,
@@ -539,7 +539,7 @@ fun ActiveCallScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (callState.peerRole == "admin") "Htet Thu Ya Admin" else "Customer",
+                    text = if (callState.peerRole == "admin") "လိုတရ (LoTaYa) Admin" else "Customer",
                     color = Color(0xFFB4C8BE),
                     style = MaterialTheme.typography.bodyLarge
                 )

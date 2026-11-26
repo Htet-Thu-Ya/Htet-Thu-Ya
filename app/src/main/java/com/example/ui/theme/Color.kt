@@ -2,7 +2,7 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Championship Emerald, Gold & Pearl aesthetic inspired by Htet Thu Ya emblem & 555 layout
+// Championship Emerald, Gold & Pearl aesthetic inspired by LoTaYa branding
 val DeepPitchBg = Color(0xFF0A1410)
 val DeepPitchSurface = Color(0xFF12221B)
 val DeepPitchElevated = Color(0xFF193026)

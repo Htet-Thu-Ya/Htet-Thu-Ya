@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -197,6 +198,7 @@ fun AdminDashboardScreen(
     onRejectOrder: (BetOrder, String) -> Unit,
     onDeleteOrder: (String) -> Unit,
     onClearCompletedOrders: (List<String>) -> Unit,
+    onClearFinishedMatches: (List<String>) -> Unit = {},
     onToggleHideOrder: (BetOrder) -> Unit = {},
     onEditOrder: (String, List<String>, String, Long, Double, Long, String, String) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onProcessWalletRequest: (WalletRequest, Boolean, String) -> Unit,
@@ -238,6 +240,9 @@ fun AdminDashboardScreen(
     onToggleAutoOneExpress: (Boolean) -> Unit = {},
     onToggleAuto555: (Boolean) -> Unit = {},
     onSaveAllowedLeagues: (List<String>) -> Unit = {},
+    onSaveBoardSheetUrl: (String) -> Unit = {},
+    onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
+    onImportCsvText: (String, String) -> Unit = { _, _ -> },
     onCreateAdminInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
     onToggleAdminInvite: (String, Boolean) -> Unit,
     onEditAdminInvite: (String, String, String, Boolean, String, String?, AdminPermissions) -> Unit = { _, _, _, _, _, _, _ -> },
@@ -266,6 +271,8 @@ fun AdminDashboardScreen(
         buildList {
             if (isOwnerAdmin || permissions.canManageOrders) {
                 add(AdminTabKey.ORDERS)
+            }
+            if (isOwnerAdmin) {
                 add(AdminTabKey.SETTLEMENT)
             }
             if (isOwnerAdmin || permissions.canApproveWallet || permissions.canEditWalletRates) {
@@ -330,6 +337,7 @@ fun AdminDashboardScreen(
     val miniGameRounds = (allMiniGameRoundsState as? UiState.Success)?.data ?: emptyList()
     val allTransactions = (allTransactionsState as? UiState.Success)?.data ?: emptyList()
     val usersById = remember(users) { users.associateBy { it.userId } }
+    val matchesById = remember(matches) { matches.associateBy { it.id } }
 
     val pendingOrderCount = orders.count { it.status == "pending" }
     val pendingWalletCount = walletReqs.count {
@@ -436,7 +444,7 @@ fun AdminDashboardScreen(
                 visibleTabs.forEach { tabKey ->
                     val (label, tag) = when (tabKey) {
                         AdminTabKey.ORDERS -> "အော်ဒါ ($pendingOrderCount)" to "admin_tab_orders"
-                        AdminTabKey.SETTLEMENT -> "စာရင်းချုပ်" to "admin_tab_settlement"
+                        AdminTabKey.SETTLEMENT -> "ရှင်းလင်းရေး/စာရင်းချုပ်" to "admin_tab_settlement"
                         AdminTabKey.WALLET -> "ငွေသွင်း/ထုတ် ($pendingWalletCount)" to "admin_tab_wallet"
                         AdminTabKey.BOARD -> "ပွဲစဉ် / ထီ" to "admin_tab_board"
                         AdminTabKey.ONE_EXPRESS -> "1xBET ကြေး" to "admin_tab_one_express"
@@ -479,6 +487,7 @@ fun AdminDashboardScreen(
                         busy = busy,
                         onOpenOneExpressBoard = { activeTabKey = AdminTabKey.ONE_EXPRESS },
                         onOpen555Board = { activeTabKey = AdminTabKey.FIVE_FIVE_FIVE },
+                        onSyncLiveResultsNow = onSyncLiveResultsNow,
                         onSaveBettingConfig = onSaveBettingConfig,
                         onToggleAutoAcceptOrders = onToggleAutoAcceptOrders,
                         onAutoSettleNow = onAutoSettleNow,
@@ -496,6 +505,7 @@ fun AdminDashboardScreen(
                     )
                     AdminTabKey.SETTLEMENT -> AdminSettlementTab(
                         orders = orders,
+                        matches = matches,
                         usersById = usersById,
                         busy = busy,
                         isOwnerAdmin = isOwnerAdmin,
@@ -509,7 +519,12 @@ fun AdminDashboardScreen(
                         onRejectOrder = { onRejectOrder(it, "ပယ်ဖျက်ပြီး - ငွေပြန်အမ်းပြီး") },
                         onDeleteOrder = onDeleteOrder,
                         onToggleHideOrder = onToggleHideOrder,
-                        onEditOrder = onEditOrder
+                        onEditOrder = onEditOrder,
+                        onSyncLiveResultsNow = onSyncLiveResultsNow,
+                        onClearCompletedOrders = onClearCompletedOrders,
+                        onClearFinishedMatches = onClearFinishedMatches,
+                        onUpdateMatchDetails = onUpdateMatchDetails,
+                        onDeleteMatch = onDeleteMatch
                     )
                     AdminTabKey.WALLET -> AdminWalletRequestsTab(
                         requests = walletReqs,
@@ -541,7 +556,10 @@ fun AdminDashboardScreen(
                         onSyncLiveResultsNow = onSyncLiveResultsNow,
                         onToggleAutoDailyMatches = onToggleAutoDailyMatches,
                         onToggleAutoLiveResults = onToggleAutoLiveResults,
-                        onSaveAllowedLeagues = onSaveAllowedLeagues
+                        onSaveAllowedLeagues = onSaveAllowedLeagues,
+                        onSaveSheetUrl = onSaveBoardSheetUrl,
+                        onSyncMatchesFromSheet = onSyncMatchesFromSheet,
+                        onImportCsvText = onImportCsvText
                     )
                     AdminTabKey.ONE_EXPRESS -> AdminExpressBoardTab(
                         boardMode = "one_express",
@@ -554,6 +572,9 @@ fun AdminDashboardScreen(
                         onToggleAutoSync = onToggleAutoOneExpress,
                         onToggleAutoLiveResults = onToggleAutoLiveResults,
                         onSaveAllowedLeagues = onSaveAllowedLeagues,
+                        onSaveSheetUrl = onSaveBoardSheetUrl,
+                        onSyncMatchesFromSheet = onSyncMatchesFromSheet,
+                        onImportCsvText = onImportCsvText,
                         onSeedSampleBoard = { onSeedSampleExpressBoard("one_express") },
                         onSaveNewMatch = onSaveNewMatch,
                         onUpdateMatchDetails = onUpdateMatchDetails,
@@ -570,6 +591,9 @@ fun AdminDashboardScreen(
                         onToggleAutoSync = onToggleAuto555,
                         onToggleAutoLiveResults = onToggleAutoLiveResults,
                         onSaveAllowedLeagues = onSaveAllowedLeagues,
+                        onSaveSheetUrl = onSaveBoardSheetUrl,
+                        onSyncMatchesFromSheet = onSyncMatchesFromSheet,
+                        onImportCsvText = onImportCsvText,
                         onSeedSampleBoard = { onSeedSampleExpressBoard("five_five_five") },
                         onSaveNewMatch = onSaveNewMatch,
                         onUpdateMatchDetails = onUpdateMatchDetails,
@@ -630,6 +654,7 @@ fun AdminDashboardScreen(
                         admins = admins,
                         invites = invites,
                         supportAgents = supportAgents,
+                        paymentAccounts = paymentAccounts,
                         appDisplayName = brandingConfig.appName.ifBlank { "လိုတရ" },
                         apkDownloadUrl = appUpdateConfig?.downloadUrl?.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
                             ?: AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL,
@@ -674,6 +699,7 @@ fun AdminDashboardScreen(
                     )
                     AdminTabKey.AUDIT_LOGS -> AdminAuditLogsTab(
                         logs = auditLogs,
+                        currentUserId = currentUserId,
                         isOwnerOrCanViewAll = isOwnerAdmin || permissions.canViewAllLogs,
                         isOwnerAdmin = isOwnerAdmin,
                         onDeleteAuditLog = onDeleteAuditLog,
@@ -716,6 +742,7 @@ fun AdminDashboardScreen(
             user = inspectedUser,
             customerOrders = custOrders,
             customerWalletReqs = custReqs,
+            matchesById = matchesById,
             busy = busy,
             canAdjustBalance = isOwnerAdmin || permissions.canAdjustBalance,
             canLockUsers = isOwnerAdmin || permissions.canLockUsers,
@@ -808,6 +835,7 @@ private fun AdminOrdersTab(
     busy: Boolean,
     onOpenOneExpressBoard: () -> Unit,
     onOpen555Board: () -> Unit,
+    onSyncLiveResultsNow: () -> Unit = {},
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onToggleAutoAcceptOrders: (Boolean) -> Unit,
     onAutoSettleNow: () -> Unit,
@@ -826,12 +854,16 @@ private fun AdminOrdersTab(
     var filter by remember { mutableStateOf("pending") }
     var groupByCustomer by remember { mutableStateOf(true) }
     var showHiddenOrders by remember { mutableStateOf(false) }
+    var showExpressShortcuts by remember { mutableStateOf(true) }
+    var showAutoAcceptCard by remember { mutableStateOf(true) }
+    var showOrderFilters by remember { mutableStateOf(true) }
     var showCommissionSettings by remember { mutableStateOf(false) }
     var showOrdersList by remember { mutableStateOf(true) }
     var editingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
     val collapsedCustomers = remember { mutableStateMapOf<String, Boolean>() }
+    val matchesById = remember(matches) { matches.associateBy { it.id } }
 
     var commissionPctText by remember { mutableStateOf(bettingConfig.winCommissionPercent.toString()) }
     var commissionBasis by remember { mutableStateOf(bettingConfig.winCommissionBasis) }
@@ -876,86 +908,97 @@ private fun AdminOrdersTab(
     ) {
         if (canManageBoard) {
             item {
-                val oneExpressOpenCount = remember(matches) {
-                    matches.count { it.boardSource == "one_express" && it.status == "open" }
-                }
-                val fffOpenCount = remember(matches) {
-                    matches.count { it.boardSource == "five_five_five" && it.status == "open" }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Card(
-                        onClick = onOpenOneExpressBoard,
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3B)),
-                        border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.7f)),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.weight(1f).testTag("admin_box_one_express")
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "1xBET ကြေး",
-                                    color = Color(0xFF38BDF8),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Text(
-                                text = "$oneExpressOpenCount ပွဲဖွင့် • Auto ${if (boardConfig.autoSyncOneExpress) "ON" else "OFF"}",
-                                color = Color(0xFFE0F2FE),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "နှိပ်၍ ပြုပြင်/Sync မည် ->",
-                                color = Color(0xFF7DD3FC),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                HideBarSectionHeader(
+                    title = "1xBET / 555 Mix အမြန်ဝင်ခလုတ်များ",
+                    countBadge = "2",
+                    isVisible = showExpressShortcuts,
+                    onToggle = { showExpressShortcuts = !showExpressShortcuts },
+                    testTag = "hide_bar_admin_orders_express_shortcuts"
+                )
+            }
+            if (showExpressShortcuts) {
+                item {
+                    val oneExpressOpenCount = remember(matches) {
+                        matches.count { it.boardSource == "one_express" && it.status == "open" }
                     }
-                    Card(
-                        onClick = onOpen555Board,
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B210B)),
-                        border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.weight(1f).testTag("admin_box_five_five_five")
+                    val fffOpenCount = remember(matches) {
+                        matches.count { it.boardSource == "five_five_five" && it.status == "open" }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        Card(
+                            onClick = onOpenOneExpressBoard,
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3B)),
+                            border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.7f)),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f).testTag("admin_box_one_express")
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "1xBET ကြေး",
+                                        color = Color(0xFF38BDF8),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 Text(
-                                    "555 Mix ဘောလုံးကြေး",
-                                    color = ChampionshipGold,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = "$oneExpressOpenCount ပွဲဖွင့် • Auto ${if (boardConfig.autoSyncOneExpress) "ON" else "OFF"}",
+                                    color = Color(0xFFE0F2FE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = "နှိပ်၍ ပြုပြင်/Sync မည် ->",
+                                    color = Color(0xFF7DD3FC),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
-                            Text(
-                                text = "$fffOpenCount ပွဲဖွင့် • Auto ${if (boardConfig.autoSyncFiveFiveFive) "ON" else "OFF"}",
-                                color = Color(0xFFFEF3C7),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "နှိပ်၍ ပြုပြင်/Sync မည် ->",
-                                color = ChampionshipGold,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        }
+                        Card(
+                            onClick = onOpen555Board,
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B210B)),
+                            border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f).testTag("admin_box_five_five_five")
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "555 Mix ဘောလုံးကြေး",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text(
+                                    text = "$fffOpenCount ပွဲဖွင့် • Auto ${if (boardConfig.autoSyncFiveFiveFive) "ON" else "OFF"}",
+                                    color = Color(0xFFFEF3C7),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = "နှိပ်၍ ပြုပြင်/Sync မည် ->",
+                                    color = ChampionshipGold,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
@@ -1106,84 +1149,119 @@ private fun AdminOrdersTab(
         }
 
         item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
-                border = BorderStroke(1.dp, PitchEmeraldDark.copy(alpha = 0.6f)),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            HideBarSectionHeader(
+                title = "အော်ဒါ Auto-Accept စနစ်",
+                countBadge = if (bettingConfig.autoAcceptOrders) "ON" else "OFF",
+                isVisible = showAutoAcceptCard,
+                onToggle = { showAutoAcceptCard = !showAutoAcceptCard },
+                testTag = "hide_bar_admin_orders_auto_accept"
+            )
+        }
+        if (showAutoAcceptCard) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, PitchEmeraldDark.copy(alpha = 0.6f)),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            "အော်ဒါ အလိုအလျောက် လက်ခံစနစ် (Auto-Accept)",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            if (bettingConfig.autoAcceptOrders) "Customer တင်လိုက်သည်နှင့် ချက်ချင်း အတည်ပြုပါမည်"
-                            else "Admin မှ ကိုယ်တိုင်စစ်ဆေး လက်ခံမည့်စနစ်",
-                            color = Color(0xFFB4C8BE),
-                            style = MaterialTheme.typography.bodySmall
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                "အော်ဒါ အလိုအလျောက် လက်ခံစနစ် (Auto-Accept)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                if (bettingConfig.autoAcceptOrders) "Customer တင်လိုက်သည်နှင့် ချက်ချင်း အတည်ပြုပါမည်"
+                                else "Admin မှ ကိုယ်တိုင်စစ်ဆေး လက်ခံမည့်စနစ်",
+                                color = Color(0xFFB4C8BE),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = bettingConfig.autoAcceptOrders,
+                            onCheckedChange = onToggleAutoAcceptOrders,
+                            enabled = !busy,
+                            modifier = Modifier.testTag("auto_accept_orders_switch")
                         )
                     }
-                    Switch(
-                        checked = bettingConfig.autoAcceptOrders,
-                        onCheckedChange = onToggleAutoAcceptOrders,
-                        enabled = !busy,
-                        modifier = Modifier.testTag("auto_accept_orders_switch")
+                }
+            }
+        }
+
+        item {
+            HideBarSectionHeader(
+                title = "စစ်ထုတ်မှု & ပြသပုံ (Filters)",
+                countBadge = filter.uppercase(),
+                isVisible = showOrderFilters,
+                onToggle = { showOrderFilters = !showOrderFilters },
+                testTag = "hide_bar_admin_orders_filters"
+            )
+        }
+        if (showOrderFilters) {
+            item {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "pending" to "အသစ် (${baseOrders.count { it.status == "pending" }})",
+                        "accepted" to "လက်ခံပြီး (${baseOrders.count { it.status == "accepted" }})",
+                        "settled" to "ပြီးဆုံး (${settledIds.size})",
+                        "all" to "အားလုံး (${baseOrders.size})"
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = filter == key,
+                            onClick = { filter = key },
+                            label = { Text(label) },
+                            modifier = Modifier.testTag("admin_orders_filter_$key")
+                        )
+                    }
+                    if (hiddenCount > 0 || showHiddenOrders) {
+                        FilterChip(
+                            selected = showHiddenOrders,
+                            onClick = { showHiddenOrders = !showHiddenOrders },
+                            label = { Text(if (showHiddenOrders) "Hide ထားသည်များပါပြ ($hiddenCount)" else "Hide ($hiddenCount)") },
+                            modifier = Modifier.testTag("admin_orders_toggle_hidden")
+                        )
+                    }
+                }
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = groupByCustomer,
+                        onClick = { groupByCustomer = true },
+                        label = { Text("Customer အလိုက်ခွဲကြည့်မည်") },
+                        modifier = Modifier.testTag("orders_view_by_customer")
+                    )
+                    FilterChip(
+                        selected = !groupByCustomer,
+                        onClick = { groupByCustomer = false },
+                        label = { Text("အော်ဒါစာရင်းလိုက်") },
+                        modifier = Modifier.testTag("orders_view_flat")
                     )
                 }
             }
         }
 
         item {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+            OutlinedButton(
+                onClick = onSyncLiveResultsNow,
+                enabled = !busy,
+                border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                modifier = Modifier.fillMaxWidth().testTag("admin_orders_refresh_live_goals_button")
             ) {
-                listOf(
-                    "pending" to "အသစ် (${baseOrders.count { it.status == "pending" }})",
-                    "accepted" to "လက်ခံပြီး (${baseOrders.count { it.status == "accepted" }})",
-                    "settled" to "ပြီးဆုံး (${settledIds.size})",
-                    "all" to "အားလုံး (${baseOrders.size})"
-                ).forEach { (key, label) ->
-                    FilterChip(
-                        selected = filter == key,
-                        onClick = { filter = key },
-                        label = { Text(label) },
-                        modifier = Modifier.testTag("admin_orders_filter_$key")
-                    )
-                }
-                if (hiddenCount > 0 || showHiddenOrders) {
-                    FilterChip(
-                        selected = showHiddenOrders,
-                        onClick = { showHiddenOrders = !showHiddenOrders },
-                        label = { Text(if (showHiddenOrders) "Hide ထားသည်များပါပြ ($hiddenCount)" else "Hide ($hiddenCount)") },
-                        modifier = Modifier.testTag("admin_orders_toggle_hidden")
-                    )
-                }
-            }
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = groupByCustomer,
-                    onClick = { groupByCustomer = true },
-                    label = { Text("Customer အလိုက်ခွဲကြည့်မည်") },
-                    modifier = Modifier.testTag("orders_view_by_customer")
-                )
-                FilterChip(
-                    selected = !groupByCustomer,
-                    onClick = { groupByCustomer = false },
-                    label = { Text("အော်ဒါစာရင်းလိုက်") },
-                    modifier = Modifier.testTag("orders_view_flat")
-                )
+                Icon(Icons.Default.LiveTv, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("တိုက်ရိုက်ဂိုးရလဒ် Refresh", color = ChampionshipGold, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -1324,6 +1402,7 @@ private fun AdminOrdersTab(
                     items(customerOrders, key = { it.id }) { order ->
                         OrderSlipCard(
                             order = order,
+                            matchesById = matchesById,
                             isAdminView = true,
                             busy = busy,
                             canDeleteAnyOrder = isOwnerAdmin,
@@ -1343,6 +1422,7 @@ private fun AdminOrdersTab(
             items(filtered, key = { it.id }) { order ->
                 OrderSlipCard(
                     order = order,
+                    matchesById = matchesById,
                     isAdminView = true,
                     busy = busy,
                     canDeleteAnyOrder = isOwnerAdmin,
@@ -1817,12 +1897,16 @@ private fun AdminBoardTab(
     onSyncLiveResultsNow: () -> Unit,
     onToggleAutoDailyMatches: (Boolean) -> Unit,
     onToggleAutoLiveResults: (Boolean) -> Unit,
-    onSaveAllowedLeagues: (List<String>) -> Unit = {}
+    onSaveAllowedLeagues: (List<String>) -> Unit = {},
+    onSaveSheetUrl: (String) -> Unit = {},
+    onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
+    onImportCsvText: (String, String) -> Unit = { _, _ -> }
 ) {
     val standardMatches = remember(matches) {
         matches.filter { it.boardSource.isBlank() || it.boardSource == "standard" }
     }
     var showAddMatch by remember { mutableStateOf(false) }
+    var showSheetDialog by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var deletingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showAddDraw by remember { mutableStateOf(false) }
@@ -2005,24 +2089,36 @@ private fun AdminBoardTab(
         }
 
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { showAddMatch = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
-                    modifier = Modifier.weight(1f).testTag("admin_add_match_button")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("ပွဲစဉ်သစ်")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { showAddMatch = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
+                        modifier = Modifier.weight(1f).testTag("admin_add_match_button")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("ပွဲစဉ်သစ်")
+                    }
+                    Button(
+                        onClick = { showAddDraw = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                        modifier = Modifier.weight(1f).testTag("admin_add_draw_button")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("2D / 3D ထီသစ်")
+                    }
                 }
-                Button(
-                    onClick = { showAddDraw = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                    modifier = Modifier.weight(1f).testTag("admin_add_draw_button")
+                OutlinedButton(
+                    onClick = { showSheetDialog = true },
+                    enabled = !busy,
+                    border = BorderStroke(1.dp, ChampionshipGold),
+                    modifier = Modifier.fillMaxWidth().testTag("sheet_sync_button_standard")
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("2D / 3D ထီသစ်")
+                    Icon(Icons.Default.TableChart, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Google Sheet / ကွန်ပျူတာ Excel ဖြင့် ပြင်ဆင်/Sync မည်", color = ChampionshipGold, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2270,6 +2366,24 @@ private fun AdminBoardTab(
                 val id = d.id
                 deletingDraw = null
                 onDeleteLotteryDraw(id)
+            }
+        )
+    }
+    if (showSheetDialog) {
+        MatchSheetSyncDialog(
+            boardMode = "standard",
+            boardConfig = boardConfig,
+            matchesToExport = standardMatches,
+            busy = busy,
+            onDismiss = { showSheetDialog = false },
+            onSaveSheetUrl = onSaveSheetUrl,
+            onSyncFromSheetUrl = { url ->
+                onSyncMatchesFromSheet("standard", url)
+                showSheetDialog = false
+            },
+            onImportCsvText = { csvText ->
+                onImportCsvText("standard", csvText)
+                showSheetDialog = false
             }
         )
     }

@@ -1014,7 +1014,7 @@ class HtetThuYaRepository(
         val path = "mini_game_rounds/$roundId"
         return try {
             val uid = requireUserId()
-            require(gameType in listOf("dice", "six_animals")) { "Invalid game type" }
+            require(gameType in listOf("dice", "six_animals", "dragon_tiger", "lucky_wheel")) { "Invalid game type" }
             require(stakeKs in 100L..1_000_000L) { "လောင်းကြေးသည် 100 Ks မှ 1,000,000 Ks အတွင်း ဖြစ်ရပါမည်" }
             require(payoutKs in 0L..(stakeKs * 100L)) { "Invalid payout" }
 
@@ -1034,8 +1034,8 @@ class HtetThuYaRepository(
             val newBalance = (curBalance - stakeKs + payoutKs).coerceAtLeast(0L)
             val newWon = curWon + payoutKs
             val safeName = customerName.trim().ifBlank { "Member" }.take(60)
-            val safeBet = betLabel.trim().ifBlank { gameType }.take(120)
-            val safeOutcome = outcomeLabel.trim().ifBlank { "-" }.take(120)
+            val safeBet = betLabel.trim().ifBlank { gameType }.take(200)
+            val safeOutcome = outcomeLabel.trim().ifBlank { "-" }.take(200)
 
             val batch = db.batch()
             batch.set(
@@ -1060,7 +1060,13 @@ class HtetThuYaRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             )
-            val gameLabel = if (gameType == "dice") "အံစာတုံး" else "၆ကောင်ဂျင်"
+            val gameLabel = when (gameType) {
+                "dice" -> "အံစာတုံး"
+                "six_animals" -> "၆ကောင်ဂျင်"
+                "dragon_tiger" -> "နဂါး vs ကျား"
+                "lucky_wheel" -> "ကံစမ်းဘီးလှည့်"
+                else -> "ဂိမ်း"
+            }
             if (payoutKs > 0L) {
                 batch.set(
                     txRef,
@@ -2370,7 +2376,8 @@ class HtetThuYaRepository(
         lastSyncedDate: String,
         allowedLeagues: List<String> = emptyList(),
         autoSyncOneExpress: Boolean = false,
-        autoSyncFiveFiveFive: Boolean = false
+        autoSyncFiveFiveFive: Boolean = false,
+        googleSheetCsvUrl: String = ""
     ): Result<Unit> {
         val path = "app_settings/board_config"
         return try {
@@ -2380,9 +2387,10 @@ class HtetThuYaRepository(
                     "autoSyncDailyMatches" to autoSyncDailyMatches,
                     "autoSyncLiveResults" to autoSyncLiveResults,
                     "lastSyncedDate" to lastSyncedDate.take(20),
-                    "allowedLeagues" to allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(30),
+                    "allowedLeagues" to allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(80),
                     "autoSyncOneExpress" to autoSyncOneExpress,
                     "autoSyncFiveFiveFive" to autoSyncFiveFiveFive,
+                    "googleSheetCsvUrl" to googleSheetCsvUrl.trim().take(500),
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2475,6 +2483,8 @@ class HtetThuYaRepository(
                     "diceTripleMult" to config.diceTripleMult.coerceIn(1.0, 100.0),
                     "diceExactMult" to config.diceExactMult.coerceIn(1.0, 100.0),
                     "sixAnimalsMult" to config.sixAnimalsMult.coerceIn(1.0, 30.0),
+                    "dragonTigerMult" to config.dragonTigerMult.coerceIn(1.0, 50.0),
+                    "luckyWheelMult" to config.luckyWheelMult.coerceIn(1.0, 50.0),
                     "diceAllowedTotals" to cleanAllowedTotals,
                     "diceMaxBigPerDay" to config.diceMaxBigPerDay.coerceIn(0L, 100_000L),
                     "diceMaxSmallPerDay" to config.diceMaxSmallPerDay.coerceIn(0L, 100_000L),
@@ -2837,9 +2847,18 @@ class HtetThuYaRepository(
         }
     }
 
+    private fun isMatchOverdueForFinish(m: SportMatch, nowMs: Long): Boolean {
+        if (m.status == "finished") return false
+        val kickoffMs = MyanmarTimeUtil.resolveMatchKickoffEpochMs(m, nowMs)
+        if (kickoffMs > 0L && kickoffMs <= nowMs - 105L * 60_000L) return true
+        val todayIso = MyanmarTimeUtil.todayIsoDate(nowMs)
+        return m.matchDate.isNotBlank() && m.matchDate < todayIso
+    }
+
     suspend fun autoSettleFinishedOrders(
         bettingConfig: BettingConfig,
-        targetUserId: String? = null
+        targetUserId: String? = null,
+        feedService: FootballFeedService? = null
     ): Result<AutoSettleSummary> {
         val path = if (targetUserId != null) "orders/auto_settle_$targetUserId" else "orders/auto_settle"
         return try {
@@ -2862,8 +2881,22 @@ class HtetThuYaRepository(
                 return Result.success(AutoSettleSummary())
             }
 
-            val matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
-            val matchesById = matches.associateBy { it.id }
+            var matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+            var matchesById = matches.associateBy { it.id }
+            if (feedService != null) {
+                val nowMs = MyanmarTimeUtil.nowMs()
+                val needsSync = pendingOrders.any { ord ->
+                    ord.matchIds.any { mid ->
+                        val m = matchesById[mid]
+                        m != null && isMatchOverdueForFinish(m, nowMs)
+                    }
+                }
+                if (needsSync) {
+                    runCatching { syncLiveMatchResults(feedService) }
+                    matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+                    matchesById = matches.associateBy { it.id }
+                }
+            }
             val draws = db.collection("lottery_draws").get().await().toObjects(LotteryDraw::class.java)
 
             var wonCount = 0
@@ -2915,7 +2948,8 @@ class HtetThuYaRepository(
 
     suspend fun autoSettleSingleOrder(
         order: BetOrder,
-        bettingConfig: BettingConfig
+        bettingConfig: BettingConfig,
+        feedService: FootballFeedService? = null
     ): Result<String> {
         val path = "orders/${order.id}"
         return try {
@@ -2923,8 +2957,24 @@ class HtetThuYaRepository(
             if (order.status !in listOf("pending", "accepted")) {
                 return Result.success("ဤအော်ဒါသည် စာရင်းရှင်းလင်းပြီးသား ဖြစ်ပါသည်")
             }
-            val matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
-            val matchesById = matches.associateBy { it.id }
+            var matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+            var matchesById = matches.associateBy { it.id }
+            if (feedService != null && order.matchIds.isNotEmpty()) {
+                val nowMs = MyanmarTimeUtil.nowMs()
+                val hasUnfinished = order.matchIds.any { id ->
+                    val m = matchesById[id]
+                    m != null && m.status != "finished"
+                }
+                val hasOverdue = order.matchIds.any { id ->
+                    val m = matchesById[id]
+                    m != null && isMatchOverdueForFinish(m, nowMs)
+                }
+                if (hasUnfinished && (hasOverdue || order.matchKickoffMs in 1L..nowMs)) {
+                    runCatching { syncLiveMatchResults(feedService) }
+                    matches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+                    matchesById = matches.associateBy { it.id }
+                }
+            }
             val draws = db.collection("lottery_draws").get().await().toObjects(LotteryDraw::class.java)
 
             when (val decision = AutoSettleEngine.evaluate(order, matchesById, draws, bettingConfig)) {
@@ -2954,8 +3004,8 @@ class HtetThuYaRepository(
                     Result.success("${order.customerName} (${orderTypeLabel(order.orderType)}) တစ်ဝက်ရှုံး ${decision.returnKs} Ks ပြန်အမ်းပြီးပါပြီ")
                 }
                 AutoSettleDecision.NotReady -> {
-                    val reason = if (order.orderType == "three_d") {
-                        "3D ထွက်ဂဏန်း (${order.drawRound.ifBlank { "လက်ရှိအကြိမ်" }}) ရလဒ် 'ပြီးဆုံး' မဖြစ်သေးပါ"
+                    val reason = if (order.orderType == "three_d" || order.orderType == "two_d") {
+                        "ထွက်ဂဏန်း (${order.drawRound.ifBlank { "လက်ရှိအကြိမ်" }}) ရလဒ် 'ပြီးဆုံး' မဖြစ်သေးပါ"
                     } else {
                         val pendingMatchNames = order.matchIds.mapNotNull { id ->
                             val m = matchesById[id]
@@ -2966,7 +3016,7 @@ class HtetThuYaRepository(
                             }
                         }.distinct()
                         if (pendingMatchNames.isNotEmpty()) {
-                            "${pendingMatchNames.joinToString(", ")} ပွဲစဉ် ရလဒ် 'ပြီးဆုံး' မဖြစ်သေးပါ (ပွဲစဉ် Tab မှ ရလဒ်ထည့်ပါ)"
+                            "${pendingMatchNames.joinToString(", ")} ပွဲစဉ် ရလဒ် 'ပြီးဆုံး' မဖြစ်သေးပါ (ရှင်းလင်းရေးခန်း / ပွဲစဉ် Tab မှ ရလဒ်ထည့်ပါ)"
                         } else {
                             "ပွဲစဉ်ရလဒ် အချက်အလက် မပြည့်စုံသေးပါ — Live ရလဒ်ဆွဲယူပါ သို့မဟုတ် ကိုယ်တိုင် နိုင်/ရှုံး ရှင်းပေးပါ"
                         }
@@ -3068,9 +3118,10 @@ class HtetThuYaRepository(
                         "autoSyncDailyMatches" to currentConfig.autoSyncDailyMatches,
                         "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
                         "lastSyncedDate" to feedService.todayDateIso(),
-                        "allowedLeagues" to currentConfig.allowedLeagues.take(30),
+                        "allowedLeagues" to currentConfig.allowedLeagues.take(80),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
+                        "googleSheetCsvUrl" to currentConfig.googleSheetCsvUrl.trim().take(500),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3239,9 +3290,10 @@ class HtetThuYaRepository(
                         "autoSyncDailyMatches" to currentConfig.autoSyncDailyMatches,
                         "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
                         "lastSyncedDate" to feedService.todayDateIso(),
-                        "allowedLeagues" to currentConfig.allowedLeagues.take(30),
+                        "allowedLeagues" to currentConfig.allowedLeagues.take(80),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
+                        "googleSheetCsvUrl" to currentConfig.googleSheetCsvUrl.trim().take(500),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3277,29 +3329,101 @@ class HtetThuYaRepository(
         return try {
             requireUserId()
             val nowMs = MyanmarTimeUtil.nowMs()
-            val espnFixtures = feedService.fetchFixturesForDays(listOf(-3, -2, -1, 0, 1)).getOrDefault(emptyList())
-            val oneXBetLiveFixtures = feedService.fetchOneXBetLiveUpdates()
-            val allFixtures = espnFixtures + oneXBetLiveFixtures
+            val existingMatches = db.collection("matches").get().await()
+                .toObjects(SportMatch::class.java)
 
-            val byExternalId = allFixtures.associateBy { it.externalId }
-            val byNormalizedTeams = espnFixtures.associateBy {
+            val recentWindow = (-5..1).map { MyanmarTimeUtil.isoDateForOffset(it, nowMs) }
+            val extraUnfinishedDates = existingMatches
+                .filter { it.status != "finished" && it.matchDate.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+                .map { it.matchDate }
+                .filter { it !in recentWindow }
+                .distinct()
+                .take(8)
+
+            val espnFixtures = feedService.fetchFixturesForDays(listOf(-3, -2, -1, 0, 1)).getOrDefault(emptyList())
+            val extraTsdbFixtures = if (extraUnfinishedDates.isNotEmpty()) {
+                feedService.fetchTheSportsDbDates(extraUnfinishedDates + listOf(
+                    MyanmarTimeUtil.isoDateForOffset(-4, nowMs),
+                    MyanmarTimeUtil.isoDateForOffset(-5, nowMs)
+                ))
+            } else {
+                emptyList()
+            }
+            val oneXBetLiveFixtures = feedService.fetchOneXBetLiveUpdates()
+            val baseFixtures = espnFixtures + extraTsdbFixtures + oneXBetLiveFixtures
+
+            val byExternalId = linkedMapOf<String, LiveFootballFixture>()
+            baseFixtures.forEach { fix ->
+                val cur = byExternalId[fix.externalId]
+                val curRank = when (cur?.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                val newRank = when (fix.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                if (cur == null || newRank >= curRank) {
+                    byExternalId[fix.externalId] = fix
+                }
+            }
+            val byNormalizedTeams = (espnFixtures + extraTsdbFixtures).associateBy {
                 "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}_${extractTeamCategoryTag(it.homeTeam)}"
             }
             val oneXBetByNormalizedTeams = oneXBetLiveFixtures.associateBy {
                 "${FootballFeedService.normalizeTeam(it.homeTeam)}_${FootballFeedService.normalizeTeam(it.awayTeam)}_${extractTeamCategoryTag(it.homeTeam)}"
             }
 
-            val existingMatches = db.collection("matches").get().await()
-                .toObjects(SportMatch::class.java)
+            fun pickBestStatus(a: LiveFootballFixture?, b: LiveFootballFixture?): LiveFootballFixture? {
+                if (a == null) return b
+                if (b == null) return a
+                val ra = when (a.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                val rb = when (b.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                return if (rb > ra) b else a
+            }
 
             val fixtureUpdates = mutableListOf<Pair<String, LiveFootballFixture>>()
             val autoCloseIds = mutableListOf<Pair<String, Long>>()
+            var targetedSearches = 0
+
             existingMatches.forEach { m ->
-                val teamKey = "${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}_${extractTeamCategoryTag(m.homeTeam)}"
-                val matched = byExternalId[m.externalId]
-                    ?: (if (m.boardSource == "one_express") oneXBetByNormalizedTeams[teamKey] else null)
-                    ?: byNormalizedTeams[teamKey]
+                val catTag = extractTeamCategoryTag(m.homeTeam)
+                val teamKey = "${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}_$catTag"
+                var matched = pickBestStatus(
+                    pickBestStatus(
+                        byExternalId[m.externalId],
+                        if (m.boardSource == "one_express") oneXBetByNormalizedTeams[teamKey] else null
+                    ),
+                    byNormalizedTeams[teamKey]
+                )
+                if (matched == null) {
+                    val fuzzyPool = baseFixtures.filter { fix ->
+                        extractTeamCategoryTag(fix.homeTeam) == catTag &&
+                            FootballFeedService.fuzzyTeamMatches(fix.homeTeam, m.homeTeam) &&
+                            FootballFeedService.fuzzyTeamMatches(fix.awayTeam, m.awayTeam)
+                    }
+                    matched = fuzzyPool.maxByOrNull { fix ->
+                        when (fix.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                    }
+                }
+                // Targeted search fallback for unfinished overdue matches (e.g. cup/lower-division/past date matches)
+                if ((matched == null || matched.status != "finished") &&
+                    m.status != "finished" &&
+                    targetedSearches < 12 &&
+                    (isMatchOverdueForFinish(m, nowMs) || m.status == "closed")
+                ) {
+                    targetedSearches++
+                    val foundList = runCatching {
+                        feedService.searchTheSportsDbMatch(m.homeTeam, m.awayTeam, nowMs)
+                    }.getOrDefault(emptyList())
+                    val bestFound = foundList.maxByOrNull { fix ->
+                        when (fix.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                    }
+                    if (bestFound != null) {
+                        matched = pickBestStatus(matched, bestFound)
+                    }
+                }
+
                 if (matched != null) {
+                    val existingRank = when (m.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                    val newRank = when (matched.status) { "finished" -> 3; "closed" -> 2; else -> 1 }
+                    if (newRank < existingRank) {
+                        return@forEach
+                    }
                     val changed = m.homeScore != matched.homeScore ||
                         m.awayScore != matched.awayScore ||
                         m.status != matched.status ||
@@ -3332,6 +3456,7 @@ class HtetThuYaRepository(
                         "kickoffLabel" to fix.kickoffLabel,
                         "matchDate" to fix.matchDate,
                         "externalId" to fix.externalId,
+                        "autoUpdatedAtMs" to nowMs,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                     if (fix.kickoffEpochMs > 0L) {
@@ -3361,6 +3486,146 @@ class HtetThuYaRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun upsertMatchesFromSheet(
+        rows: List<com.example.data.betting.SheetMatchRow>,
+        defaultBoardSource: String = "standard"
+    ): Result<Int> {
+        val path = "matches/sheet_sync"
+        return try {
+            val adminUid = requireUserId()
+            if (rows.isEmpty()) return Result.success(0)
+            val existingMatches = db.collection("matches").get().await().toObjects(SportMatch::class.java)
+            val existingByTeamBoard = existingMatches.associateBy { m ->
+                "${FootballFeedService.normalizeTeam(m.homeTeam)}_${FootballFeedService.normalizeTeam(m.awayTeam)}_${m.boardSource.ifBlank { "standard" }}"
+            }
+
+            val nowMs = MyanmarTimeUtil.nowMs()
+            var count = 0
+            rows.chunked(180).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { row ->
+                    val src = row.boardSource.takeIf { it in listOf("standard", "one_express", "five_five_five") }
+                        ?: defaultBoardSource
+                    val key = "${FootballFeedService.normalizeTeam(row.homeTeam)}_${FootballFeedService.normalizeTeam(row.awayTeam)}_$src"
+                    val existing = existingByTeamBoard[key]
+                    val cleanKickoff = row.kickoffLabel.ifBlank {
+                        if (row.status == "finished") "FT" else "Tonight 21:00"
+                    }.take(40)
+                    val resolvedKickoffMs = if (row.status == "open") {
+                        MyanmarTimeUtil.resolveMatchKickoffEpochMs(
+                            SportMatch(kickoffLabel = cleanKickoff, matchDate = row.matchDate, status = row.status),
+                            nowMs
+                        )
+                    } else 0L
+                    val est1x2 = com.example.data.betting.KyayFormatter.estimate1x2FromHandicap(row.handicapLine)
+                    val oneExp = row.oneExpressKyay.ifBlank {
+                        if (src == "one_express") com.example.data.betting.KyayFormatter.formatOneExpressKyay(
+                            row.handicapLine, row.goalLine, row.bodyOdds, row.goalOdds
+                        ) else ""
+                    }.take(60)
+                    val fffKyay = row.fiveFiveFiveKyay.ifBlank {
+                        if (src == "five_five_five") com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(
+                            row.handicapLine, row.goalLine, row.bodyOdds, row.goalOdds
+                        ) else ""
+                    }.take(60)
+
+                    if (existing != null) {
+                        val fields = mutableMapOf<String, Any>(
+                            "league" to row.league,
+                            "homeTeam" to row.homeTeam,
+                            "awayTeam" to row.awayTeam,
+                            "kickoffLabel" to cleanKickoff,
+                            "handicapLine" to row.handicapLine,
+                            "goalLine" to row.goalLine,
+                            "bodyOdds" to row.bodyOdds,
+                            "goalOdds" to row.goalOdds,
+                            "win1Odds" to (row.win1Odds ?: existing.win1Odds.takeIf { it > 1.0 } ?: est1x2.first),
+                            "drawOdds" to (row.drawOdds ?: existing.drawOdds.takeIf { it > 1.0 } ?: est1x2.second),
+                            "win2Odds" to (row.win2Odds ?: existing.win2Odds.takeIf { it > 1.0 } ?: est1x2.third),
+                            "overOdds" to (row.overOdds ?: row.goalOdds),
+                            "underOdds" to (row.underOdds ?: row.goalOdds),
+                            "status" to row.status,
+                            "homeScore" to row.homeScore,
+                            "awayScore" to row.awayScore,
+                            "oneExpressKyay" to oneExp,
+                            "fiveFiveFiveKyay" to fffKyay,
+                            "matchDate" to row.matchDate,
+                            "autoUpdatedAtMs" to nowMs,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                        if (row.status == "finished") fields["liveClock"] = "FT"
+                        if (resolvedKickoffMs > 0L) fields["kickoffEpochMs"] = resolvedKickoffMs
+                        batch.update(db.collection("matches").document(existing.id), fields)
+                    } else {
+                        val matchId = "sh_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+                        batch.set(
+                            db.collection("matches").document(matchId),
+                            mapOf(
+                                "league" to row.league,
+                                "homeTeam" to row.homeTeam,
+                                "awayTeam" to row.awayTeam,
+                                "kickoffLabel" to cleanKickoff,
+                                "matchDate" to row.matchDate,
+                                "kickoffEpochMs" to resolvedKickoffMs.coerceAtLeast(0L),
+                                "handicapLine" to row.handicapLine,
+                                "goalLine" to row.goalLine,
+                                "bodyOdds" to row.bodyOdds,
+                                "goalOdds" to row.goalOdds,
+                                "win1Odds" to (row.win1Odds ?: est1x2.first),
+                                "drawOdds" to (row.drawOdds ?: est1x2.second),
+                                "win2Odds" to (row.win2Odds ?: est1x2.third),
+                                "overOdds" to (row.overOdds ?: row.goalOdds),
+                                "underOdds" to (row.underOdds ?: row.goalOdds),
+                                "status" to row.status,
+                                "liveClock" to if (row.status == "finished") "FT" else "",
+                                "homeScore" to row.homeScore,
+                                "awayScore" to row.awayScore,
+                                "visibility" to "public",
+                                "boardSource" to src,
+                                "oneExpressKyay" to oneExp,
+                                "fiveFiveFiveKyay" to fffKyay,
+                                "autoUpdatedAtMs" to nowMs,
+                                "createdBy" to adminUid,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    }
+                    count++
+                }
+                batch.commit().await()
+            }
+            Result.success(count)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteMatchesBatch(matchIds: List<String>): Result<Int> {
+        val path = "matches"
+        return try {
+            requireUserId()
+            val validIds = matchIds.filter { it.isNotBlank() && ID_REGEX.matches(it) }
+            if (validIds.isEmpty()) return Result.success(0)
+            validIds.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { id ->
+                    batch.delete(db.collection("matches").document(id))
+                }
+                batch.commit().await()
+            }
+            Result.success(validIds.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }

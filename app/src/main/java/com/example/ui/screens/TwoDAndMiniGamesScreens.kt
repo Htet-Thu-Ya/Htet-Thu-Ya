@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -27,7 +32,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
@@ -52,23 +60,31 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.betting.MiniGameEngine
 import com.example.data.model.Live2DStatus
 import com.example.data.model.LotteryDraw
 import com.example.data.model.MiniGameControlConfig
@@ -93,8 +109,11 @@ import com.example.ui.theme.PearlCardBorder
 import com.example.ui.theme.PitchEmerald
 import com.example.ui.theme.PitchEmeraldDark
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.cos
 import kotlin.math.roundToLong
+import kotlin.math.sin
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -545,8 +564,22 @@ fun DiceGameScreen(
     var exactNumber by remember { mutableIntStateOf(11) }
     var stakeInput by remember { mutableStateOf("1000") }
     var lastDice by remember { mutableStateOf(listOf(4, 5, 2)) }
+    var displayDice by remember { mutableStateOf(listOf(4, 5, 2)) }
+    var isRollingVisual by remember { mutableStateOf(false) }
     var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
     var showDiceHistory by remember { mutableStateOf(true) }
+    val animScope = rememberCoroutineScope()
+
+    val diceRotation by animateFloatAsState(
+        targetValue = if (isRollingVisual) 360f else 0f,
+        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+        label = "dice_spin"
+    )
+    val diceScale by animateFloatAsState(
+        targetValue = if (isRollingVisual) 1.09f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f),
+        label = "dice_pop"
+    )
 
     val allowedTotals = remember(miniGameControlConfig.diceAllowedTotals) {
         miniGameControlConfig.diceAllowedTotals.filter { it in 3..18 }.distinct().sorted()
@@ -560,7 +593,7 @@ fun DiceGameScreen(
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
-    val canPlay = !busy && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+    val canPlay = !busy && !isRollingVisual && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
 
     val stdMult = miniGameControlConfig.diceStandardMult
     val tripleMult = miniGameControlConfig.diceTripleMult
@@ -574,6 +607,9 @@ fun DiceGameScreen(
 
     val diceHistory = remember(roundsState) {
         ((roundsState as? UiState.Success)?.data ?: emptyList()).filter { it.gameType == "dice" }
+    }
+    val winStreak = remember(diceHistory) {
+        diceHistory.takeWhile { it.payoutKs > 0L }.size
     }
 
     Scaffold(
@@ -617,12 +653,59 @@ fun DiceGameScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("လက်ကျန်: ${formatKs(balanceKs)}", color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
-                            Text("စုစုပေါင်း: ${lastDice.sum()}", color = Color.White, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (winStreak >= 2) {
+                                    Surface(color = Color(0xFFDC2626), shape = CircleShape) {
+                                        Text(
+                                            "🔥 $winStreak ဆက်တိုက်",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    "စုစုပေါင်း: ${displayDice.sum()}",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            lastDice.forEach { dieValue ->
-                                DiceFaceVisual(value = dieValue)
+                            displayDice.forEachIndexed { idx, dieValue ->
+                                Box(
+                                    modifier = Modifier.graphicsLayer {
+                                        rotationZ = if (isRollingVisual) (if (idx % 2 == 0) diceRotation else -diceRotation) else 0f
+                                        scaleX = diceScale
+                                        scaleY = diceScale
+                                    }
+                                ) {
+                                    DiceFaceVisual(value = dieValue)
+                                }
+                            }
+                        }
+
+                        if (diceHistory.isNotEmpty()) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                diceHistory.take(6).forEach { hr ->
+                                    val won = hr.payoutKs > 0L
+                                    Surface(
+                                        color = if (won) Color(0xFF065F46) else Color(0xFF334155),
+                                        shape = CircleShape
+                                    ) {
+                                        Text(
+                                            text = if (won) "✔ ${hr.outcomeLabel.take(10)}" else "✖ ${hr.outcomeLabel.take(10)}",
+                                            color = if (won) ChampionshipGoldBright else Color(0xFFCBD5E1),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -633,8 +716,8 @@ fun DiceGameScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = if (r.payoutKs > 0L) "အနိုင်ရ! ${r.outcomeLabel} → +${formatKs(r.payoutKs)}"
-                                    else "ရှုံးသွားပါသည် (${r.outcomeLabel})",
+                                    text = if (r.payoutKs > 0L) "🎉 အနိုင်ရ! ${r.outcomeLabel} → +${formatKs(r.payoutKs)}"
+                                    else "မပေါက်သေးပါ (${r.outcomeLabel}) — ထပ်စမ်းကြည့်ပါ!",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center,
@@ -751,9 +834,21 @@ fun DiceGameScreen(
 
                         Button(
                             onClick = {
+                                isRollingVisual = true
+                                animScope.launch {
+                                    repeat(6) {
+                                        displayDice = listOf((1..6).random(), (1..6).random(), (1..6).random())
+                                        delay(70L)
+                                    }
+                                }
                                 onPlayDice(selectedOption, exactNumber, parsedStake) { dice, round ->
-                                    lastDice = dice
-                                    lastRound = round
+                                    animScope.launch {
+                                        delay(380L)
+                                        lastDice = dice
+                                        displayDice = dice
+                                        lastRound = round
+                                        isRollingVisual = false
+                                    }
                                 }
                             },
                             enabled = canPlay,
@@ -761,8 +856,10 @@ fun DiceGameScreen(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("dice_play_button")
                         ) {
-                            if (busy) {
+                            if (busy || isRollingVisual) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("အံစာတုံး လှိမ့်နေသည်...", fontWeight = FontWeight.Bold)
                             } else {
                                 Icon(Icons.Default.Casino, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
@@ -859,9 +956,9 @@ fun SixAnimalsGameScreen(
     busy: Boolean,
     onBack: () -> Unit,
     onPlaySixAnimals: (
-        selectedAnimalIndex: Int,
+        selectedAnimalIndices: Set<Int>,
         animalLabels: List<String>,
-        stakeKs: Long,
+        stakePerAnimalKs: Long,
         onResult: (List<Int>, MiniGameRound) -> Unit
     ) -> Unit
 ) {
@@ -874,21 +971,41 @@ fun SixAnimalsGameScreen(
     }
     val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
 
-    var selectedAnimalIndex by remember { mutableIntStateOf(0) }
+    var selectedAnimals by remember { mutableStateOf(setOf(0)) }
     var stakeInput by remember { mutableStateOf("1000") }
     var lastRolledIndices by remember { mutableStateOf(listOf(0, 2, 5)) }
+    var displayRolledIndices by remember { mutableStateOf(listOf(0, 2, 5)) }
+    var isRollingVisual by remember { mutableStateOf(false) }
     var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
     var showAnimalHistory by remember { mutableStateOf(true) }
+    val animScope = rememberCoroutineScope()
+
+    val slotScale by animateFloatAsState(
+        targetValue = if (isRollingVisual) 1.07f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f),
+        label = "animal_slot_pop"
+    )
 
     val parsedStake = stakeInput.toLongOrNull() ?: 0L
+    val totalStake = parsedStake * selectedAnimals.size.coerceAtLeast(1)
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
     val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
-    val canPlay = !busy && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+    val canPlay = !busy && !isRollingVisual && !isGamesPaused &&
+        selectedAnimals.isNotEmpty() &&
+        parsedStake >= 100L &&
+        totalStake in minStake..maxStake.coerceAtLeast(1_000_000L) &&
+        totalStake <= balanceKs
 
     val singleMult = miniGameControlConfig.sixAnimalsMult.coerceAtLeast(1.2)
     val bonus = (singleMult - 1.0).coerceAtLeast(0.2)
     val doubleMult = 1.0 + bonus * 2.0
     val tripleAnimalMult = 1.0 + bonus * 3.0
+    val maxOneHitPayout = MiniGameEngine.computeSixAnimalsMultiPickPayout(
+        roll = Triple(selectedAnimals.first(), selectedAnimals.first(), selectedAnimals.first()),
+        selectedAnimalIndices = selectedAnimals,
+        stakePerAnimalKs = parsedStake,
+        baseBonus = bonus
+    )
 
     val animalHistory = remember(roundsState) {
         ((roundsState as? UiState.Success)?.data ?: emptyList()).filter { it.gameType == "six_animals" }
@@ -896,7 +1013,7 @@ fun SixAnimalsGameScreen(
 
     Scaffold(
         containerColor = DeepPitchBg,
-        topBar = { SubScreenTopBar(title = "၆ကောင်ဂျင် (6 Animals)", onBack = onBack) }
+        topBar = { SubScreenTopBar(title = "၆ကောင်ဂျင် (Multi-Pick)", onBack = onBack) }
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -941,20 +1058,26 @@ fun SixAnimalsGameScreen(
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                            lastRolledIndices.forEach { idx ->
+                            displayRolledIndices.forEach { idx ->
                                 val token = SIX_ANIMALS_LIST.getOrElse(idx) { SIX_ANIMALS_LIST.first() }
+                                val matched = selectedAnimals.contains(token.index)
                                 Surface(
                                     color = token.badgeColor,
                                     shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.5.dp, ChampionshipGold),
-                                    modifier = Modifier.weight(1f)
+                                    border = BorderStroke(if (matched) 2.5.dp else 1.5.dp, if (matched) ChampionshipGoldBright else ChampionshipGold.copy(alpha = 0.6f)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .graphicsLayer {
+                                            scaleX = slotScale
+                                            scaleY = slotScale
+                                        }
                                 ) {
                                     Text(
                                         text = token.title.substringBefore(" "),
                                         color = Color.White,
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(vertical = 14.dp, horizontal = 6.dp)
+                                        modifier = Modifier.padding(vertical = 16.dp, horizontal = 6.dp)
                                     )
                                 }
                             }
@@ -967,8 +1090,8 @@ fun SixAnimalsGameScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = if (r.payoutKs > 0L) "အနိုင်ရ! ${r.outcomeLabel} → +${formatKs(r.payoutKs)}"
-                                    else "မပေါက်ပါ (${r.outcomeLabel})",
+                                    text = if (r.payoutKs > 0L) "🎉 အနိုင်ရ! ${r.outcomeLabel} → +${formatKs(r.payoutKs)}"
+                                    else "မပေါက်သေးပါ (${r.outcomeLabel}) — ထပ်စမ်းကြည့်ပါ!",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center,
@@ -987,14 +1110,31 @@ fun SixAnimalsGameScreen(
                     shape = RoundedCornerShape(18.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("အကောင် ၆ မျိုးမှ ၁ မျိုး ရွေးပါ", color = InkDark, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("စိတ်ကြိုက်အကောင် ၁ ကောင်မက ရွေးပါ (${selectedAnimals.size}/6)", color = InkDark, fontWeight = FontWeight.Bold)
+                                Text("တစ်ကောင်ချင်းစီ ထပ်တိုးရွေးချယ် ထိုးနိုင်ပါသည်", color = InkMuted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            FilterChip(
+                                selected = selectedAnimals.size == 6,
+                                onClick = {
+                                    selectedAnimals = if (selectedAnimals.size == 6) setOf(0) else setOf(0, 1, 2, 3, 4, 5)
+                                },
+                                label = { Text(if (selectedAnimals.size == 6) "၁ ကောင်ထဲ" else "အားလုံး") },
+                                modifier = Modifier.testTag("six_animals_select_all_chip")
+                            )
+                        }
                         SIX_ANIMALS_LIST.chunked(2).forEach { pair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 pair.forEach { token ->
-                                    val isSel = selectedAnimalIndex == token.index
+                                    val isSel = selectedAnimals.contains(token.index)
                                     Surface(
                                         color = if (isSel) token.badgeColor else Color(0xFFEDF2EF),
                                         shape = RoundedCornerShape(14.dp),
@@ -1004,7 +1144,13 @@ fun SixAnimalsGameScreen(
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clickable { selectedAnimalIndex = token.index }
+                                            .clickable {
+                                                selectedAnimals = if (isSel) {
+                                                    if (selectedAnimals.size > 1) selectedAnimals - token.index else selectedAnimals
+                                                } else {
+                                                    selectedAnimals + token.index
+                                                }
+                                            }
                                             .testTag("six_animal_choice_${token.index}")
                                     ) {
                                         Row(
@@ -1019,7 +1165,7 @@ fun SixAnimalsGameScreen(
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Default.Pets,
+                                                    imageVector = if (isSel) Icons.Default.CheckCircle else Icons.Default.Pets,
                                                     contentDescription = null,
                                                     tint = if (isSel) token.badgeColor else Color.White,
                                                     modifier = Modifier.size(16.dp)
@@ -1051,7 +1197,7 @@ fun SixAnimalsGameScreen(
                         OutlinedTextField(
                             value = stakeInput,
                             onValueChange = { stakeInput = it.filter { c -> c.isDigit() }.take(7) },
-                            label = { Text("ထိုးကြေး (Ks)") },
+                            label = { Text("၁ ကောင်ချင်း ထိုးကြေး (Ks)") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -1061,15 +1207,48 @@ fun SixAnimalsGameScreen(
                             modifier = Modifier.fillMaxWidth().testTag("six_animals_stake_input")
                         )
 
+                        Surface(
+                            color = Color(0xFFEDF2EF),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("ရွေးထားသည့်အကောင်:", color = InkMuted)
+                                    Text("${selectedAnimals.size} ကောင်", color = InkDark, fontWeight = FontWeight.Bold)
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("စုစုပေါင်း ထိုးကြေး:", color = InkMuted)
+                                    Text(formatKs(totalStake), color = InkDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("အမြင့်ဆုံး ပြန်ရနိုင်ချေ (3တူ):", color = PitchEmeraldDark)
+                                    Text(formatKs(maxOneHitPayout), color = PitchEmeraldDark, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
                         Button(
                             onClick = {
+                                isRollingVisual = true
+                                animScope.launch {
+                                    repeat(7) {
+                                        displayRolledIndices = listOf((0..5).random(), (0..5).random(), (0..5).random())
+                                        delay(65L)
+                                    }
+                                }
                                 onPlaySixAnimals(
-                                    selectedAnimalIndex,
+                                    selectedAnimals,
                                     SIX_ANIMALS_LIST.map { it.title },
                                     parsedStake
                                 ) { rolls, round ->
-                                    lastRolledIndices = rolls
-                                    lastRound = round
+                                    animScope.launch {
+                                        delay(420L)
+                                        lastRolledIndices = rolls
+                                        displayRolledIndices = rolls
+                                        lastRound = round
+                                        isRollingVisual = false
+                                    }
                                 }
                             },
                             enabled = canPlay,
@@ -1077,10 +1256,12 @@ fun SixAnimalsGameScreen(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("six_animals_play_button")
                         ) {
-                            if (busy) {
+                            if (busy || isRollingVisual) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("၆ကောင်ဂျင် လှိမ့်နေသည်...", fontWeight = FontWeight.Bold)
                             } else {
-                                Text("၆ကောင်ဂျင် လှိမ့်မည်", fontWeight = FontWeight.Bold)
+                                Text("၆ကောင်ဂျင် လှိမ့်မည် (${selectedAnimals.size} ကောင် • ${formatKs(totalStake)})", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1100,6 +1281,559 @@ fun SixAnimalsGameScreen(
                 }
                 if (showAnimalHistory) {
                     items(animalHistory.take(15), key = { it.id }) { round ->
+                        MiniGameRoundCard(round)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun DragonTigerGameScreen(
+    balanceKs: Long,
+    systemGameConfig: SystemGameConfig,
+    miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
+    roundsState: UiState<List<MiniGameRound>>,
+    busy: Boolean,
+    onBack: () -> Unit,
+    onPlayDragonTiger: (
+        pick: String,
+        stakeKs: Long,
+        onResult: (MiniGameEngine.DragonTigerRoll, MiniGameRound) -> Unit
+    ) -> Unit
+) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+
+    var selectedPick by remember { mutableStateOf("DRAGON") }
+    var stakeInput by remember { mutableStateOf("1000") }
+    var lastRoll by remember { mutableStateOf(MiniGameEngine.DragonTigerRoll(12, "♠", 9, "♥")) }
+    var isFlipping by remember { mutableStateOf(false) }
+    var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
+    var showHistory by remember { mutableStateOf(true) }
+    val animScope = rememberCoroutineScope()
+
+    val cardScale by animateFloatAsState(
+        targetValue = if (isFlipping) 1.08f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f),
+        label = "dt_card_pop"
+    )
+
+    val parsedStake = stakeInput.toLongOrNull() ?: 0L
+    val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
+    val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
+    val canPlay = !busy && !isFlipping && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+
+    val dtMult = miniGameControlConfig.dragonTigerMult.coerceIn(1.1, 50.0)
+    val previewMult = if (selectedPick == "TIE") 8.0 else dtMult
+    val dtHistory = remember(roundsState) {
+        ((roundsState as? UiState.Success)?.data ?: emptyList()).filter { it.gameType == "dragon_tiger" }
+    }
+
+    fun rankStr(rank: Int): String = when (rank) {
+        1 -> "A"; 11 -> "J"; 12 -> "Q"; 13 -> "K"; else -> rank.toString()
+    }
+
+    Scaffold(
+        containerColor = DeepPitchBg,
+        topBar = { SubScreenTopBar(title = "နဂါး vs ကျား (Dragon Tiger)", onBack = onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            if (isGamesPaused) {
+                item {
+                    PauseStatusBannerCard(
+                        title = if (systemGameConfig.maintenanceMode) systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                        else "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်",
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.5.dp, ChampionshipGold.copy(alpha = 0.65f)),
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("လက်ကျန်: ${formatKs(balanceKs)}", color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            Text("အမြန်ဖဲဖွင့်ဂိမ်း • Tie x8", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelMedium)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                color = Color(0xFF7F1D1D),
+                                border = BorderStroke(2.dp, ChampionshipGold),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer { scaleX = cardScale; scaleY = cardScale }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("🐉 နဂါး", color = ChampionshipGoldBright, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = if (isFlipping) "?" else "${rankStr(lastRoll.dragonRank)}${lastRoll.dragonSuit}",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                            Text("VS", color = ChampionshipGoldBright, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                            Surface(
+                                color = Color(0xFF92400E),
+                                border = BorderStroke(2.dp, ChampionshipGold),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer { scaleX = cardScale; scaleY = cardScale }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("🐯 ကျား", color = ChampionshipGoldBright, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = if (isFlipping) "?" else "${rankStr(lastRoll.tigerRank)}${lastRoll.tigerSuit}",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                        }
+
+                        lastRound?.let { r ->
+                            Surface(
+                                color = if (r.payoutKs > 0L) PitchEmeraldDark else AdminCrimson.copy(alpha = 0.85f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = if (r.payoutKs > 0L) "🎉 အနိုင်ရ! ${r.outcomeLabel} → +${formatKs(r.payoutKs)}"
+                                    else "မပေါက်သေးပါ (${r.outcomeLabel})",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                    colors = CardDefaults.cardColors(containerColor = PearlCard),
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("ထိုးမည့်ဘက် ရွေးချယ်ပါ", color = InkDark, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                Triple("DRAGON", "🐉 နဂါး x${dtMult}", Color(0xFFB91C1C)),
+                                Triple("TIE", "⚖️ သရေ x8", Color(0xFF047857)),
+                                Triple("TIGER", "🐯 ကျား x${dtMult}", Color(0xFFD97706))
+                            ).forEach { (key, label, tint) ->
+                                val isSel = selectedPick == key
+                                Surface(
+                                    color = if (isSel) tint else Color(0xFFEDF2EF),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(if (isSel) 2.dp else 1.dp, if (isSel) ChampionshipGold else PearlCardBorder),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { selectedPick = key }
+                                        .testTag("dragon_tiger_pick_${key.lowercase()}")
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (isSel) Color.White else InkDark,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        modifier = Modifier.padding(vertical = 14.dp, horizontal = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(500L, 1000L, 3000L, 5000L, 10000L).forEach { amt ->
+                                FilterChip(
+                                    selected = parsedStake == amt,
+                                    onClick = { stakeInput = amt.toString() },
+                                    label = { Text("$amt") }
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = stakeInput,
+                            onValueChange = { stakeInput = it.filter { c -> c.isDigit() }.take(7) },
+                            label = { Text("ထိုးကြေး (Ks)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = InkDark, unfocusedTextColor = InkDark),
+                            modifier = Modifier.fillMaxWidth().testTag("dragon_tiger_stake_input")
+                        )
+
+                        Text(
+                            "နိုင်ရင် ရရှိမည်: ${formatKs((parsedStake * previewMult).roundToLong())}",
+                            color = PitchEmeraldDark,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Button(
+                            onClick = {
+                                isFlipping = true
+                                onPlayDragonTiger(selectedPick, parsedStake) { roll, round ->
+                                    animScope.launch {
+                                        delay(380L)
+                                        lastRoll = roll
+                                        lastRound = round
+                                        isFlipping = false
+                                    }
+                                }
+                            },
+                            enabled = canPlay,
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().height(52.dp).testTag("dragon_tiger_play_button")
+                        ) {
+                            if (busy || isFlipping) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("ဖဲဖွင့်နေသည်...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Default.Bolt, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("ဖဲဖွင့် ကစားမည်", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (dtHistory.isNotEmpty()) {
+                item {
+                    HideBarSectionHeader(
+                        title = "နဂါး vs ကျား လတ်တလော မှတ်တမ်း",
+                        countBadge = "${dtHistory.size}",
+                        isVisible = showHistory,
+                        onToggle = { showHistory = !showHistory },
+                        testTag = "hide_bar_dragon_tiger_history",
+                        modifier = Modifier.widthIn(max = 600.dp)
+                    )
+                }
+                if (showHistory) {
+                    items(dtHistory.take(15), key = { it.id }) { round ->
+                        MiniGameRoundCard(round)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun LuckyWheelGameScreen(
+    balanceKs: Long,
+    systemGameConfig: SystemGameConfig,
+    miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
+    roundsState: UiState<List<MiniGameRound>>,
+    busy: Boolean,
+    onBack: () -> Unit,
+    onPlayLuckyWheel: (
+        stakeKs: Long,
+        onResult: (segmentIndex: Int, MiniGameRound) -> Unit
+    ) -> Unit
+) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+
+    val segments = remember(miniGameControlConfig.luckyWheelMult) {
+        MiniGameEngine.buildLuckyWheelSegments(miniGameControlConfig.luckyWheelMult)
+    }
+    var stakeInput by remember { mutableStateOf("1000") }
+    var isSpinning by remember { mutableStateOf(false) }
+    var lastRound by remember { mutableStateOf<MiniGameRound?>(null) }
+    var showHistory by remember { mutableStateOf(true) }
+    val wheelRotation = remember { Animatable(0f) }
+    val animScope = rememberCoroutineScope()
+
+    val parsedStake = stakeInput.toLongOrNull() ?: 0L
+    val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
+    val maxStake = systemGameConfig.maxStakeKs.coerceAtLeast(minStake)
+    val canPlay = !busy && !isSpinning && !isGamesPaused && parsedStake in minStake..maxStake && parsedStake <= balanceKs
+
+    val wheelHistory = remember(roundsState) {
+        ((roundsState as? UiState.Success)?.data ?: emptyList()).filter { it.gameType == "lucky_wheel" }
+    }
+
+    val sliceColors = remember {
+        listOf(
+            Color(0xFF334155),
+            Color(0xFF0369A1),
+            Color(0xFF047857),
+            Color(0xFFD97706),
+            Color(0xFF475569),
+            Color(0xFF7C3AED),
+            Color(0xFF0F766E),
+            Color(0xFFB91C1C)
+        )
+    }
+
+    Scaffold(
+        containerColor = DeepPitchBg,
+        topBar = { SubScreenTopBar(title = "ကံစမ်းဘီး (Lucky Wheel)", onBack = onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            if (isGamesPaused) {
+                item {
+                    PauseStatusBannerCard(
+                        title = if (systemGameConfig.maintenanceMode) systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                        else "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်",
+                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        nowMs = nowMs
+                    )
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.5.dp, ChampionshipGold.copy(alpha = 0.65f)),
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("လက်ကျန်: ${formatKs(balanceKs)}", color = ChampionshipGold, fontFamily = JetBrainsMonoFontFamily, fontWeight = FontWeight.Bold)
+                            Text("အမြင့်ဆုံး ဂျက်ပေါ့", color = ChampionshipGoldBright, style = MaterialTheme.typography.labelMedium)
+                        }
+
+                        // Top pointer + rotating 8-slice Canvas wheel
+                        Box(
+                            modifier = Modifier.size(216.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(
+                                modifier = Modifier
+                                    .size(196.dp)
+                                    .graphicsLayer { rotationZ = wheelRotation.value }
+                            ) {
+                                val sweep = 360f / segments.size.coerceAtLeast(1)
+                                segments.forEachIndexed { idx, _ ->
+                                    drawArc(
+                                        color = sliceColors[idx % sliceColors.size],
+                                        startAngle = -90f - sweep / 2f + idx * sweep,
+                                        sweepAngle = sweep,
+                                        useCenter = true,
+                                        size = Size(size.width, size.height)
+                                    )
+                                }
+                                drawCircle(
+                                    color = ChampionshipGold,
+                                    style = Stroke(width = 6f)
+                                )
+                                drawCircle(
+                                    color = DeepPitchBg,
+                                    radius = size.minDimension * 0.14f
+                                )
+                                drawCircle(
+                                    color = ChampionshipGoldBright,
+                                    radius = size.minDimension * 0.14f,
+                                    style = Stroke(width = 4f)
+                                )
+                            }
+                            // Top stationary pointer needle
+                            Canvas(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .size(22.dp)
+                            ) {
+                                val path = Path().apply {
+                                    moveTo(size.width * 0.5f, size.height)
+                                    lineTo(0f, 0f)
+                                    lineTo(size.width, 0f)
+                                    close()
+                                }
+                                drawPath(path, color = ChampionshipGoldBright)
+                            }
+                        }
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            segments.forEachIndexed { idx, seg ->
+                                Surface(
+                                    color = sliceColors[idx % sliceColors.size],
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = seg.label,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        lastRound?.let { r ->
+                            Surface(
+                                color = if (r.payoutKs > 0L) PitchEmeraldDark else AdminCrimson.copy(alpha = 0.85f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = if (r.payoutKs > 0L) "🎡 အနိုင်ရ! ${r.outcomeLabel} → +${formatKs(r.payoutKs)}"
+                                    else "ဗလာ (${r.outcomeLabel}) — ထပ်လှည့်ကြည့်ပါ!",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
+                    colors = CardDefaults.cardColors(containerColor = PearlCard),
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(500L, 1000L, 3000L, 5000L, 10000L).forEach { amt ->
+                                FilterChip(
+                                    selected = parsedStake == amt,
+                                    onClick = { stakeInput = amt.toString() },
+                                    label = { Text("$amt") }
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = stakeInput,
+                            onValueChange = { stakeInput = it.filter { c -> c.isDigit() }.take(7) },
+                            label = { Text("လှည့်ကြေး (Ks)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = InkDark, unfocusedTextColor = InkDark),
+                            modifier = Modifier.fillMaxWidth().testTag("lucky_wheel_stake_input")
+                        )
+
+                        Button(
+                            onClick = {
+                                isSpinning = true
+                                onPlayLuckyWheel(parsedStake) { segIdx, round ->
+                                    animScope.launch {
+                                        val sweep = 360f / segments.size.coerceAtLeast(1)
+                                        val currentMod = wheelRotation.value % 360f
+                                        val desiredMod = (360f - (segIdx * sweep)) % 360f
+                                        val deltaMod = ((desiredMod - currentMod) + 360f) % 360f
+                                        val target = wheelRotation.value + 1080f + deltaMod
+                                        wheelRotation.animateTo(
+                                            targetValue = target,
+                                            animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing)
+                                        )
+                                        lastRound = round
+                                        isSpinning = false
+                                    }
+                                }
+                            },
+                            enabled = canPlay,
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().height(52.dp).testTag("lucky_wheel_play_button")
+                        ) {
+                            if (busy || isSpinning) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("ဘီးလှည့်နေသည်...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("ကံစမ်းဘီး လှည့်မည်", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (wheelHistory.isNotEmpty()) {
+                item {
+                    HideBarSectionHeader(
+                        title = "ကံစမ်းဘီး လတ်တလော မှတ်တမ်း",
+                        countBadge = "${wheelHistory.size}",
+                        isVisible = showHistory,
+                        onToggle = { showHistory = !showHistory },
+                        testTag = "hide_bar_lucky_wheel_history",
+                        modifier = Modifier.widthIn(max = 600.dp)
+                    )
+                }
+                if (showHistory) {
+                    items(wheelHistory.take(15), key = { it.id }) { round ->
                         MiniGameRoundCard(round)
                     }
                 }

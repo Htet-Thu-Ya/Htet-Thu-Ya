@@ -1,9 +1,11 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,8 +26,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -65,6 +70,7 @@ import coil.compose.SubcomposeAsyncImage
 import com.example.R
 import com.example.data.model.BetOrder
 import com.example.data.model.BrandingConfig
+import com.example.data.model.SportMatch
 import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.theme.CinzelFontFamily
 import com.example.ui.theme.PadaukFontFamily
@@ -124,6 +130,8 @@ fun orderTypeBurmese(type: String): String = when (type) {
     "two_d" -> "နှစ်လုံးထီ (2D)"
     "dice" -> "အံစာတုံး"
     "six_animals" -> "၆ကောင်ဂျင်"
+    "dragon_tiger" -> "နဂါး vs ကျား"
+    "lucky_wheel" -> "ကံစမ်းဘီး"
     else -> type
 }
 
@@ -378,6 +386,7 @@ fun OrderSlipCard(
     isAdminView: Boolean = false,
     busy: Boolean = false,
     canDeleteAnyOrder: Boolean = false,
+    matchesById: Map<String, SportMatch> = emptyMap(),
     onAccept: ((BetOrder) -> Unit)? = null,
     onAutoSettleOrder: ((BetOrder) -> Unit)? = null,
     onSettleWin: ((BetOrder) -> Unit)? = null,
@@ -388,6 +397,10 @@ fun OrderSlipCard(
     onEditOrder: ((BetOrder) -> Unit)? = null
 ) {
     val isCompleted = order.status in listOf("won", "lost", "rejected")
+    val linkedMatches = remember(order.matchIds, matchesById) {
+        order.matchIds.mapNotNull { matchesById[it] }
+    }
+    var showTimingDetails by remember(order.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -568,38 +581,151 @@ fun OrderSlipCard(
                     style = MaterialTheme.typography.labelMedium
                 )
             }
+            if (linkedMatches.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    border = BorderStroke(1.dp, PearlCardBorder),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.SportsSoccer,
+                                contentDescription = null,
+                                tint = PitchEmeraldDark,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "တိုက်ရိုက်ဂိုးရလဒ် (${linkedMatches.size} ပွဲ)",
+                                color = PitchEmeraldDark,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        linkedMatches.forEach { m ->
+                            val stateText = when {
+                                m.status == "finished" -> "FT ပြီးဆုံး"
+                                m.liveClock.isNotBlank() -> "LIVE ${m.liveClock}"
+                                m.status == "closed" -> "ကန်နေ/ပိတ်"
+                                m.kickoffEpochMs > 0L && m.kickoffEpochMs <= System.currentTimeMillis() -> "ကန်နေဆဲ"
+                                else -> "မစသေး"
+                            }
+                            val scoreBadgeBg = when {
+                                m.status == "finished" -> EmeraldSoft
+                                m.liveClock.isNotBlank() || m.status == "closed" -> AmberPendingSoft
+                                else -> SkyInfoSoft
+                            }
+                            val scoreBadgeFg = when {
+                                m.status == "finished" -> PitchEmeraldDark
+                                m.liveClock.isNotBlank() || m.status == "closed" -> AmberPending
+                                else -> SkyInfo
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${m.homeTeam}  ${m.homeScore} - ${m.awayScore}  ${m.awayTeam}",
+                                    color = InkDark,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Surface(color = scoreBadgeBg, shape = CircleShape) {
+                                    Text(
+                                        text = stateText,
+                                        color = scoreBadgeFg,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (order.matchKickoffMs > 0L || order.matchKickoffText.isNotBlank() || order.scanAtMs > 0L) {
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
                 Surface(
                     color = SkyInfoSoft,
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showTimingDetails = !showTimingDetails }
+                        .testTag("toggle_order_timing_${order.id}")
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        if (order.matchKickoffText.isNotBlank()) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = "ပွဲကန်မည့်အချိန်: ${order.matchKickoffText}",
+                                text = "ပွဲချိန် / စကန် အသေးစိတ်",
                                 color = SkyInfo,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold
                             )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (showTimingDetails) "ဝှက်မည်" else "ကြည့်မည်",
+                                    color = SkyInfo,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Icon(
+                                    imageVector = if (showTimingDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = null,
+                                    tint = SkyInfo,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
-                        if (order.matchKickoffMs > 0L) {
-                            val countdown = formatKickoffCountdown(order.matchKickoffMs)
-                            Text(
-                                text = "ပွဲစချိန်: ${formatEpochDateTime(order.matchKickoffMs)} • $countdown",
-                                color = SkyInfo,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (order.scanAtMs > 0L) {
-                            Text(
-                                text = "စကန်မည့်အချိန်: ${formatEpochDateTime(order.scanAtMs)}",
-                                color = PitchEmeraldDark,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        AnimatedVisibility(visible = showTimingDetails) {
+                            Column(
+                                modifier = Modifier.padding(top = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                if (order.matchKickoffText.isNotBlank()) {
+                                    Text(
+                                        text = "ပွဲကန်မည့်အချိန်: ${order.matchKickoffText}",
+                                        color = SkyInfo,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                if (order.matchKickoffMs > 0L) {
+                                    val countdown = formatKickoffCountdown(order.matchKickoffMs)
+                                    Text(
+                                        text = "ပွဲစချိန်: ${formatEpochDateTime(order.matchKickoffMs)} • $countdown",
+                                        color = SkyInfo,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                if (order.scanAtMs > 0L) {
+                                    Text(
+                                        text = "စကန်မည့်အချိန်: ${formatEpochDateTime(order.scanAtMs)}",
+                                        color = PitchEmeraldDark,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }

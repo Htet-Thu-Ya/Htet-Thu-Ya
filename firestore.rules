@@ -214,10 +214,10 @@ service cloud.firestore {
              data.keys().hasOnly(['userId', 'customerName', 'gameType', 'betLabel', 'outcomeLabel', 'stakeKs', 'payoutKs', 'createdAt']) &&
              data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 60 &&
-             data.gameType in ['dice', 'six_animals'] &&
-             data.betLabel is string && data.betLabel.size() >= 1 && data.betLabel.size() <= 120 &&
-             data.outcomeLabel is string && data.outcomeLabel.size() >= 1 && data.outcomeLabel.size() <= 120 &&
-             data.stakeKs is int && data.stakeKs >= 100 && data.stakeKs <= 1000000 &&
+             data.gameType in ['dice', 'six_animals', 'dragon_tiger', 'lucky_wheel'] &&
+             data.betLabel is string && data.betLabel.size() >= 1 && data.betLabel.size() <= 200 &&
+             data.outcomeLabel is string && data.outcomeLabel.size() >= 1 && data.outcomeLabel.size() <= 200 &&
+             data.stakeKs is int && data.stakeKs >= 100 && data.stakeKs <= 10000000 &&
              data.payoutKs is int && data.payoutKs >= 0 && data.payoutKs <= (data.stakeKs * 100) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
@@ -309,13 +309,14 @@ service cloud.firestore {
 
     function isValidBoardConfig(data) {
       return data.keys().hasAll(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'googleSheetCsvUrl', 'updatedBy', 'updatedAt']) &&
              data.autoSyncDailyMatches is bool &&
              data.autoSyncLiveResults is bool &&
              data.lastSyncedDate is string && data.lastSyncedDate.size() <= 20 &&
-             (!('allowedLeagues' in data) || (data.allowedLeagues is list && data.allowedLeagues.size() <= 30)) &&
+             (!('allowedLeagues' in data) || (data.allowedLeagues is list && data.allowedLeagues.size() <= 80)) &&
              (!('autoSyncOneExpress' in data) || data.autoSyncOneExpress is bool) &&
              (!('autoSyncFiveFiveFive' in data) || data.autoSyncFiveFiveFive is bool) &&
+             (!('googleSheetCsvUrl' in data) || (data.googleSheetCsvUrl is string && data.googleSheetCsvUrl.size() <= 500)) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -395,11 +396,13 @@ service cloud.firestore {
 
     function isValidMiniGameControlConfig(data) {
       return data.keys().hasAll(['diceStandardMult', 'diceTripleMult', 'diceExactMult', 'sixAnimalsMult', 'diceAllowedTotals', 'diceMaxBigPerDay', 'diceMaxSmallPerDay', 'diceMaxOddPerDay', 'diceMaxEvenPerDay', 'diceTotalDailyQuotas', 'animalDailyQuotas', 'globalDirective', 'userDirectives', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['diceStandardMult', 'diceTripleMult', 'diceExactMult', 'sixAnimalsMult', 'diceAllowedTotals', 'diceMaxBigPerDay', 'diceMaxSmallPerDay', 'diceMaxOddPerDay', 'diceMaxEvenPerDay', 'diceTotalDailyQuotas', 'animalDailyQuotas', 'globalDirective', 'stealthHouseWinPct', 'userDirectives', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['diceStandardMult', 'diceTripleMult', 'diceExactMult', 'sixAnimalsMult', 'dragonTigerMult', 'luckyWheelMult', 'diceAllowedTotals', 'diceMaxBigPerDay', 'diceMaxSmallPerDay', 'diceMaxOddPerDay', 'diceMaxEvenPerDay', 'diceTotalDailyQuotas', 'animalDailyQuotas', 'globalDirective', 'stealthHouseWinPct', 'userDirectives', 'updatedBy', 'updatedAt']) &&
              data.diceStandardMult is number && data.diceStandardMult >= 1.0 && data.diceStandardMult <= 50.0 &&
              data.diceTripleMult is number && data.diceTripleMult >= 1.0 && data.diceTripleMult <= 100.0 &&
              data.diceExactMult is number && data.diceExactMult >= 1.0 && data.diceExactMult <= 100.0 &&
              data.sixAnimalsMult is number && data.sixAnimalsMult >= 1.0 && data.sixAnimalsMult <= 30.0 &&
+             (!('dragonTigerMult' in data) || (data.dragonTigerMult is number && data.dragonTigerMult >= 1.0 && data.dragonTigerMult <= 50.0)) &&
+             (!('luckyWheelMult' in data) || (data.luckyWheelMult is number && data.luckyWheelMult >= 1.0 && data.luckyWheelMult <= 50.0)) &&
              data.diceAllowedTotals is list && data.diceAllowedTotals.size() <= 20 &&
              data.diceMaxBigPerDay is int && data.diceMaxBigPerDay >= 0 && data.diceMaxBigPerDay <= 100000 &&
              data.diceMaxSmallPerDay is int && data.diceMaxSmallPerDay >= 0 && data.diceMaxSmallPerDay <= 100000 &&
@@ -795,7 +798,10 @@ service cloud.firestore {
                        isValidAuditLogEntry(incoming()) &&
                        incoming().actorId == request.auth.uid;
       allow update: if false;
-      allow delete: if isOwnerAdmin() && isValidId(logId);
+      allow delete: if isValidId(logId) && (
+        isOwnerAdmin() ||
+        (isActiveAdmin() && resource.data.actorId == request.auth.uid)
+      );
     }
 
     match /transactions/{txId} {

@@ -15,6 +15,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.net.URI
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -39,15 +40,21 @@ class FootballFeedService(
         "uefa.europa.conf" to "UEFA Conference League",
         "uefa.youth" to "UEFA Youth League",
         "eng.1" to "Premier League",
+        "eng.2" to "Championship",
         "eng.fa" to "FA Cup",
         "eng.league_cup" to "Carabao Cup",
         "esp.1" to "La Liga",
+        "esp.2" to "La Liga 2",
         "esp.copa_del_rey" to "Copa del Rey",
         "ger.1" to "Bundesliga",
+        "ger.2" to "2. Bundesliga",
         "ita.1" to "Serie A",
+        "ita.2" to "Serie B",
         "ita.coppa_italia" to "Coppa Italia",
         "fra.1" to "Ligue 1",
+        "fra.2" to "Ligue 2",
         "afc.champions" to "AFC Champions League Elite",
+        "afc.cup" to "AFC Champions League 2",
         "tha.1" to "Thai League 1",
         "jpn.1" to "J1 League (Japan)",
         "kor.1" to "K League 1 (Korea)",
@@ -55,6 +62,9 @@ class FootballFeedService(
         "chn.1" to "Chinese Super League",
         "aus.1" to "A-League",
         "rus.1" to "Russian Premier League",
+        "rus.cup" to "Russian Cup",
+        "egy.1" to "Egypt. Premier League",
+        "isr.1" to "Israel",
         "bra.1" to "Brasileirao Serie A",
         "fifa.world" to "World Cup Qualifiers"
     )
@@ -552,12 +562,94 @@ class FootballFeedService(
     private fun fetchTheSportsDbDay(isoDate: String, nowMs: Long): List<LiveFootballFixture> {
         val url = "https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=$isoDate&s=Soccer"
         val body = httpGet(url) ?: return emptyList()
-        val root = JSONObject(body)
+        return parseTheSportsDbEvents(body = body, fallbackIsoDate = isoDate, nowMs = nowMs)
+    }
+
+    suspend fun fetchTheSportsDbDates(isoDates: List<String>): List<LiveFootballFixture> = withContext(Dispatchers.IO) {
+        val cleanDates = isoDates.map { it.trim() }.filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }.distinct().take(12)
+        if (cleanDates.isEmpty()) return@withContext emptyList()
+        val nowMs = MyanmarTimeUtil.nowMs()
+        val results = coroutineScope {
+            cleanDates.map { iso -> async { fetchTheSportsDbDay(iso, nowMs) } }.awaitAll().flatten()
+        }
+        val merged = linkedMapOf<String, LiveFootballFixture>()
+        results.forEach { mergeFixture(merged, it) }
+        merged.values.toList()
+    }
+
+    suspend fun searchTheSportsDbMatch(
+        homeTeam: String,
+        awayTeam: String,
+        nowMs: Long = MyanmarTimeUtil.nowMs()
+    ): List<LiveFootballFixture> = withContext(Dispatchers.IO) {
+        val cleanHome = homeTeam.trim()
+        val cleanAway = awayTeam.trim()
+        if (cleanHome.isBlank() || cleanAway.isBlank()) return@withContext emptyList()
+        val merged = linkedMapOf<String, LiveFootballFixture>()
+        val queries = listOf(
+            "${cleanHome}_vs_${cleanAway}",
+            "$cleanHome vs $cleanAway"
+        ).distinct()
+        for (q in queries) {
+            val encoded = URLEncoder.encode(q, "UTF-8")
+            val url = "https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=$encoded"
+            val body = httpGet(url) ?: continue
+            parseTheSportsDbEvents(
+                body = body,
+                fallbackIsoDate = MyanmarTimeUtil.todayIsoDate(nowMs),
+                nowMs = nowMs
+            ).filter { fix ->
+                fuzzyTeamMatches(fix.homeTeam, cleanHome) && fuzzyTeamMatches(fix.awayTeam, cleanAway)
+            }.forEach { mergeFixture(merged, it) }
+            if (merged.values.any { it.status == "finished" }) break
+        }
+        merged.values.toList()
+    }
+
+    suspend fun fetchGoogleSheetCsvMatches(csvUrl: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val exportUrl = normalizeGoogleSheetCsvUrl(csvUrl)
+            require(exportUrl.isNotBlank()) { "Google Sheet / CSV Link ထည့်သွင်းပါ" }
+            val req = Request.Builder()
+                .url(exportUrl)
+                .header("User-Agent", "LoTaYa-Android/5.0")
+                .header("Accept", "text/csv, text/plain, */*")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return@withContext Result.failure(IllegalStateException("Google Sheet ဖတ်မရပါ (HTTP ${resp.code}) — 'Anyone with the link can view' ဖွင့်ထားပါ"))
+                }
+                val text = resp.body?.string().orEmpty()
+                if (text.isBlank()) {
+                    return@withContext Result.failure(IllegalStateException("Google Sheet ထဲတွင် ဒေတာ မရှိသေးပါ"))
+                }
+                if (text.trimStart().startsWith("<!DOCTYPE html", ignoreCase = true) ||
+                    text.trimStart().startsWith("<html", ignoreCase = true)
+                ) {
+                    return@withContext Result.failure(IllegalStateException("Google Sheet ကို Public / Published to web CSV အဖြစ် ဖွင့်ပေးရန် လိုအပ်ပါသည်"))
+                }
+                Result.success(text)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun parseTheSportsDbEvents(
+        body: String,
+        fallbackIsoDate: String,
+        nowMs: Long
+    ): List<LiveFootballFixture> {
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return emptyList()
         val events = root.optJSONArray("events") ?: return emptyList()
         val list = mutableListOf<LiveFootballFixture>()
 
-        for (i in 0 until events.length().coerceAtMost(120)) {
+        for (i in 0 until events.length()) {
             val ev = events.optJSONObject(i) ?: continue
+            val sport = ev.optString("strSport").trim()
+            if (sport.isNotBlank() && !sport.equals("Soccer", ignoreCase = true) && !sport.equals("Football", ignoreCase = true)) {
+                continue
+            }
             val eventId = ev.optString("idEvent").trim()
             val home = ev.optString("strHomeTeam").trim()
             val away = ev.optString("strAwayTeam").trim()
@@ -570,8 +662,12 @@ class FootballFeedService(
             val rawStatus = ev.optString("strStatus").trim()
             val homeScore = ev.optString("intHomeScore").toLongOrNull() ?: 0L
             val awayScore = ev.optString("intAwayScore").toLongOrNull() ?: 0L
+            val hasExplicitScores = !ev.isNull("intHomeScore") &&
+                !ev.isNull("intAwayScore") &&
+                ev.optString("intHomeScore").trim().isNotBlank() &&
+                ev.optString("intAwayScore").trim().isNotBlank()
 
-            val dateStr = ev.optString("dateEvent").ifBlank { isoDate }
+            val dateStr = ev.optString("dateEvent").ifBlank { fallbackIsoDate }
             val timeStr = ev.optString("strTime").trim().take(8)
             val timestampStr = ev.optString("strTimestamp").trim()
             val kickoffEpochMs = MyanmarTimeUtil.parseIsoUtcEpochMs(timestampStr)
@@ -580,8 +676,11 @@ class FootballFeedService(
 
             val isFinished = rawStatus.contains("Finished", ignoreCase = true) ||
                 rawStatus.equals("FT", ignoreCase = true) ||
+                rawStatus.equals("AET", ignoreCase = true) ||
                 rawStatus.equals("AOT", ignoreCase = true) ||
-                rawStatus.equals("AP", ignoreCase = true)
+                rawStatus.equals("AP", ignoreCase = true) ||
+                rawStatus.equals("Match Finished", ignoreCase = true) ||
+                (hasExplicitScores && kickoffEpochMs in 1L..(nowMs - 3L * 3_600_000L))
             val isLiveOrStarted = rawStatus.contains("Half", ignoreCase = true) ||
                 rawStatus.contains("Live", ignoreCase = true) ||
                 rawStatus.endsWith("'") ||
@@ -688,7 +787,7 @@ class FootballFeedService(
             val req = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "LoTaYa-Android/4.0")
+                .header("User-Agent", "LoTaYa-Android/5.0")
                 .build()
             val body = client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) resp.body?.string() else null
@@ -696,7 +795,17 @@ class FootballFeedService(
 
             val root = JSONObject(body)
             val tagName = root.optString("tag_name", "latest")
-            val notes = root.optString("body", "").take(350)
+            val rawNotes = root.optString("body", "")
+            val notes = rawNotes.lines()
+                .filterNot { line ->
+                    val low = line.lowercase(Locale.US)
+                    low.contains("htet thu ya") ||
+                        low.contains("htet-thu-ya") ||
+                        low.contains("github.com")
+                }
+                .joinToString("\n")
+                .trim()
+                .take(350)
             val assets = root.optJSONArray("assets")
             var apkDownloadUrl = "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/LoTaYa.apk"
             var updatedIso = root.optString("published_at", "")
@@ -743,7 +852,7 @@ class FootballFeedService(
         return try {
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "LoTaYa-Android/4.0")
+                .header("User-Agent", "LoTaYa-Android/5.0")
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) resp.body?.string() else null
@@ -794,31 +903,79 @@ class FootballFeedService(
 
         val DEFAULT_LEAGUE_OPTIONS = listOf(
             "UEFA Champions League",
+            "UEFA Champions League. Duel of the players. Goals",
+            "UEFA Champions League. Winner",
+            "UEFA Youth League",
             "Europa League",
             "UEFA Conference League",
-            "UEFA Youth League",
             "Premier League",
             "FA Cup",
             "Carabao Cup",
+            "Championship",
             "La Liga",
+            "La Liga 2",
             "Copa del Rey",
+            "Spain",
             "Bundesliga",
+            "2. Bundesliga",
             "Serie A",
+            "Serie B",
             "Coppa Italia",
+            "Italy",
             "Ligue 1",
+            "Ligue 2",
             "AFC Champions League Elite",
             "AFC Champions League 2",
+            "Gulf Club Championship",
             "Thai League 1",
             "J1 League (Japan)",
             "K League 1 (Korea)",
             "Saudi Pro League",
             "Chinese Super League",
             "A-League",
+            "Russian Premier League",
             "Russian Cup",
             "Egypt. Premier League",
-            "Gulf Club Championship",
+            "Peru Cup",
+            "Botswana Championship",
+            "Austria. Amateur Cup",
+            "El Salvador. Reserve League",
+            "Greece. Amateur Cup",
+            "Israel",
+            "Brazil",
+            "Brasileirao Serie A",
+            "Senegal. League des Pepites U20",
+            "Short Football 3x3",
+            "Short Football 4x4",
+            "Short Football 5x5",
+            "Short Football 3x3 L1",
+            "Short Football 4x4 L2",
+            "Student League",
+            "Student League 2",
+            "BudnesLiga LFL 5x5",
+            "Division 4x4",
+            "FIFA 27. Amateur daily league",
+            "FIFA 23. Volta daily league",
             "World Cup Qualifiers"
         )
+
+        fun normalizeGoogleSheetCsvUrl(raw: String): String {
+            val cleaned = raw.trim()
+            if (cleaned.isBlank()) return ""
+            val withHttps = when {
+                cleaned.startsWith("https://", ignoreCase = true) -> cleaned
+                cleaned.startsWith("http://", ignoreCase = true) -> "https://" + cleaned.removePrefix("http://").removePrefix("HTTP://")
+                else -> "https://$cleaned"
+            }
+            val sheetMatch = Regex("""docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)""").find(withHttps)
+            if (sheetMatch != null && !withHttps.contains("/export", ignoreCase = true) && !withHttps.contains("output=csv", ignoreCase = true)) {
+                val docId = sheetMatch.groupValues[1]
+                val gidMatch = Regex("""gid=(\d+)""").find(withHttps)
+                val gidPart = if (gidMatch != null) "&gid=${gidMatch.groupValues[1]}" else ""
+                return "https://docs.google.com/spreadsheets/d/$docId/export?format=csv$gidPart"
+            }
+            return withHttps.take(500)
+        }
 
         fun normalizeOneXBetLiveUrl(raw: String): String {
             val cleaned = raw.trim()
@@ -941,7 +1098,26 @@ class FootballFeedService(
             return name.lowercase(Locale.US)
                 .replace(Regex("[^a-z0-9]"), "")
                 .removeSuffix("fc")
+                .removeSuffix("ac")
+                .removeSuffix("sc")
+                .removeSuffix("cf")
                 .removePrefix("fc")
+                .removePrefix("ac")
+                .removePrefix("estac")
+                .removePrefix("as")
+        }
+
+        fun fuzzyTeamMatches(a: String, b: String): Boolean {
+            val normA = normalizeTeam(a)
+            val normB = normalizeTeam(b)
+            if (normA.isBlank() || normB.isBlank()) return false
+            if (normA == normB) return true
+            if (normA.length >= 4 && normB.length >= 4 && (normA.contains(normB) || normB.contains(normA))) {
+                return true
+            }
+            val tokensA = a.lowercase(Locale.US).split(Regex("[^a-z0-9]+")).filter { it.length >= 4 }.toSet()
+            val tokensB = b.lowercase(Locale.US).split(Regex("[^a-z0-9]+")).filter { it.length >= 4 }.toSet()
+            return tokensA.isNotEmpty() && tokensA.intersect(tokensB).isNotEmpty()
         }
     }
 }

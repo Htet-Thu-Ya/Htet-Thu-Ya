@@ -86,9 +86,11 @@ import com.example.ui.screens.ChatHubScreen
 import com.example.ui.screens.CustomerHomeScreen
 import com.example.ui.screens.CustomerRoute
 import com.example.ui.screens.DiceGameScreen
+import com.example.ui.screens.DragonTigerGameScreen
 import com.example.ui.screens.ExpressOddsOrderScreen
 import com.example.ui.screens.IncomingCallDialog
 import com.example.ui.screens.LeaderboardScreen
+import com.example.ui.screens.LuckyWheelGameScreen
 import com.example.ui.screens.OrdersHistoryScreen
 import com.example.ui.screens.PointExchangeScreen
 import com.example.ui.screens.QualityRatingScreen
@@ -475,6 +477,7 @@ private fun AuthenticatedRoot(
                             onRejectOrder = vm::rejectOrder,
                             onDeleteOrder = vm::deleteOrder,
                             onClearCompletedOrders = vm::clearCompletedOrders,
+                            onClearFinishedMatches = vm::clearFinishedMatches,
                             onToggleHideOrder = { ord -> vm.setOrderHidden(ord.id, !ord.isHidden) },
                             onEditOrder = vm::editOrderDetails,
                             onProcessWalletRequest = vm::processWalletRequest,
@@ -524,6 +527,9 @@ private fun AuthenticatedRoot(
                             onToggleAutoOneExpress = vm::toggleAutoSyncOneExpress,
                             onToggleAuto555 = vm::toggleAutoSync555,
                             onSaveAllowedLeagues = vm::saveAllowedLeagues,
+                            onSaveBoardSheetUrl = vm::saveBoardSheetUrl,
+                            onSyncMatchesFromSheet = vm::syncMatchesFromGoogleSheet,
+                            onImportCsvText = vm::importMatchesFromCsvText,
                             onCreateAdminInvite = { label, email, pin, perms ->
                                 vm.createAdminInvite(label, email, pin, perms)
                             },
@@ -784,10 +790,52 @@ private fun AuthenticatedRoot(
                             }
                         )
                     }
+                    composable(CustomerRoute.DRAGON_TIGER.name) {
+                        DragonTigerGameScreen(
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            miniGameControlConfig = miniGameControlConfig,
+                            roundsState = userMiniGameRoundsState,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onPlayDragonTiger = { pick, stake, onDone ->
+                                vm.playDragonTigerGame(pick, stake) { res ->
+                                    res.onSuccess { (roll, round) -> onDone(roll, round) }
+                                        .onFailure { err ->
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(err.localizedMessage ?: "Dragon Tiger failed")
+                                            }
+                                        }
+                                }
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.LUCKY_WHEEL.name) {
+                        LuckyWheelGameScreen(
+                            balanceKs = balanceKs,
+                            systemGameConfig = systemGameConfig,
+                            miniGameControlConfig = miniGameControlConfig,
+                            roundsState = userMiniGameRoundsState,
+                            busy = busy,
+                            onBack = { navController.popBackStack() },
+                            onPlayLuckyWheel = { stake, onDone ->
+                                vm.playLuckyWheelGame(stake) { res ->
+                                    res.onSuccess { (segIdx, round) -> onDone(segIdx, round) }
+                                        .onFailure { err ->
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(err.localizedMessage ?: "Lucky Wheel failed")
+                                            }
+                                        }
+                                }
+                            }
+                        )
+                    }
                     composable(CustomerRoute.ACTIVE_ORDERS.name) {
                         OrdersHistoryScreen(
                             activeOnly = true,
                             ordersState = userOrdersState,
+                            matchesState = matchesState,
+                            onRefreshLiveScores = vm::syncLiveMatchResultsNow,
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -795,6 +843,8 @@ private fun AuthenticatedRoot(
                         OrdersHistoryScreen(
                             activeOnly = false,
                             ordersState = userOrdersState,
+                            matchesState = matchesState,
+                            onRefreshLiveScores = vm::syncLiveMatchResultsNow,
                             onBack = { navController.popBackStack() },
                             onDeleteOrder = vm::deleteOrder,
                             onClearCompletedOrders = vm::clearCompletedOrders

@@ -146,6 +146,8 @@ enum class CustomerRoute {
     THREE_D,
     DICE_GAME,
     SIX_ANIMALS,
+    DRAGON_TIGER,
+    LUCKY_WHEEL,
     ACTIVE_ORDERS,
     PAST_ORDERS,
     LEDGER,
@@ -234,6 +236,8 @@ fun CustomerHomeScreen(
             }
             add(MenuTile(CustomerRoute.DICE_GAME, if (isEnglish) "Dice Roll" else "အံစာတုံး", Icons.Default.Casino, Color(0xFF7C3AED), Color(0xFFEDE9FE), "menu_dice", "dice"))
             add(MenuTile(CustomerRoute.SIX_ANIMALS, if (isEnglish) "6 Animals" else "၆ကောင်ဂျင်", Icons.Default.Pets, Color(0xFFB45309), Color(0xFFFEF3C7), "menu_six_animals", "six_animals"))
+            add(MenuTile(CustomerRoute.DRAGON_TIGER, if (isEnglish) "Dragon Tiger" else "နဂါး vs ကျား", Icons.Default.Bolt, Color(0xFFDC2626), Color(0xFFFEE2E2), "menu_dragon_tiger", "dragon_tiger"))
+            add(MenuTile(CustomerRoute.LUCKY_WHEEL, if (isEnglish) "Lucky Wheel" else "ကံစမ်းဘီး", Icons.Default.AutoAwesome, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_lucky_wheel", "lucky_wheel"))
             add(MenuTile(CustomerRoute.ACTIVE_ORDERS, if (isEnglish) "Active Slips" else "လောင်းထားသောပွဲစဉ်များ", Icons.Default.History, Color(0xFF334155), Color(0xFFE2E8F0), "menu_active_orders"))
             add(MenuTile(CustomerRoute.PAST_ORDERS, if (isEnglish) "Past Slips" else "ပွဲစဉ်ဟောင်းများ", Icons.Default.CalendarMonth, Color(0xFFEA580C), Color(0xFFFFEDD5), "menu_past_orders"))
             add(MenuTile(CustomerRoute.LEDGER, if (isEnglish) "Wallet" else "ငွေစာရင်း", Icons.Default.MonetizationOn, Color(0xFFD97706), Color(0xFFFEF3C7), "menu_ledger"))

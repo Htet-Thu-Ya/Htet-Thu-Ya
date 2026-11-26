@@ -932,6 +932,7 @@ fun AdminCustomerDetailDialog(
     user: UserAccount,
     customerOrders: List<BetOrder>,
     customerWalletReqs: List<WalletRequest>,
+    matchesById: Map<String, SportMatch> = emptyMap(),
     busy: Boolean = false,
     canAdjustBalance: Boolean = true,
     canLockUsers: Boolean = true,
@@ -1221,6 +1222,7 @@ fun AdminCustomerDetailDialog(
                                         order = order,
                                         isAdminView = true,
                                         busy = busy,
+                                        matchesById = matchesById,
                                         onAccept = onAcceptOrder,
                                         onAutoSettleOrder = onAutoSettleOrder,
                                         onSettleWin = onRequestSettleWin,
@@ -1240,6 +1242,7 @@ fun AdminCustomerDetailDialog(
                                     OrderSlipCard(
                                         order = order,
                                         isAdminView = true,
+                                        matchesById = matchesById,
                                         onDeleteOrder = { onDeleteOrder(it.id) }
                                     )
                                 }

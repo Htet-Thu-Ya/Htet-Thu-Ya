@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,12 +20,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -33,6 +37,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,6 +51,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -64,12 +70,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.betting.KyayFormatter
+import com.example.data.betting.MatchSheetCsvCodec
 import com.example.data.model.BoardConfig
 import com.example.data.model.SportMatch
 import com.example.data.model.SystemGameConfig
@@ -604,7 +614,10 @@ fun AdminExpressBoardTab(
         fiveFiveFiveKyay: String?,
         oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
     ) -> Unit,
-    onDeleteMatch: (String) -> Unit
+    onDeleteMatch: (String) -> Unit,
+    onSaveSheetUrl: (String) -> Unit = {},
+    onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
+    onImportCsvText: (String, String) -> Unit = { _, _ -> }
 ) {
     val isOneExpress = boardMode == "one_express"
     val boardTitle = if (isOneExpress) "1xBET ဘောလုံးပွဲကြေး" else "555 Mix ဘောလုံးပွဲကြေး"
@@ -615,6 +628,7 @@ fun AdminExpressBoardTab(
     }
 
     var showAutoSyncCard by remember(boardMode) { mutableStateOf(true) }
+    var showSheetDialog by remember(boardMode) { mutableStateOf(false) }
     var showMatchesTable by remember(boardMode) { mutableStateOf(true) }
     val adminExpandedLeagues = remember(boardMode) { mutableStateMapOf<String, Boolean>() }
     var adminNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -892,23 +906,39 @@ fun AdminExpressBoardTab(
             }
         }
 
-        // Manual Add Match Button
+        // Manual Add Match + Sheet/Excel Sync Buttons
         item {
-            Button(
-                onClick = { showAddDialog = true },
-                enabled = !busy,
-                colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = InkDark),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("add_match_$boardMode")
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = if (isOneExpress) "1xBET ပွဲစဉ်သစ် ထည့်မည်" else "555 Mix ပွဲစဉ်သစ် ထည့်မည်",
-                    fontWeight = FontWeight.Bold
-                )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { showAddDialog = true },
+                    enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = InkDark),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("add_match_$boardMode")
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (isOneExpress) "1xBET ပွဲသစ်" else "555 Mix ပွဲသစ်",
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+                OutlinedButton(
+                    onClick = { showSheetDialog = true },
+                    enabled = !busy,
+                    border = BorderStroke(1.dp, accent),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("sheet_sync_button_$boardMode")
+                ) {
+                    Icon(Icons.Default.TableChart, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Google Sheet / Excel", color = accent, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
             }
         }
 
@@ -1135,4 +1165,137 @@ fun AdminExpressBoardTab(
             }
         )
     }
+
+    if (showSheetDialog) {
+        MatchSheetSyncDialog(
+            boardMode = boardMode,
+            boardConfig = boardConfig,
+            matchesToExport = filteredMatches,
+            busy = busy,
+            onDismiss = { showSheetDialog = false },
+            onSaveSheetUrl = onSaveSheetUrl,
+            onSyncFromSheetUrl = { url ->
+                onSyncMatchesFromSheet(boardMode, url)
+                showSheetDialog = false
+            },
+            onImportCsvText = { csvText ->
+                onImportCsvText(boardMode, csvText)
+                showSheetDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun MatchSheetSyncDialog(
+    boardMode: String,
+    boardConfig: BoardConfig,
+    matchesToExport: List<SportMatch>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onSaveSheetUrl: (String) -> Unit,
+    onSyncFromSheetUrl: (String) -> Unit,
+    onImportCsvText: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var sheetUrlInput by remember(boardConfig.googleSheetCsvUrl) { mutableStateOf(boardConfig.googleSheetCsvUrl) }
+    var csvTextInput by remember(boardMode) { mutableStateOf("") }
+    val exportedCsv = remember(matchesToExport) { MatchSheetCsvCodec.exportToCsv(matchesToExport) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Google Sheet / ကွန်ပျူတာ Excel ဖြင့် ပြင်ဆင်ရန်") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "၁) လက်ရှိပွဲစဉ် CSV ကို Copy ကူး၍ Google Sheet / Excel ထဲ Paste လုပ်ပြီး လွယ်ကူစွာ ပြင်ဆင်နိုင်ပါသည်။",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(exportedCsv))
+                            Toast.makeText(context, "ပွဲစဉ် ${matchesToExport.size} ပွဲ CSV Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f).testTag("sheet_copy_export_csv_$boardMode")
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("CSV Copy (${matchesToExport.size})", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = { csvTextInput = exportedCsv },
+                        modifier = Modifier.weight(1f).testTag("sheet_load_current_csv_$boardMode")
+                    ) {
+                        Text("အောက်တွင်ထည့်", maxLines = 1)
+                    }
+                }
+
+                HorizontalDivider()
+
+                Text(
+                    text = "၂) Google Sheet Link မှ တိုက်ရိုက်ဆွဲယူရန် (Published CSV / Share Link):",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = sheetUrlInput,
+                    onValueChange = { sheetUrlInput = it },
+                    label = { Text("Google Sheet CSV URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("sheet_url_input_$boardMode")
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { onSaveSheetUrl(sheetUrlInput) },
+                        enabled = !busy && sheetUrlInput.isNotBlank(),
+                        modifier = Modifier.weight(1f).testTag("sheet_save_url_$boardMode")
+                    ) {
+                        Text("Link သိမ်း", maxLines = 1)
+                    }
+                    Button(
+                        onClick = { onSyncFromSheetUrl(sheetUrlInput) },
+                        enabled = !busy && sheetUrlInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
+                        modifier = Modifier.weight(1f).testTag("sheet_pull_url_$boardMode")
+                    ) {
+                        Text("Sheet မှ ဆွဲယူ", maxLines = 1)
+                    }
+                }
+
+                HorizontalDivider()
+
+                Text(
+                    text = "၃) Excel / Google Sheet မှ Copy ကူးထားသော ဇယား (CSV / TSV) ကို Paste ထည့်သွင်းရန်:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = csvTextInput,
+                    onValueChange = { csvTextInput = it },
+                    label = { Text("CSV / Excel Data Paste ထည့်ပါ") },
+                    minLines = 4,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth().testTag("sheet_csv_paste_input_$boardMode")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onImportCsvText(csvTextInput) },
+                enabled = !busy && csvTextInput.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
+                modifier = Modifier.testTag("sheet_import_csv_confirm_$boardMode")
+            ) {
+                Text("CSV/Excel ထည့်သွင်းမည်")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }
+        }
+    )
 }

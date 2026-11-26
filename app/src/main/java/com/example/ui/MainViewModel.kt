@@ -1020,9 +1020,9 @@ class MainViewModel(
     }
 
     fun playSixAnimalsGame(
-        selectedAnimalIndex: Int,
+        selectedAnimalIndices: Set<Int>,
         animalLabels: List<String>,
-        stakeKs: Long,
+        stakePerAnimalKs: Long,
         onResult: (Result<Pair<List<Int>, MiniGameRound>>) -> Unit
     ) {
         val sys = systemGameConfig.value
@@ -1033,6 +1033,16 @@ class MainViewModel(
         }
         if (sys.isGamesPausedNow(nowMs)) {
             onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းကစားခွင့်"))))
+            return
+        }
+        val cleanSelection = selectedAnimalIndices.filter { it in 0..5 }.toSet()
+        if (cleanSelection.isEmpty()) {
+            onResult(Result.failure(IllegalStateException("အကောင် အနည်းဆုံး ၁ ကောင် ရွေးချယ်ပါ")))
+            return
+        }
+        val totalStakeKs = stakePerAnimalKs * cleanSelection.size
+        if (totalStakeKs !in 100L..1_000_000L) {
+            onResult(Result.failure(IllegalStateException("စုစုပေါင်းထိုးကြေးသည် 100 Ks မှ 1,000,000 Ks အတွင်း ဖြစ်ရပါမည်")))
             return
         }
         viewModelScope.launch {
@@ -1071,23 +1081,29 @@ class MainViewModel(
                 val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
                 val recentCustomerAnimals = ((userMiniGameRounds.value as? UiState.Success)?.data ?: emptyList())
                     .filter { it.gameType == "six_animals" }
-                val chosen = com.example.data.betting.MiniGameEngine.selectSixAnimalsRoll(
+                val baseBonus = (ctrl.sixAnimalsMult - 1.0).coerceIn(0.2, 29.0)
+                val chosen = com.example.data.betting.MiniGameEngine.selectSixAnimalsRollMultiPick(
                     allCombos = allCombos,
                     quotaCombos = quotaCombos,
-                    selectedAnimalIndex = selectedAnimalIndex,
+                    selectedAnimalIndices = cleanSelection,
+                    stakePerAnimalKs = stakePerAnimalKs,
+                    baseBonus = baseBonus,
                     directive = directive,
                     stealthHouseWinPct = ctrl.stealthHouseWinPct,
-                    stakeKs = stakeKs,
                     recentCustomerRounds = recentCustomerAnimals
                 )
                 val rolled = listOf(chosen.first, chosen.second, chosen.third)
-                val matches = rolled.count { it == selectedAnimalIndex }
-                val baseBonus = (ctrl.sixAnimalsMult - 1.0).coerceIn(0.2, 29.0)
-                val payoutKs = if (matches > 0) {
-                    (stakeKs + (stakeKs * baseBonus * matches).roundToLong()).coerceIn(0L, stakeKs * 100L)
-                } else 0L
+                val rawPayout = com.example.data.betting.MiniGameEngine.computeSixAnimalsMultiPickPayout(
+                    roll = chosen,
+                    selectedAnimalIndices = cleanSelection,
+                    stakePerAnimalKs = stakePerAnimalKs,
+                    baseBonus = baseBonus
+                )
+                val payoutKs = rawPayout.coerceIn(0L, totalStakeKs * 100L)
 
-                val pickedName = animalLabels.getOrElse(selectedAnimalIndex) { "Pick #${selectedAnimalIndex + 1}" }
+                val pickedName = cleanSelection.sorted().joinToString(" + ") { idx ->
+                    animalLabels.getOrElse(idx) { "Pick #${idx + 1}" }
+                }.take(190)
                 val outcomeNames = rolled.joinToString(" • ") { idx -> animalLabels.getOrElse(idx) { "#$idx" } }
                 val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
 
@@ -1096,10 +1112,134 @@ class MainViewModel(
                     gameType = "six_animals",
                     betLabel = pickedName,
                     outcomeLabel = outcomeNames,
-                    stakeKs = stakeKs,
+                    stakeKs = totalStakeKs,
                     payoutKs = payoutKs
                 )
                 onResult(res.map { rolled to it })
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun playDragonTigerGame(
+        pick: String, // "DRAGON", "TIGER", "TIE"
+        stakeKs: Long,
+        onResult: (Result<Pair<com.example.data.betting.MiniGameEngine.DragonTigerRoll, MiniGameRound>>) -> Unit
+    ) {
+        val sys = systemGameConfig.value
+        val nowMs = System.currentTimeMillis()
+        if (sys.maintenanceMode || !sys.isGameEnabled("dragon_tiger")) {
+            onResult(Result.failure(IllegalStateException("နဂါး vs ကျား ဂိမ်း ခေတ္တပိတ်ထားပါသည်")))
+            return
+        }
+        if (sys.isGamesPausedNow(nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းကစားခွင့်"))))
+            return
+        }
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val ctrl = miniGameControlConfig.value
+                val normPick = pick.trim().uppercase()
+                val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
+                val recentCustomerDt = ((userMiniGameRounds.value as? UiState.Success)?.data ?: emptyList())
+                    .filter { it.gameType == "dragon_tiger" }
+                val roll = com.example.data.betting.MiniGameEngine.selectDragonTigerOutcome(
+                    pick = normPick,
+                    directive = directive,
+                    stealthHouseWinPct = ctrl.stealthHouseWinPct,
+                    stakeKs = stakeKs,
+                    recentCustomerRounds = recentCustomerDt
+                )
+                val winner = when {
+                    roll.dragonRank > roll.tigerRank -> "DRAGON"
+                    roll.tigerRank > roll.dragonRank -> "TIGER"
+                    else -> "TIE"
+                }
+                val dtMult = ctrl.dragonTigerMult.coerceIn(1.1, 50.0)
+                val payoutKs = when {
+                    normPick == "TIE" && winner == "TIE" -> (stakeKs * 8.0).roundToLong()
+                    normPick == winner -> (stakeKs * dtMult).roundToLong()
+                    else -> 0L
+                }.coerceIn(0L, stakeKs * 100L)
+
+                fun cardText(rank: Int, suit: String): String {
+                    val rLabel = when (rank) {
+                        1 -> "A"; 11 -> "J"; 12 -> "Q"; 13 -> "K"; else -> rank.toString()
+                    }
+                    return "$rLabel$suit"
+                }
+                val betLabel = when (normPick) {
+                    "DRAGON" -> "နဂါး (x$dtMult)"
+                    "TIGER" -> "ကျား (x$dtMult)"
+                    else -> "သရေ Tie (x8)"
+                }
+                val winText = when (winner) {
+                    "DRAGON" -> "နဂါးနိုင်"
+                    "TIGER" -> "ကျားနိုင်"
+                    else -> "သရေ"
+                }
+                val outcomeLabel = "🐉 ${cardText(roll.dragonRank, roll.dragonSuit)} vs 🐯 ${cardText(roll.tigerRank, roll.tigerSuit)} • $winText"
+                val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
+
+                val res = repository.playMiniGameRound(
+                    customerName = name,
+                    gameType = "dragon_tiger",
+                    betLabel = betLabel,
+                    outcomeLabel = outcomeLabel,
+                    stakeKs = stakeKs,
+                    payoutKs = payoutKs
+                )
+                onResult(res.map { roll to it })
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun playLuckyWheelGame(
+        stakeKs: Long,
+        onResult: (Result<Pair<Int, MiniGameRound>>) -> Unit
+    ) {
+        val sys = systemGameConfig.value
+        val nowMs = System.currentTimeMillis()
+        if (sys.maintenanceMode || !sys.isGameEnabled("lucky_wheel")) {
+            onResult(Result.failure(IllegalStateException("ကံစမ်းဘီးလှည့် ဂိမ်း ခေတ္တပိတ်ထားပါသည်")))
+            return
+        }
+        if (sys.isGamesPausedNow(nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းကစားခွင့်"))))
+            return
+        }
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val ctrl = miniGameControlConfig.value
+                val segments = com.example.data.betting.MiniGameEngine.buildLuckyWheelSegments(ctrl.luckyWheelMult)
+                val directive = ctrl.userDirectives[currentUserId] ?: ctrl.globalDirective
+                val recentCustomerWheel = ((userMiniGameRounds.value as? UiState.Success)?.data ?: emptyList())
+                    .filter { it.gameType == "lucky_wheel" }
+                val chosenIndex = com.example.data.betting.MiniGameEngine.selectLuckyWheelSegmentIndex(
+                    segments = segments,
+                    directive = directive,
+                    stealthHouseWinPct = ctrl.stealthHouseWinPct,
+                    stakeKs = stakeKs,
+                    recentCustomerRounds = recentCustomerWheel
+                )
+                val seg = segments.getOrElse(chosenIndex) { segments.first() }
+                val payoutKs = (stakeKs * seg.multiplier).roundToLong().coerceIn(0L, stakeKs * 100L)
+                val name = (userAccount.value as? UiState.Success)?.data?.displayName ?: displayName
+
+                val res = repository.playMiniGameRound(
+                    customerName = name,
+                    gameType = "lucky_wheel",
+                    betLabel = "Spin 🎡 (${stakeKs} Ks)",
+                    outcomeLabel = "🎯 ${seg.label}",
+                    stakeKs = stakeKs,
+                    payoutKs = payoutKs
+                )
+                onResult(res.map { seg.index to it })
             } finally {
                 _busy.value = false
             }
@@ -1387,7 +1527,7 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.autoSettleFinishedOrders(bettingConfig.value)
+                val res = repository.autoSettleFinishedOrders(bettingConfig.value, feedService = feedService)
                 res.onSuccess { summary ->
                     _events.emit(formatAutoSettleMessage(summary))
                     if (summary.settledCount > 0) {
@@ -1406,7 +1546,7 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.autoSettleFinishedOrders(bettingConfig.value, targetUserId)
+                val res = repository.autoSettleFinishedOrders(bettingConfig.value, targetUserId, feedService = feedService)
                 res.onSuccess { summary ->
                     val prefix = if (customerName.isNotBlank()) "$customerName: " else ""
                     _events.emit(prefix + formatAutoSettleMessage(summary))
@@ -1426,7 +1566,7 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.autoSettleSingleOrder(order, bettingConfig.value)
+                val res = repository.autoSettleSingleOrder(order, bettingConfig.value, feedService = feedService)
                 res.onSuccess { msg ->
                     _events.emit(msg)
                     logAuditAsync("Auto settled single order", "order", order.id, order.customerName, msg)
@@ -1458,7 +1598,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            googleSheetCsvUrl = cur.googleSheetCsvUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cur.copy(autoSyncDailyMatches = true))
@@ -1477,7 +1618,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            googleSheetCsvUrl = cur.googleSheetCsvUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncLiveMatchResults(feedService)
@@ -1496,7 +1638,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = enabled,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            googleSheetCsvUrl = cur.googleSheetCsvUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cur.copy(autoSyncOneExpress = true))
@@ -1515,7 +1658,8 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = enabled
+            autoSyncFiveFiveFive = enabled,
+            googleSheetCsvUrl = cur.googleSheetCsvUrl
         )
         if (res.isSuccess && enabled) {
             repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cur.copy(autoSyncFiveFiveFive = true))
@@ -1531,12 +1675,101 @@ class MainViewModel(
             lastSyncedDate = cur.lastSyncedDate,
             allowedLeagues = leagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
-            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            googleSheetCsvUrl = cur.googleSheetCsvUrl
         )
         if (res.isSuccess) {
             logAuditAsync("Updated allowed leagues", "board", "board_config", "", "${leagues.size} leagues")
         }
         res
+    }
+
+    fun saveBoardSheetUrl(csvUrl: String) = runAction("Google Sheet Link သိမ်းဆည်းပြီးပါပြီ") {
+        val cur = boardConfig.value
+        val normalized = com.example.data.network.FootballFeedService.normalizeGoogleSheetCsvUrl(csvUrl)
+        val res = repository.saveBoardConfig(
+            autoSyncDailyMatches = cur.autoSyncDailyMatches,
+            autoSyncLiveResults = cur.autoSyncLiveResults,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = cur.allowedLeagues,
+            autoSyncOneExpress = cur.autoSyncOneExpress,
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            googleSheetCsvUrl = normalized
+        )
+        if (res.isSuccess) {
+            logAuditAsync("Saved Google Sheet CSV URL", "board", "board_config")
+        }
+        res
+    }
+
+    fun syncMatchesFromGoogleSheet(boardSource: String, csvUrl: String) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val normalizedUrl = com.example.data.network.FootballFeedService.normalizeGoogleSheetCsvUrl(csvUrl)
+                val cur = boardConfig.value
+                if (normalizedUrl != cur.googleSheetCsvUrl && normalizedUrl.isNotBlank()) {
+                    repository.saveBoardConfig(
+                        autoSyncDailyMatches = cur.autoSyncDailyMatches,
+                        autoSyncLiveResults = cur.autoSyncLiveResults,
+                        lastSyncedDate = cur.lastSyncedDate,
+                        allowedLeagues = cur.allowedLeagues,
+                        autoSyncOneExpress = cur.autoSyncOneExpress,
+                        autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+                        googleSheetCsvUrl = normalizedUrl
+                    )
+                }
+                val fetchRes = feedService.fetchGoogleSheetCsvMatches(normalizedUrl)
+                val csvText = fetchRes.getOrElse { err ->
+                    _events.emit(err.localizedMessage ?: "Google Sheet ဖတ်မရပါ")
+                    return@launch
+                }
+                val rows = com.example.data.betting.MatchSheetCsvCodec.parseCsvOrTsv(csvText, boardSource)
+                if (rows.isEmpty()) {
+                    _events.emit("Google Sheet ထဲတွင် မှန်ကန်သော ပွဲစဉ်ဒေတာ မတွေ့ပါ")
+                    return@launch
+                }
+                val upsertRes = repository.upsertMatchesFromSheet(rows, boardSource)
+                upsertRes.onSuccess { count ->
+                    _events.emit("Google Sheet မှ ပွဲစဉ် $count ပွဲ Update / ထည့်သွင်းပြီးပါပြီ")
+                    logAuditAsync("Synced matches from Google Sheet", "board", boardSource, "", "Count=$count")
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "Google Sheet ဒေတာ သိမ်းဆည်းမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun importMatchesFromCsvText(boardSource: String, csvText: String) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val rows = com.example.data.betting.MatchSheetCsvCodec.parseCsvOrTsv(csvText, boardSource)
+                if (rows.isEmpty()) {
+                    _events.emit("CSV / Excel စာသားပုံစံ မမှန်ကန်သေးပါ (ဥပမာ: League,Home,Away,Time,Handicap,Goal)")
+                    return@launch
+                }
+                val upsertRes = repository.upsertMatchesFromSheet(rows, boardSource)
+                upsertRes.onSuccess { count ->
+                    _events.emit("Sheet / Excel မှ ပွဲစဉ် $count ပွဲ ထည့်သွင်း/ပြင်ဆင်ပြီးပါပြီ")
+                    logAuditAsync("Imported CSV/Excel matches", "board", boardSource, "", "Count=$count")
+                }.onFailure { err ->
+                    _events.emit(err.localizedMessage ?: "Sheet CSV ထည့်သွင်းမှု မအောင်မြင်ပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun clearFinishedMatches(matchIds: List<String>) = runAction("ပြီးဆုံးပြီးသား ပွဲစဉ်များ ရှင်းလင်းပြီးပါပြီ") {
+        val res = repository.deleteMatchesBatch(matchIds)
+        if (res.isSuccess) {
+            logAuditAsync("Cleared finished matches", "board", "batch", "", "Count=${res.getOrDefault(0)}")
+        }
+        res.map { }
     }
 
     fun syncDailyMatchesNow() {
