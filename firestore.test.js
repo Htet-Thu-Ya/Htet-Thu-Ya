@@ -2072,6 +2072,227 @@ test("Dragon Tiger, Lucky Wheel, Multi-Pick Six Animals, 40+ Leagues + Sheet CSV
   await assertSucceeds(ownerDb.collection("audit_logs").doc("log_owner_1").delete());
 });
 
+test("2D/3D Control Room, Lottery Calendar, Board Sheet RBAC, editable app_update fields, and Ledger clear permissions", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const second2dSheetDb = testEnv.authenticatedContext("sub_2d_sheet", {
+    email: "sub2dsheet@example.com",
+    email_verified: true,
+  }).firestore();
+  const secondNoPermDb = testEnv.authenticatedContext("sub_basic", {
+    email: "subbasic@example.com",
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.collection("admins").doc("sub_2d_sheet").set({
+      userId: "sub_2d_sheet",
+      displayName: "2D Sheet Admin",
+      email: "sub2dsheet@example.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "INV_2D_SHEET",
+      permissions: {
+        canManage2D3DRoom: true,
+        canManageBoardSheet: true,
+        canManageBoard: false,
+      },
+      createdAt: pastDate(10000),
+      updatedAt: pastDate(10000),
+    });
+    await db.collection("admins").doc("sub_basic").set({
+      userId: "sub_basic",
+      displayName: "Basic Admin",
+      email: "subbasic@example.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "INV_BASIC",
+      permissions: {
+        canManage2D3DRoom: false,
+        canManageBoardSheet: false,
+        canManageBoard: false,
+      },
+      createdAt: pastDate(10000),
+      updatedAt: pastDate(10000),
+    });
+    await db.collection("transactions").doc("tx_ledger_clear_1").set({
+      userId: ALICE_UID,
+      txType: "admin_adjust",
+      direction: "credit",
+      amountKs: 2000,
+      title: "Bonus",
+      balanceAfterKs: 2000,
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    });
+  });
+
+  // 1. 2D/3D Control Room & Calendar: granted second admin & Owner succeed; basic admin & customer fail writes
+  const roomPayload = {
+    autoMode: false,
+    autoNotifyOnResult: true,
+    liveTwod: "49",
+    liveSet: "1414.44",
+    liveVal: "64009.86",
+    liveUpdatedText: "26/11/2026 4:30:00 PM",
+    m1201Set: "1432.01",
+    m1201Val: "26395.72",
+    m1201Twod: "15",
+    e430Set: "1414.44",
+    e430Val: "64009.86",
+    e430Twod: "49",
+    am930Modern: "678",
+    am930Internet: "696",
+    pm200Modern: "638",
+    pm200Internet: "539",
+    presentPakokku: "Pakokku Special 49",
+    presentDailyCard: "Daily 15",
+    presentWeeklyCard: "Weekly 4x",
+    presentThaiCard: "Thai 49",
+    presentAtakeCard: "Atake 15/49",
+    lastNotificationTitle: "2D Result",
+    lastNotificationBody: "4:30 PM -> 49",
+    lastNotificationNonce: 1700000000000,
+    updatedBy: "sub_2d_sheet",
+    updatedAt: pastDate(3000),
+  };
+  await assertSucceeds(
+    second2dSheetDb.collection("app_settings").doc("lottery_2d3d_config").set(roomPayload)
+  );
+  await assertFails(
+    secondNoPermDb.collection("app_settings").doc("lottery_2d3d_config").set({ ...roomPayload, updatedBy: "sub_basic" })
+  );
+  await assertFails(
+    aliceDb.collection("app_settings").doc("lottery_2d3d_config").set({ ...roomPayload, updatedBy: ALICE_UID })
+  );
+  await assertSucceeds(aliceDb.collection("app_settings").doc("lottery_2d3d_config").get());
+
+  // Lottery calendar 2D & 3D writes
+  await assertSucceeds(
+    second2dSheetDb.collection("lottery_calendar").doc("2d_2026_11").set({
+      docType: "2d_month",
+      year: 2026,
+      month: 11,
+      days: { "26": { m1201Twod: "15", e430Twod: "49" } },
+      updatedBy: "sub_2d_sheet",
+      updatedAt: pastDate(2900),
+    })
+  );
+  await assertSucceeds(
+    ownerDb.collection("lottery_calendar").doc("3d_2026").set({
+      docType: "3d_year",
+      year: 2026,
+      months: { "11": { firstDay: "01", firstNum: "123", secondDay: "16", secondNum: "456" } },
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2800),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("lottery_calendar").doc("2d_2026_11").set({
+      docType: "2d_month",
+      year: 2026,
+      month: 11,
+      days: {},
+      updatedBy: ALICE_UID,
+      updatedAt: pastDate(2700),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("lottery_calendar").get());
+
+  // 2. Board Sheet RBAC: canManageBoardSheet can create/update matches and board_config, cannot delete matches
+  await assertSucceeds(
+    second2dSheetDb.collection("matches").doc("m_sheet_1").set({
+      league: "Premier League",
+      homeTeam: "Arsenal",
+      awayTeam: "Chelsea",
+      kickoffLabel: "21:30",
+      handicapLine: "Home -0.5",
+      goalLine: "2.5",
+      bodyOdds: 1.95,
+      goalOdds: 1.90,
+      win1Odds: 1.92,
+      drawOdds: 3.40,
+      win2Odds: 4.10,
+      overOdds: 1.88,
+      underOdds: 1.95,
+      status: "open",
+      homeScore: 0,
+      awayScore: 0,
+      visibility: "public",
+      boardSource: "one_express",
+      createdBy: "sub_2d_sheet",
+      createdAt: pastDate(2600),
+      updatedAt: pastDate(2600),
+    })
+  );
+  await assertSucceeds(
+    second2dSheetDb.collection("matches").doc("m_sheet_1").update({
+      homeScore: 2,
+      awayScore: 1,
+      updatedAt: pastDate(2500),
+    })
+  );
+  await assertFails(second2dSheetDb.collection("matches").doc("m_sheet_1").delete());
+  await assertFails(
+    secondNoPermDb.collection("matches").doc("m_sheet_2").set({
+      league: "PL",
+      homeTeam: "A",
+      awayTeam: "B",
+      kickoffLabel: "21:00",
+      handicapLine: "Home -0.5",
+      goalLine: "2.5",
+      bodyOdds: 1.95,
+      goalOdds: 1.90,
+      status: "open",
+      homeScore: 0,
+      awayScore: 0,
+      visibility: "public",
+      createdBy: "sub_basic",
+      createdAt: pastDate(2400),
+      updatedAt: pastDate(2400),
+    })
+  );
+  await assertSucceeds(
+    second2dSheetDb.collection("app_settings").doc("board_config").set({
+      autoSyncDailyMatches: true,
+      autoSyncLiveResults: true,
+      lastSyncedDate: "2026-11-26",
+      googleSheetCsvUrl: "https://docs.google.com/spreadsheets/d/e/test/pub?output=csv",
+      updatedBy: "sub_2d_sheet",
+      updatedAt: pastDate(2300),
+    })
+  );
+
+  // 3. Editable app_update text fields succeed for Owner
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("app_update").set({
+      latestVersionCode: 6,
+      latestVersionName: "6.0",
+      downloadUrl: "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/LoTaYa.apk",
+      releaseNotes: "New 2D/3D Live Hub",
+      forceUpdate: false,
+      bannerTitle: "Update Ready!",
+      bannerSubtitle: "Tap to get 2D/3D Live & A-P Sheet",
+      dialogTitle: "LoTaYa New Version",
+      installButtonLabel: "Install Now",
+      laterButtonLabel: "Later",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2200),
+    })
+  );
+
+  // 4. Ledger delete permissions: Second Admin cannot delete, Owner can clear/delete
+  await assertFails(second2dSheetDb.collection("transactions").doc("tx_ledger_clear_1").delete());
+  await assertSucceeds(ownerDb.collection("transactions").doc("tx_ledger_clear_1").delete());
+});
+
+
 
 
 

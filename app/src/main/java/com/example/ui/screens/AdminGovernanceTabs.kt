@@ -146,7 +146,8 @@ fun AdminFinancialOverviewTab(
         direction: String,
         isHidden: Boolean
     ) -> Unit = { _, _, _, _, _ -> },
-    onDeleteTransaction: (String) -> Unit = {}
+    onDeleteTransaction: (String) -> Unit = {},
+    onClearAllTransactions: (List<String>) -> Unit = {}
 ) {
     var editingAccount by remember { mutableStateOf<PaymentAccount?>(null) }
     var showCreateAccountDialog by remember { mutableStateOf(false) }
@@ -160,6 +161,7 @@ fun AdminFinancialOverviewTab(
     var zoomingReceiptBase64 by remember { mutableStateOf<String?>(null) }
     var editingTx by remember { mutableStateOf<LedgerTransaction?>(null) }
     var deletingTx by remember { mutableStateOf<LedgerTransaction?>(null) }
+    var showClearAllTxConfirm by remember { mutableStateOf(false) }
 
     val usersById = remember(users) { users.associateBy { it.userId } }
 
@@ -479,6 +481,26 @@ fun AdminFinancialOverviewTab(
                     }
                 }
             } else {
+                if (isOwnerAdmin && transactions.isNotEmpty()) {
+                    item {
+                        OutlinedButton(
+                            onClick = { showClearAllTxConfirm = true },
+                            enabled = !busy,
+                            border = BorderStroke(1.dp, AdminCrimson.copy(alpha = 0.7f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("clear_all_ledger_transactions_button")
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Ledger အားလုံး ဖျက်မည် (Clear All • ${transactions.size})",
+                                color = AdminCrimson,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
                 if (visibleTransactions.isEmpty()) {
                     item {
                         Text("Ledger ငွေစာရင်း မှတ်တမ်း မရှိသေးပါ", color = Color(0xFFB4C8BE))
@@ -612,6 +634,18 @@ fun AdminFinancialOverviewTab(
                 val id = tx.id
                 deletingTx = null
                 onDeleteTransaction(id)
+            }
+        )
+    }
+
+    if (showClearAllTxConfirm) {
+        ConfirmDeleteDialog(
+            title = "Ledger မှတ်တမ်းအားလုံး ဖျက်မည်လား?",
+            message = "Ledger ငွေစာရင်း မှတ်တမ်း ${transactions.size} ခုလုံးကို အပြီးတိုင် ဖျက်ပစ်ပါမည်။",
+            onDismiss = { showClearAllTxConfirm = false },
+            onConfirm = {
+                showClearAllTxConfirm = false
+                onClearAllTransactions(transactions.map { it.id })
             }
         )
     }
@@ -1053,6 +1087,8 @@ fun AdminSubAdminsTab(
                         if (perms.canViewUsers) add("Users")
                         if (perms.canLockUsers) add("Lock Users")
                         if (perms.canManageBoard) add("Board")
+                        if (perms.canManage2D3DRoom) add("2D/3D Room")
+                        if (perms.canManageBoardSheet) add("Sheet Table")
                         if (perms.canChat) add("Chat")
                         if (perms.canEditWalletRates) add("Wallet Rates")
                         if (perms.canEditGameConfig) add("Game Settings")
@@ -1197,6 +1233,8 @@ private fun PermissionCheckboxesBlock(
         Triple("Customer စာရင်း ကြည့်ရှုခွင့်", permissions.canViewUsers) { v: Boolean -> permissions.copy(canViewUsers = v) },
         Triple("Customer အကောင့် ယာယီပိတ်/ဖွင့် (Lock) ခွင့်", permissions.canLockUsers) { v: Boolean -> permissions.copy(canLockUsers = v) },
         Triple("ပွဲစဉ် / ထီ Board စီမံခွင့်", permissions.canManageBoard) { v: Boolean -> permissions.copy(canManageBoard = v) },
+        Triple("2D/3D ထိန်းချုပ်ခန်း ဝင်ခွင့်", permissions.canManage2D3DRoom) { v: Boolean -> permissions.copy(canManage2D3DRoom = v) },
+        Triple("Google Sheet ဇယား စီမံခွင့်", permissions.canManageBoardSheet) { v: Boolean -> permissions.copy(canManageBoardSheet = v) },
         Triple("Customer Chat / Call ဆက်သွယ်ခွင့်", permissions.canChat) { v: Boolean -> permissions.copy(canChat = v) },
         Triple("ငွေသွင်း/ထုတ် % နှုန်း ပြင်ခွင့်", permissions.canEditWalletRates) { v: Boolean -> permissions.copy(canEditWalletRates = v) },
         Triple("အနိုင်အကောက် % & Auto Settle ပြင်ခွင့်", permissions.canEditGameConfig) { v: Boolean -> permissions.copy(canEditGameConfig = v) },

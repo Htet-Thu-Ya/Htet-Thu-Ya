@@ -142,6 +142,7 @@ enum class CustomerRoute {
     ONE_EXPRESS_PARLAY,
     FIVE_FIVE_FIVE,
     FIVE_FIVE_FIVE_PARLAY,
+    LOTTERY_HUB,
     TWO_D,
     THREE_D,
     DICE_GAME,
@@ -228,6 +229,9 @@ fun CustomerHomeScreen(
         buildList {
             add(MenuTile(CustomerRoute.PARLAY, if (isEnglish) "Parlay" else "မောင်း", Icons.Default.Stadium, Color(0xFF16A34A), Color(0xFFDCFCE7), "menu_parlay", "parlay"))
             add(MenuTile(CustomerRoute.BODY_GOAL, if (isEnglish) "Body / O-U" else "ဘော်ဒီ/ဂိုးပေါင်း", Icons.Default.SportsSoccer, Color(0xFF1E293B), Color(0xFFE2E8F0), "menu_body_goal", "body_goal"))
+            if (!systemGameConfig.hideTwoD || !systemGameConfig.hideThreeD) {
+                add(MenuTile(CustomerRoute.LOTTERY_HUB, if (isEnglish) "2D/3D Live & Calendar" else "2D/3D Live & ပြက္ခဒိန်", Icons.Default.CalendarMonth, Color(0xFF0D9488), Color(0xFFCCFBF1), "menu_lottery_hub", if (!systemGameConfig.hideTwoD) "two_d" else "three_d"))
+            }
             if (!systemGameConfig.hideTwoD) {
                 add(MenuTile(CustomerRoute.TWO_D, if (isEnglish) "2D Lottery" else "၂လုံးထီ (2D)", Icons.Default.TrendingUp, Color(0xFF0F766E), Color(0xFFCCFBF1), "menu_two_d", "two_d"))
             }

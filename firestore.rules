@@ -334,12 +334,69 @@ service cloud.firestore {
 
     function isValidAppUpdateConfig(data) {
       return data.keys().hasAll(['latestVersionCode', 'latestVersionName', 'downloadUrl', 'releaseNotes', 'forceUpdate', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['latestVersionCode', 'latestVersionName', 'downloadUrl', 'releaseNotes', 'forceUpdate', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['latestVersionCode', 'latestVersionName', 'downloadUrl', 'releaseNotes', 'forceUpdate', 'bannerTitle', 'bannerSubtitle', 'dialogTitle', 'installButtonLabel', 'laterButtonLabel', 'updatedBy', 'updatedAt']) &&
              data.latestVersionCode is int && data.latestVersionCode >= 1 && data.latestVersionCode <= 1000000 &&
              data.latestVersionName is string && data.latestVersionName.size() >= 1 && data.latestVersionName.size() <= 30 &&
              data.downloadUrl is string && data.downloadUrl.size() >= 8 && data.downloadUrl.size() <= 300 && data.downloadUrl.matches('^https://.*') &&
              data.releaseNotes is string && data.releaseNotes.size() <= 500 &&
              data.forceUpdate is bool &&
+             (!('bannerTitle' in data) || (data.bannerTitle is string && data.bannerTitle.size() <= 120)) &&
+             (!('bannerSubtitle' in data) || (data.bannerSubtitle is string && data.bannerSubtitle.size() <= 240)) &&
+             (!('dialogTitle' in data) || (data.dialogTitle is string && data.dialogTitle.size() <= 120)) &&
+             (!('installButtonLabel' in data) || (data.installButtonLabel is string && data.installButtonLabel.size() <= 60)) &&
+             (!('laterButtonLabel' in data) || (data.laterButtonLabel is string && data.laterButtonLabel.size() <= 40)) &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLottery2D3DConfig(data) {
+      return data.keys().hasAll(['autoMode', 'autoNotifyOnResult', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'autoMode', 'autoNotifyOnResult',
+               'liveTwod', 'liveSet', 'liveVal', 'liveUpdatedText',
+               'm1201Set', 'm1201Val', 'm1201Twod',
+               'e430Set', 'e430Val', 'e430Twod',
+               'am930Modern', 'am930Internet', 'pm200Modern', 'pm200Internet',
+               'presentPakokku', 'presentDailyCard', 'presentWeeklyCard', 'presentThaiCard', 'presentAtakeCard',
+               'lastNotificationTitle', 'lastNotificationBody', 'lastNotificationNonce',
+               'updatedBy', 'updatedAt'
+             ]) &&
+             data.autoMode is bool &&
+             data.autoNotifyOnResult is bool &&
+             (!('liveTwod' in data) || (data.liveTwod is string && data.liveTwod.size() <= 12)) &&
+             (!('liveSet' in data) || (data.liveSet is string && data.liveSet.size() <= 32)) &&
+             (!('liveVal' in data) || (data.liveVal is string && data.liveVal.size() <= 32)) &&
+             (!('liveUpdatedText' in data) || (data.liveUpdatedText is string && data.liveUpdatedText.size() <= 80)) &&
+             (!('m1201Set' in data) || (data.m1201Set is string && data.m1201Set.size() <= 32)) &&
+             (!('m1201Val' in data) || (data.m1201Val is string && data.m1201Val.size() <= 32)) &&
+             (!('m1201Twod' in data) || (data.m1201Twod is string && data.m1201Twod.size() <= 12)) &&
+             (!('e430Set' in data) || (data.e430Set is string && data.e430Set.size() <= 32)) &&
+             (!('e430Val' in data) || (data.e430Val is string && data.e430Val.size() <= 32)) &&
+             (!('e430Twod' in data) || (data.e430Twod is string && data.e430Twod.size() <= 12)) &&
+             (!('am930Modern' in data) || (data.am930Modern is string && data.am930Modern.size() <= 16)) &&
+             (!('am930Internet' in data) || (data.am930Internet is string && data.am930Internet.size() <= 16)) &&
+             (!('pm200Modern' in data) || (data.pm200Modern is string && data.pm200Modern.size() <= 16)) &&
+             (!('pm200Internet' in data) || (data.pm200Internet is string && data.pm200Internet.size() <= 16)) &&
+             (!('presentPakokku' in data) || (data.presentPakokku is string && data.presentPakokku.size() <= 1500)) &&
+             (!('presentDailyCard' in data) || (data.presentDailyCard is string && data.presentDailyCard.size() <= 1500)) &&
+             (!('presentWeeklyCard' in data) || (data.presentWeeklyCard is string && data.presentWeeklyCard.size() <= 1500)) &&
+             (!('presentThaiCard' in data) || (data.presentThaiCard is string && data.presentThaiCard.size() <= 1500)) &&
+             (!('presentAtakeCard' in data) || (data.presentAtakeCard is string && data.presentAtakeCard.size() <= 1500)) &&
+             (!('lastNotificationTitle' in data) || (data.lastNotificationTitle is string && data.lastNotificationTitle.size() <= 120)) &&
+             (!('lastNotificationBody' in data) || (data.lastNotificationBody is string && data.lastNotificationBody.size() <= 400)) &&
+             (!('lastNotificationNonce' in data) || (data.lastNotificationNonce is int && data.lastNotificationNonce >= 0)) &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLotteryCalendarDoc(data) {
+      return data.keys().hasAll(['docType', 'year', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['docType', 'year', 'month', 'days', 'months', 'updatedBy', 'updatedAt']) &&
+             data.docType in ['2d_month', '3d_year'] &&
+             data.year is int && data.year >= 2020 && data.year <= 2040 &&
+             (!('month' in data) || (data.month is int && data.month >= 1 && data.month <= 12)) &&
+             (!('days' in data) || (data.days is map && data.days.size() <= 32)) &&
+             (!('months' in data) || (data.months is map && data.months.size() <= 13)) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -640,12 +697,12 @@ service cloud.firestore {
     match /matches/{matchId} {
       allow get: if isSignedIn() && isValidId(matchId) && (isActiveAdmin() || resource.data.visibility == 'public');
       allow list: if isSignedIn() && (isActiveAdmin() || resource.data.visibility == 'public');
-      allow create: if hasAdminPerm('canManageBoard') &&
+      allow create: if (hasAdminPerm('canManageBoard') || hasAdminPerm('canManageBoardSheet')) &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().keys().hasAll(['league', 'homeTeam', 'awayTeam', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'createdBy', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['league', 'homeTeam', 'awayTeam', 'homeLogoUrl', 'awayLogoUrl', 'kickoffLabel', 'handicapLine', 'goalLine', 'bodyOdds', 'goalOdds', 'win1Odds', 'drawOdds', 'win2Odds', 'overOdds', 'underOdds', 'status', 'homeScore', 'awayScore', 'visibility', 'externalId', 'matchDate', 'kickoffEpochMs', 'liveClock', 'boardSource', 'oneExpressKyay', 'fiveFiveFiveKyay', 'autoUpdatedAtMs', 'createdBy', 'createdAt', 'updatedAt']);
-      allow update: if hasAdminPerm('canManageBoard') &&
+      allow update: if (hasAdminPerm('canManageBoard') || hasAdminPerm('canManageBoardSheet')) &&
                        isValidId(matchId) &&
                        isValidMatch(incoming()) &&
                        incoming().createdBy == existing().createdBy &&
@@ -825,19 +882,32 @@ service cloud.firestore {
     }
 
     match /app_settings/{settingId} {
-      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config', 'app_update', 'system_config', 'security_config', 'branding_config', 'mini_game_control'];
+      allow get: if isSignedIn() && settingId in ['wallet_config', 'board_config', 'betting_config', 'app_update', 'system_config', 'security_config', 'branding_config', 'mini_game_control', 'lottery_2d3d_config'];
       allow list: if isSignedIn();
       allow create, update: if isActiveAdmin() && (
                               (settingId == 'wallet_config' && hasAdminPerm('canEditWalletRates') && isValidWalletConfig(incoming())) ||
-                              (settingId == 'board_config' && hasAdminPerm('canManageBoard') && isValidBoardConfig(incoming())) ||
+                              (settingId == 'board_config' && (hasAdminPerm('canManageBoard') || hasAdminPerm('canManageBoardSheet')) && isValidBoardConfig(incoming())) ||
                               (settingId == 'betting_config' && hasAdminPerm('canEditGameConfig') && isValidBettingConfig(incoming())) ||
                               (settingId == 'app_update' && hasAdminPerm('canEditGameConfig') && isValidAppUpdateConfig(incoming())) ||
                               (settingId == 'system_config' && hasAdminPerm('canEditGameConfig') && isValidSystemGameConfig(incoming())) ||
                               (settingId == 'security_config' && isOwnerAdmin() && isValidSecurityConfig(incoming())) ||
                               (settingId == 'branding_config' && isOwnerAdmin() && isValidBrandingConfig(incoming())) ||
-                              (settingId == 'mini_game_control' && isOwnerAdmin() && isValidMiniGameControlConfig(incoming()))
+                              (settingId == 'mini_game_control' && isOwnerAdmin() && isValidMiniGameControlConfig(incoming())) ||
+                              (settingId == 'lottery_2d3d_config' && hasAdminPerm('canManage2D3DRoom') && isValidLottery2D3DConfig(incoming()))
                             );
       allow delete: if false;
+    }
+
+    match /lottery_calendar/{docId} {
+      allow get: if isSignedIn() && isValidId(docId);
+      allow list: if isSignedIn();
+      allow create, update: if isSignedIn() &&
+                               isValidId(docId) &&
+                               hasAdminPerm('canManage2D3DRoom') &&
+                               isValidLotteryCalendarDoc(incoming());
+      allow delete: if isSignedIn() &&
+                       isValidId(docId) &&
+                       (isOwnerAdmin() || hasAdminPerm('canManage2D3DRoom'));
     }
 
     match /direct_messages/{msgId} {

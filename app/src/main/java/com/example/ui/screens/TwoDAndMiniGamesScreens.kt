@@ -123,6 +123,7 @@ fun TwoDLotteryScreen(
     balanceKs: Long,
     systemGameConfig: SystemGameConfig,
     busy: Boolean,
+    embeddedInHub: Boolean = false,
     onRefreshLive2D: () -> Unit,
     onBack: () -> Unit,
     onSubmit2DOrder: (
@@ -169,14 +170,9 @@ fun TwoDLotteryScreen(
         (0..99).map { it.toString().padStart(2, '0') }.chunked(10)
     }
 
-    Scaffold(
-        containerColor = DeepPitchBg,
-        topBar = { SubScreenTopBar(title = "နှစ်လုံးထီ (2D)", onBack = onBack) }
-    ) { padding ->
+    val contentBody: @Composable (Modifier) -> Unit = { containerMod ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = containerMod.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -536,6 +532,19 @@ fun TwoDLotteryScreen(
                     }
                 }
             }
+        }
+    }
+
+    if (embeddedInHub) {
+        contentBody(Modifier)
+    } else {
+        Scaffold(
+            containerColor = DeepPitchBg,
+            topBar = {
+                SubScreenTopBar(title = "၂လုံးထီ (2D)", onBack = onBack)
+            }
+        ) { padding ->
+            contentBody(Modifier.padding(padding))
         }
     }
 }

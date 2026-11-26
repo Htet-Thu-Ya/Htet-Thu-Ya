@@ -617,7 +617,8 @@ fun AdminExpressBoardTab(
     onDeleteMatch: (String) -> Unit,
     onSaveSheetUrl: (String) -> Unit = {},
     onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
-    onImportCsvText: (String, String) -> Unit = { _, _ -> }
+    onImportCsvText: (String, String) -> Unit = { _, _ -> },
+    onOpenSheetTable: (() -> Unit)? = null
 ) {
     val isOneExpress = boardMode == "one_express"
     val boardTitle = if (isOneExpress) "1xBET ဘောလုံးပွဲကြေး" else "555 Mix ဘောလုံးပွဲကြေး"
@@ -940,6 +941,21 @@ fun AdminExpressBoardTab(
                     Text("Google Sheet / Excel", color = accent, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
+            if (onOpenSheetTable != null) {
+                OutlinedButton(
+                    onClick = onOpenSheetTable,
+                    enabled = !busy,
+                    border = BorderStroke(1.dp, accent.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("open_sheet_table_from_$boardMode")
+                ) {
+                    Icon(Icons.Default.TableChart, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("App အတွင်း A–P Sheet ဇယားဖြင့် ပြင်ရန်", color = accent, fontWeight = FontWeight.Bold)
+                }
+            }
         }
 
         // Matches List Hide Bar
@@ -1202,6 +1218,7 @@ fun MatchSheetSyncDialog(
     var sheetUrlInput by remember(boardConfig.googleSheetCsvUrl) { mutableStateOf(boardConfig.googleSheetCsvUrl) }
     var csvTextInput by remember(boardMode) { mutableStateOf("") }
     val exportedCsv = remember(matchesToExport) { MatchSheetCsvCodec.exportToCsv(matchesToExport) }
+    val exportedMyanmarSheetCsv = remember(matchesToExport) { MatchSheetCsvCodec.exportToMyanmarSheetCsv(matchesToExport) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1212,27 +1229,38 @@ fun MatchSheetSyncDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "၁) လက်ရှိပွဲစဉ် CSV ကို Copy ကူး၍ Google Sheet / Excel ထဲ Paste လုပ်ပြီး လွယ်ကူစွာ ပြင်ဆင်နိုင်ပါသည်။",
+                    text = "၁) လက်ရှိပွဲစဉ် A–P 16-Col CSV ကို Copy ကူး၍ Google Sheet / Excel ထဲ Paste လုပ်ပြီး လွယ်ကူစွာ ပြင်ဆင်နိုင်ပါသည်။",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
-                            clipboard.setText(AnnotatedString(exportedCsv))
-                            Toast.makeText(context, "ပွဲစဉ် ${matchesToExport.size} ပွဲ CSV Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                            clipboard.setText(AnnotatedString(exportedMyanmarSheetCsv))
+                            Toast.makeText(context, "A–P ဇယား (${matchesToExport.size} ပွဲ) CSV Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.weight(1f).testTag("sheet_copy_export_csv_$boardMode")
+                        modifier = Modifier.weight(1f).testTag("sheet_copy_ap_csv_$boardMode")
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("CSV Copy (${matchesToExport.size})", maxLines = 1)
+                        Text("A–P Copy (${matchesToExport.size})", maxLines = 1)
                     }
                     OutlinedButton(
-                        onClick = { csvTextInput = exportedCsv },
+                        onClick = { csvTextInput = exportedMyanmarSheetCsv },
                         modifier = Modifier.weight(1f).testTag("sheet_load_current_csv_$boardMode")
                     ) {
-                        Text("အောက်တွင်ထည့်", maxLines = 1)
+                        Text("A–P ထည့်", maxLines = 1)
                     }
+                }
+                OutlinedButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(exportedCsv))
+                        Toast.makeText(context, "Standard CSV (${matchesToExport.size} ပွဲ) Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("sheet_copy_export_csv_$boardMode")
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Standard CSV Copy (${matchesToExport.size})", maxLines = 1)
                 }
 
                 HorizontalDivider()

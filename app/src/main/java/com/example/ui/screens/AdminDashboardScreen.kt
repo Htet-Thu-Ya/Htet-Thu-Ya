@@ -102,9 +102,14 @@ import com.example.data.model.BrandingConfig
 import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
 import com.example.data.model.LedgerTransaction
+import com.example.data.model.Live2DStatus
+import com.example.data.model.Lottery2D3DControlConfig
+import com.example.data.model.Lottery2DDayRecord
+import com.example.data.model.Lottery3DMonthEntry
 import com.example.data.model.LotteryDraw
 import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
+import com.example.data.model.OneXBetOddsSpec
 import com.example.data.model.PaymentAccount
 import com.example.data.model.SecurityConfig
 import com.example.data.model.SportMatch
@@ -146,6 +151,8 @@ private enum class AdminTabKey {
     BOARD,
     ONE_EXPRESS,
     FIVE_FIVE_FIVE,
+    SHEET_TABLE,
+    LOTTERY_2D3D_ROOM,
     MINI_GAMES,
     CUSTOMERS,
     FINANCE,
@@ -188,6 +195,8 @@ fun AdminDashboardScreen(
     securityConfig: SecurityConfig = SecurityConfig(),
     brandingConfig: BrandingConfig = BrandingConfig(),
     miniGameControlConfig: MiniGameControlConfig = MiniGameControlConfig(),
+    live2DStatus: Live2DStatus? = null,
+    lottery2D3DConfig: Lottery2D3DControlConfig = Lottery2D3DControlConfig(),
     currentPublicIp: String? = null,
     busy: Boolean,
     onSwitchToCustomer: () -> Unit,
@@ -207,6 +216,7 @@ fun AdminDashboardScreen(
     onClearProcessedWalletRequests: (List<String>) -> Unit,
     onEditTransaction: (String, String, Long, String, Boolean) -> Unit = { _, _, _, _, _ -> },
     onDeleteTransaction: (String) -> Unit = {},
+    onClearAllTransactions: (List<String>) -> Unit = {},
     onSaveWalletConfig: (Double, String, Double, String) -> Unit,
     onSaveBettingConfig: (Double, String, Boolean) -> Unit,
     onToggleAutoAcceptOrders: (Boolean) -> Unit = {},
@@ -243,6 +253,12 @@ fun AdminDashboardScreen(
     onSaveBoardSheetUrl: (String) -> Unit = {},
     onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
     onImportCsvText: (String, String) -> Unit = { _, _ -> },
+    onUpdateMatchFromSheetRow: (SportMatch, String, Long, Long, String, String, String, String, String, String, Double, Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    onSync2D3DFromApiNow: () -> Unit = {},
+    onSaveLottery2D3DConfig: (Lottery2D3DControlConfig) -> Unit = {},
+    onTriggerManual2D3DNotification: (String, String) -> Unit = { _, _ -> },
+    onSave2DCalendarDay: (Int, Int, String, Lottery2DDayRecord) -> Unit = { _, _, _, _ -> },
+    onSave3DCalendarMonth: (Int, String, Lottery3DMonthEntry) -> Unit = { _, _, _ -> },
     onCreateAdminInvite: (label: String, assignedEmail: String, initialPin: String, permissions: AdminPermissions) -> Unit,
     onToggleAdminInvite: (String, Boolean) -> Unit,
     onEditAdminInvite: (String, String, String, Boolean, String, String?, AdminPermissions) -> Unit = { _, _, _, _, _, _, _ -> },
@@ -263,7 +279,7 @@ fun AdminDashboardScreen(
     onDeleteDirectMessage: (String) -> Unit,
     onSendGroupMessage: (String) -> Unit,
     onDeleteGroupMessage: (String) -> Unit,
-    onSaveAppUpdateConfig: (Int, String, String, String, Boolean) -> Unit,
+    onSaveAppUpdateConfig: (Int, String, String, String, Boolean, String, String, String, String, String) -> Unit,
     onDeleteQualityReview: (String) -> Unit,
     onCallCustomer: (customerUid: String, customerName: String, callType: String) -> Unit = { _, _, _ -> }
 ) {
@@ -282,6 +298,12 @@ fun AdminDashboardScreen(
                 add(AdminTabKey.BOARD)
                 add(AdminTabKey.ONE_EXPRESS)
                 add(AdminTabKey.FIVE_FIVE_FIVE)
+            }
+            if (isOwnerAdmin || permissions.canManageBoard || permissions.canManageBoardSheet) {
+                add(AdminTabKey.SHEET_TABLE)
+            }
+            if (isOwnerAdmin || permissions.canManage2D3DRoom) {
+                add(AdminTabKey.LOTTERY_2D3D_ROOM)
             }
             if (isOwnerAdmin) {
                 add(AdminTabKey.MINI_GAMES)
@@ -449,6 +471,8 @@ fun AdminDashboardScreen(
                         AdminTabKey.BOARD -> "ပွဲစဉ် / ထီ" to "admin_tab_board"
                         AdminTabKey.ONE_EXPRESS -> "1xBET ကြေး" to "admin_tab_one_express"
                         AdminTabKey.FIVE_FIVE_FIVE -> "555 Mix ကြေး" to "admin_tab_five_five_five"
+                        AdminTabKey.SHEET_TABLE -> "Sheet ဇယား (A–P)" to "admin_tab_sheet_table"
+                        AdminTabKey.LOTTERY_2D3D_ROOM -> "2D/3D ထိန်းချုပ်ခန်း" to "admin_tab_2d3d_room"
                         AdminTabKey.MINI_GAMES -> "ဂိမ်းခန်းထိန်းချုပ်" to "admin_tab_mini_games"
                         AdminTabKey.CUSTOMERS -> "Customer (${users.size})" to "admin_tab_customers"
                         AdminTabKey.FINANCE -> "ဘဏ္ဍာရေး/Bank" to "admin_tab_finance"
@@ -578,7 +602,12 @@ fun AdminDashboardScreen(
                         onSeedSampleBoard = { onSeedSampleExpressBoard("one_express") },
                         onSaveNewMatch = onSaveNewMatch,
                         onUpdateMatchDetails = onUpdateMatchDetails,
-                        onDeleteMatch = onDeleteMatch
+                        onDeleteMatch = onDeleteMatch,
+                        onOpenSheetTable = {
+                            if (visibleTabs.contains(AdminTabKey.SHEET_TABLE)) {
+                                activeTabKey = AdminTabKey.SHEET_TABLE
+                            }
+                        }
                     )
                     AdminTabKey.FIVE_FIVE_FIVE -> AdminExpressBoardTab(
                         boardMode = "five_five_five",
@@ -597,7 +626,32 @@ fun AdminDashboardScreen(
                         onSeedSampleBoard = { onSeedSampleExpressBoard("five_five_five") },
                         onSaveNewMatch = onSaveNewMatch,
                         onUpdateMatchDetails = onUpdateMatchDetails,
-                        onDeleteMatch = onDeleteMatch
+                        onDeleteMatch = onDeleteMatch,
+                        onOpenSheetTable = {
+                            if (visibleTabs.contains(AdminTabKey.SHEET_TABLE)) {
+                                activeTabKey = AdminTabKey.SHEET_TABLE
+                            }
+                        }
+                    )
+                    AdminTabKey.SHEET_TABLE -> AdminMatchSheetTableTab(
+                        matches = matches,
+                        boardConfig = boardConfig,
+                        busy = busy,
+                        onSaveSheetUrl = onSaveBoardSheetUrl,
+                        onSyncMatchesFromSheet = onSyncMatchesFromSheet,
+                        onImportCsvText = onImportCsvText,
+                        onUpdateMatchFromSheetRow = onUpdateMatchFromSheetRow,
+                        onSaveNewMatch = onSaveNewMatch
+                    )
+                    AdminTabKey.LOTTERY_2D3D_ROOM -> Admin2D3DControlRoomTab(
+                        config = lottery2D3DConfig,
+                        live2DStatus = live2DStatus,
+                        busy = busy,
+                        onSyncFromApiNow = onSync2D3DFromApiNow,
+                        onSaveConfig = onSaveLottery2D3DConfig,
+                        onTriggerManualNoti = onTriggerManual2D3DNotification,
+                        onSave2DCalendarDay = onSave2DCalendarDay,
+                        onSave3DCalendarMonth = onSave3DCalendarMonth
                     )
                     AdminTabKey.MINI_GAMES -> AdminMiniGameControlTab(
                         config = miniGameControlConfig,
@@ -647,7 +701,8 @@ fun AdminDashboardScreen(
                         onEditWalletRequest = onEditWalletRequest,
                         onDeleteWalletRequest = onDeleteWalletRequest,
                         onEditTransaction = onEditTransaction,
-                        onDeleteTransaction = onDeleteTransaction
+                        onDeleteTransaction = onDeleteTransaction,
+                        onClearAllTransactions = onClearAllTransactions
                     )
                     AdminTabKey.SUB_ADMINS -> AdminSubAdminsTab(
                         currentUserId = currentUserId,
@@ -2412,6 +2467,7 @@ private fun AdminCustomersTab(
     var searchQuery by remember { mutableStateOf("") }
     var showHiddenUsers by remember { mutableStateOf(false) }
     var showCustomersList by remember { mutableStateOf(true) }
+    val expandedCustomerIds = remember { mutableStateMapOf<String, Boolean>() }
 
     val ordersByUser = remember(orders) { orders.groupBy { it.userId } }
     val hiddenCount = remember(users) { users.count { it.isHidden } }
@@ -2455,13 +2511,41 @@ private fun AdminCustomersTab(
                     onToggle = { showCustomersList = !showCustomersList },
                     testTag = "hide_bar_admin_customers"
                 )
-                if (hiddenCount > 0 || showHiddenUsers) {
-                    FilterChip(
-                        selected = showHiddenUsers,
-                        onClick = { showHiddenUsers = !showHiddenUsers },
-                        label = { Text(if (showHiddenUsers) "Hide ပါပြ ($hiddenCount)" else "Hide ($hiddenCount)") },
-                        modifier = Modifier.testTag("toggle_hidden_users_filter")
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (hiddenCount > 0 || showHiddenUsers) {
+                        FilterChip(
+                            selected = showHiddenUsers,
+                            onClick = { showHiddenUsers = !showHiddenUsers },
+                            label = { Text(if (showHiddenUsers) "Hide ပါပြ ($hiddenCount)" else "Hide ($hiddenCount)") },
+                            modifier = Modifier.testTag("toggle_hidden_users_filter")
+                        )
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
+                    if (showCustomersList && filteredUsers.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(
+                                onClick = {
+                                    filteredUsers.forEach { expandedCustomerIds[it.userId] = true }
+                                },
+                                modifier = Modifier.testTag("customers_expand_all_button")
+                            ) {
+                                Text("အားလုံးဖွင့်", color = ChampionshipGold, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(
+                                onClick = {
+                                    filteredUsers.forEach { expandedCustomerIds[it.userId] = false }
+                                },
+                                modifier = Modifier.testTag("customers_collapse_all_button")
+                            ) {
+                                Text("အားလုံးဝှက်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2471,25 +2555,30 @@ private fun AdminCustomersTab(
                 Text("Customer အကောင့် မတွေ့ရှိသေးပါ", color = Color(0xFFB4C8BE))
             }
         } else {
+            val defaultCustomerExpanded = filteredUsers.size <= 2
             items(filteredUsers, key = { it.userId }) { user ->
                 val userOrders = ordersByUser[user.userId].orEmpty()
                 val activeCount = userOrders.count { it.status in listOf("pending", "accepted") }
                 val custSummary = remember(user, userOrders) {
                     SettlementCalculator.summarizeCustomer(user.userId, user, userOrders)
                 }
+                val isExpanded = expandedCustomerIds[user.userId] ?: defaultCustomerExpanded
                 Card(
                     colors = CardDefaults.cardColors(containerColor = PearlCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onInspectCustomer(user) }
                         .testTag("customer_card_${user.userId}")
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Compact Per-Customer Hide Bar Header (always visible)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedCustomerIds[user.userId] = !isExpanded }
+                                .testTag("hide_bar_customer_${user.userId}"),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.Person, contentDescription = null, tint = PitchEmeraldDark)
@@ -2525,18 +2614,11 @@ private fun AdminCustomersTab(
                                             }
                                         }
                                     }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Default.Email,
-                                            contentDescription = null,
-                                            tint = PitchEmeraldDark,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(Modifier.width(4.dp))
+                                    if (!isExpanded) {
                                         Text(
-                                            text = user.email.ifBlank { "Gmail မသိမ်းဆည်းရသေးပါ" },
-                                            color = if (user.email.isNotBlank()) PitchEmeraldDark else InkMuted,
-                                            style = MaterialTheme.typography.bodyMedium,
+                                            text = "အော်ဒါ: ${userOrders.size} (လက်ရှိ $activeCount) • နှိပ်၍ အသေးစိတ်ကြည့်ရန်",
+                                            color = InkMuted,
+                                            style = MaterialTheme.typography.labelSmall,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -2544,16 +2626,6 @@ private fun AdminCustomersTab(
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = { onToggleHideUser(user) },
-                                    modifier = Modifier.testTag("toggle_hide_user_${user.userId}")
-                                ) {
-                                    Icon(
-                                        imageVector = if (user.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (user.isHidden) "Show Customer" else "Hide Customer",
-                                        tint = InkMuted
-                                    )
-                                }
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         formatKs(user.balanceKs),
@@ -2569,142 +2641,178 @@ private fun AdminCustomersTab(
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
-                            }
-                        }
-                        val netText = when {
-                            custSummary.customerNetKs > 0L -> "+${formatKs(custSummary.customerNetKs)} နိုင်"
-                            custSummary.customerNetKs < 0L -> "-${formatKs(kotlin.math.abs(custSummary.customerNetKs))} ရှုံး"
-                            else -> "0 Ks"
-                        }
-                        Text(
-                            "နိုင် ${custSummary.wonCount} (${formatKs(custSummary.totalWonPayoutKs)}) • ရှုံး ${custSummary.lostCount} (${formatKs(custSummary.totalLostStakeKs)}) • အသားတင်: $netText",
-                            color = if (custSummary.customerNetKs >= 0L) PitchEmeraldDark else AdminCrimson,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            "Active: ${formatKs(user.activeStakeKs)} • အော်ဒါ: ${userOrders.size} (လက်ရှိ $activeCount) • စာရင်းဝင်: ${formatTimestamp(user.createdAt)}",
-                            color = InkMuted,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Button(
-                                onClick = { onInspectCustomer(user) },
-                                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("inspect_customer_${user.userId}")
-                            ) {
-                                Text("လောင်းကြေး / အသေးစိတ်", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            if (canManageOrders) {
-                                Button(
-                                    onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
-                                    enabled = activeCount > 0 && !busy,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("customer_card_auto_settle_${user.userId}")
+                                IconButton(
+                                    onClick = { onToggleHideUser(user) },
+                                    modifier = Modifier.testTag("toggle_hide_user_${user.userId}")
                                 ) {
-                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Auto ရှင်း ($activeCount)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Icon(
+                                        imageVector = if (user.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (user.isHidden) "Show Customer" else "Hide Customer",
+                                        tint = InkMuted
+                                    )
                                 }
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isExpanded) "Collapse customer details" else "Expand customer details",
+                                    tint = PitchEmeraldDark,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                         }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (canAdjustBalance) {
-                                OutlinedButton(
-                                    onClick = { onOpenAdjustBalance(user) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("adjust_balance_${user.userId}")
-                                ) {
-                                    Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
-                                }
-                            }
-                            Button(
-                                onClick = { onOpenGiftPoints(user) },
-                                colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("gift_points_${user.userId}")
-                            ) {
-                                Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(15.dp))
+
+                        if (isExpanded) {
+                            HorizontalDivider(color = InkMuted.copy(alpha = 0.16f))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Email,
+                                    contentDescription = null,
+                                    tint = PitchEmeraldDark,
+                                    modifier = Modifier.size(14.dp)
+                                )
                                 Spacer(Modifier.width(4.dp))
-                                Text("ပွိုင့်", fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(
+                                    text = user.email.ifBlank { "Gmail မသိမ်းဆည်းရသေးပါ" },
+                                    color = if (user.email.isNotBlank()) PitchEmeraldDark else InkMuted,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            val netText = when {
+                                custSummary.customerNetKs > 0L -> "+${formatKs(custSummary.customerNetKs)} နိုင်"
+                                custSummary.customerNetKs < 0L -> "-${formatKs(kotlin.math.abs(custSummary.customerNetKs))} ရှုံး"
+                                else -> "0 Ks"
+                            }
+                            Text(
+                                "နိုင် ${custSummary.wonCount} (${formatKs(custSummary.totalWonPayoutKs)}) • ရှုံး ${custSummary.lostCount} (${formatKs(custSummary.totalLostStakeKs)}) • အသားတင်: $netText",
+                                color = if (custSummary.customerNetKs >= 0L) PitchEmeraldDark else AdminCrimson,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Active: ${formatKs(user.activeStakeKs)} • အော်ဒါ: ${userOrders.size} (လက်ရှိ $activeCount) • စာရင်းဝင်: ${formatTimestamp(user.createdAt)}",
+                                color = InkMuted,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Button(
+                                    onClick = { onInspectCustomer(user) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("inspect_customer_${user.userId}")
+                                ) {
+                                    Text("လောင်းကြေး / အသေးစိတ်", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (canManageOrders) {
+                                    Button(
+                                        onClick = { onAutoSettleCustomer(user.userId, user.displayName.ifBlank { "Member" }) },
+                                        enabled = activeCount > 0 && !busy,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E), contentColor = Color.White),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("customer_card_auto_settle_${user.userId}")
+                                    ) {
+                                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Auto ရှင်း ($activeCount)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (canAdjustBalance) {
+                                    OutlinedButton(
+                                        onClick = { onOpenAdjustBalance(user) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("adjust_balance_${user.userId}")
+                                    ) {
+                                        Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                                    }
+                                }
+                                Button(
+                                    onClick = { onOpenGiftPoints(user) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("gift_points_${user.userId}")
+                                ) {
+                                    Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("ပွိုင့်", fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+                                if (canChat) {
+                                    Button(
+                                        onClick = { onOpenChatWithCustomer(user) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("chat_customer_${user.userId}")
+                                    ) {
+                                        Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
+                                    }
+                                }
+                            }
+                            if (canLockUsers) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { onToggleLockUser(user) },
+                                        modifier = Modifier.weight(1f).testTag("toggle_lock_${user.userId}")
+                                    ) {
+                                        Icon(Icons.Default.Lock, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(if (user.isLocked) "Lock ပြန်ဖွင့်" else "Account ပိတ်", color = AdminCrimson, maxLines = 1)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onForceLogoutUser(user) },
+                                        modifier = Modifier.weight(1f).testTag("force_logout_${user.userId}")
+                                    ) {
+                                        Icon(Icons.Default.Logout, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Force Out", color = AdminCrimson, maxLines = 1)
+                                    }
+                                }
                             }
                             if (canChat) {
-                                Button(
-                                    onClick = { onOpenChatWithCustomer(user) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("chat_customer_${user.userId}")
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Icon(Icons.Default.Forum, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Chat", fontWeight = FontWeight.Bold, maxLines = 1)
-                                }
-                            }
-                        }
-                        if (canLockUsers) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                OutlinedButton(
-                                    onClick = { onToggleLockUser(user) },
-                                    modifier = Modifier.weight(1f).testTag("toggle_lock_${user.userId}")
-                                ) {
-                                    Icon(Icons.Default.Lock, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(if (user.isLocked) "Lock ပြန်ဖွင့်" else "Account ပိတ်", color = AdminCrimson, maxLines = 1)
-                                }
-                                OutlinedButton(
-                                    onClick = { onForceLogoutUser(user) },
-                                    modifier = Modifier.weight(1f).testTag("force_logout_${user.userId}")
-                                ) {
-                                    Icon(Icons.Default.Logout, contentDescription = null, tint = AdminCrimson, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Force Out", color = AdminCrimson, maxLines = 1)
-                                }
-                            }
-                        }
-                        if (canChat) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "voice")
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("customer_voice_call_${user.userId}")
-                                ) {
-                                    Icon(Icons.Default.Call, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Voice Call", color = PitchEmeraldDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "video")
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("customer_video_call_${user.userId}")
-                                ) {
-                                    Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF0369A1), modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Video Call", color = Color(0xFF0369A1), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    OutlinedButton(
+                                        onClick = {
+                                            onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "voice")
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("customer_voice_call_${user.userId}")
+                                    ) {
+                                        Icon(Icons.Default.Call, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Voice Call", color = PitchEmeraldDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            onCallCustomer(user.userId, user.displayName.ifBlank { "Member" }, "video")
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("customer_video_call_${user.userId}")
+                                    ) {
+                                        Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF0369A1), modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Video Call", color = Color(0xFF0369A1), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }

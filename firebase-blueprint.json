@@ -328,10 +328,64 @@
         "downloadUrl": { "type": "string" },
         "releaseNotes": { "type": "string" },
         "forceUpdate": { "type": "boolean" },
+        "bannerTitle": { "type": "string" },
+        "bannerSubtitle": { "type": "string" },
+        "dialogTitle": { "type": "string" },
+        "installButtonLabel": { "type": "string" },
+        "laterButtonLabel": { "type": "string" },
         "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["latestVersionCode", "latestVersionName", "downloadUrl", "releaseNotes", "forceUpdate", "updatedBy", "updatedAt"]
+    },
+    "Lottery2D3DControlConfig": {
+      "title": "Lottery2D3DControlConfig",
+      "description": "Admin-controlled automatic or manual 2D/3D live results, present cards, and custom notification trigger.",
+      "type": "object",
+      "properties": {
+        "autoMode": { "type": "boolean" },
+        "autoNotifyOnResult": { "type": "boolean" },
+        "liveTwod": { "type": "string" },
+        "liveSet": { "type": "string" },
+        "liveVal": { "type": "string" },
+        "liveUpdatedText": { "type": "string" },
+        "m1201Set": { "type": "string" },
+        "m1201Val": { "type": "string" },
+        "m1201Twod": { "type": "string" },
+        "e430Set": { "type": "string" },
+        "e430Val": { "type": "string" },
+        "e430Twod": { "type": "string" },
+        "am930Modern": { "type": "string" },
+        "am930Internet": { "type": "string" },
+        "pm200Modern": { "type": "string" },
+        "pm200Internet": { "type": "string" },
+        "presentPakokku": { "type": "string" },
+        "presentDailyCard": { "type": "string" },
+        "presentWeeklyCard": { "type": "string" },
+        "presentThaiCard": { "type": "string" },
+        "presentAtakeCard": { "type": "string" },
+        "lastNotificationTitle": { "type": "string" },
+        "lastNotificationBody": { "type": "string" },
+        "lastNotificationNonce": { "type": "integer" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["autoMode", "autoNotifyOnResult", "updatedBy", "updatedAt"]
+    },
+    "LotteryCalendarDoc": {
+      "title": "LotteryCalendarDoc",
+      "description": "Monthly 2D calendar (2d_YYYY_MM) or yearly 3D calendar (3d_YYYY) archive managed in the 2D/3D Control Room.",
+      "type": "object",
+      "properties": {
+        "docType": { "type": "string", "enum": ["2d_month", "3d_year"] },
+        "year": { "type": "integer" },
+        "month": { "type": "integer" },
+        "days": { "type": "object" },
+        "months": { "type": "object" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["docType", "year", "updatedBy", "updatedAt"]
     },
     "SystemGameConfig": {
       "title": "SystemGameConfig",
@@ -578,6 +632,14 @@
     "/app_settings/mini_game_control": {
       "schema": { "$ref": "#/entities/MiniGameControlConfig" },
       "description": "Main Admin customizable Dice & 6-Animal payout multipliers, daily quotas, and outcome directives."
+    },
+    "/app_settings/lottery_2d3d_config": {
+      "schema": { "$ref": "#/entities/Lottery2D3DControlConfig" },
+      "description": "2D/3D Control Room settings for automatic/manual 2D results, Present cards, and notifications."
+    },
+    "/lottery_calendar/{docId}": {
+      "schema": { "$ref": "#/entities/LotteryCalendarDoc" },
+      "description": "2D monthly and 3D yearly result archives."
     },
     "/direct_messages/{msgId}": {
       "schema": { "$ref": "#/entities/DirectChatMessage" },

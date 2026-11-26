@@ -485,6 +485,7 @@ fun ThreeDLotteryScreen(
     balanceKs: Long,
     systemGameConfig: SystemGameConfig = SystemGameConfig(),
     busy: Boolean,
+    embeddedInHub: Boolean = false,
     onBack: () -> Unit,
     onSubmit3DOrder: (
         selections: List<String>,
@@ -530,16 +531,9 @@ fun ThreeDLotteryScreen(
         totalStake in minAllowedStake..maxAllowedStake &&
         totalStake <= balanceKs
 
-    Scaffold(
-        containerColor = DeepPitchBg,
-        topBar = {
-            SubScreenTopBar(title = "သုံးလုံးထီ (3D)", onBack = onBack)
-        }
-    ) { padding ->
+    val contentBody: @Composable (Modifier) -> Unit = { containerMod ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = containerMod.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -771,6 +765,19 @@ fun ThreeDLotteryScreen(
                     }
                 }
             }
+        }
+    }
+
+    if (embeddedInHub) {
+        contentBody(Modifier)
+    } else {
+        Scaffold(
+            containerColor = DeepPitchBg,
+            topBar = {
+                SubScreenTopBar(title = "သုံးလုံးထီ (3D)", onBack = onBack)
+            }
+        ) { padding ->
+            contentBody(Modifier.padding(padding))
         }
     }
 }

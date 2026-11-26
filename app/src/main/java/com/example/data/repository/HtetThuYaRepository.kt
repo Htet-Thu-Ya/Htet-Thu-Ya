@@ -24,6 +24,10 @@ import com.example.data.model.GroupChatMessage
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.LiveFootballFixture
+import com.example.data.model.Lottery2D3DControlConfig
+import com.example.data.model.Lottery2DDayRecord
+import com.example.data.model.Lottery3DMonthEntry
+import com.example.data.model.LotteryCalendarDoc
 import com.example.data.model.LotteryDraw
 import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
@@ -377,6 +381,33 @@ class HtetThuYaRepository(
                     } else null
                 }
                 .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeLottery2D3DConfig(userId: String): Flow<Lottery2D3DControlConfig> = flow {
+        val path = "app_settings/lottery_2d3d_config"
+        emitAll(
+            db.collection("app_settings").document("lottery_2d3d_config")
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(Lottery2D3DControlConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                            ?: Lottery2D3DControlConfig()
+                    } else Lottery2D3DControlConfig()
+                }
+                .wrapFirestoreCatch(OperationType.GET, path, userId)
+        )
+    }
+
+    fun observeLotteryCalendars(userId: String): Flow<List<LotteryCalendarDoc>> = flow {
+        val path = "lottery_calendar"
+        emitAll(
+            db.collection("lottery_calendar")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(LotteryCalendarDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .wrapFirestoreCatch(OperationType.LIST, path, userId)
         )
     }
 
@@ -2810,6 +2841,28 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun clearAllTransactions(txIds: List<String>): Result<Int> {
+        val path = "transactions"
+        return try {
+            requireUserId()
+            val validIds = txIds.filter { it.isNotBlank() && ID_REGEX.matches(it) }
+            if (validIds.isEmpty()) return Result.success(0)
+            validIds.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { id ->
+                    batch.delete(db.collection("transactions").document(id))
+                }
+                batch.commit().await()
+            }
+            Result.success(validIds.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun deleteAuditLog(logId: String): Result<Unit> {
         val path = "audit_logs/$logId"
         return try {
@@ -3829,12 +3882,220 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun updateMatchFromSheetRow(
+        match: SportMatch,
+        boardSource: String,
+        homeScore: Long,
+        awayScore: Long,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        win1Odds: Double,
+        drawOdds: Double,
+        win2Odds: Double,
+        overOdds: Double,
+        underOdds: Double,
+        bodyOdds: Double,
+        goalOdds: Double
+    ): Result<Unit> {
+        val path = "matches/${match.id}"
+        return try {
+            requireUserId()
+            require(match.id.isNotBlank() && ID_REGEX.matches(match.id)) { "Invalid match ID" }
+            val safeSource = boardSource.takeIf { it in listOf("standard", "one_express", "five_five_five") } ?: "standard"
+            val cleanLeague = league.trim().ifBlank { match.league }.take(60)
+            val cleanHome = homeTeam.trim().ifBlank { match.homeTeam }.take(60)
+            val cleanAway = awayTeam.trim().ifBlank { match.awayTeam }.take(60)
+            val cleanKickoff = kickoffLabel.trim().ifBlank { match.kickoffLabel.ifBlank { "Tonight 21:00" } }.take(40)
+            val cleanHandicap = handicapLine.trim().ifBlank { "Home -0.5" }.take(40)
+            val cleanGoal = goalLine.trim().ifBlank { "2.5" }.take(20)
+            val cleanBody = bodyOdds.coerceIn(1.05, 50.0)
+            val cleanGoalOdds = goalOdds.coerceIn(1.05, 50.0)
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val mappedStatus = when {
+                cleanKickoff.equals("FT", ignoreCase = true) || cleanKickoff.equals("Finished", ignoreCase = true) -> "finished"
+                cleanKickoff.startsWith("LIVE", ignoreCase = true) -> "closed"
+                else -> match.status.ifBlank { "open" }
+            }
+            val oneExpKyay = if (safeSource == "one_express") {
+                com.example.data.betting.KyayFormatter.formatOneExpressKyay(cleanHandicap, cleanGoal, cleanBody, cleanGoalOdds).take(60)
+            } else match.oneExpressKyay
+            val fffKyay = if (safeSource == "five_five_five") {
+                com.example.data.betting.KyayFormatter.formatFiveFiveFiveKyay(cleanHandicap, cleanGoal, cleanBody, cleanGoalOdds).take(60)
+            } else match.fiveFiveFiveKyay
+
+            db.collection("matches").document(match.id).update(
+                mapOf(
+                    "boardSource" to safeSource,
+                    "homeScore" to homeScore.coerceIn(0L, 99L),
+                    "awayScore" to awayScore.coerceIn(0L, 99L),
+                    "league" to cleanLeague,
+                    "homeTeam" to cleanHome,
+                    "awayTeam" to cleanAway,
+                    "kickoffLabel" to cleanKickoff,
+                    "handicapLine" to cleanHandicap,
+                    "goalLine" to cleanGoal,
+                    "win1Odds" to win1Odds.coerceIn(1.01, 99.0),
+                    "drawOdds" to drawOdds.coerceIn(1.01, 99.0),
+                    "win2Odds" to win2Odds.coerceIn(1.01, 99.0),
+                    "overOdds" to overOdds.coerceIn(1.01, 99.0),
+                    "underOdds" to underOdds.coerceIn(1.01, 99.0),
+                    "bodyOdds" to cleanBody,
+                    "goalOdds" to cleanGoalOdds,
+                    "oneExpressKyay" to oneExpKyay,
+                    "fiveFiveFiveKyay" to fffKyay,
+                    "status" to mappedStatus,
+                    "autoUpdatedAtMs" to nowMs,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveLottery2D3DConfig(config: Lottery2D3DControlConfig): Result<Unit> {
+        val path = "app_settings/lottery_2d3d_config"
+        return try {
+            val adminUid = requireUserId()
+            db.collection("app_settings").document("lottery_2d3d_config").set(
+                mapOf(
+                    "autoMode" to config.autoMode,
+                    "autoNotifyOnResult" to config.autoNotifyOnResult,
+                    "liveTwod" to config.liveTwod.trim().take(12),
+                    "liveSet" to config.liveSet.trim().take(32),
+                    "liveVal" to config.liveVal.trim().take(32),
+                    "liveUpdatedText" to config.liveUpdatedText.trim().take(80),
+                    "m1201Set" to config.m1201Set.trim().take(32),
+                    "m1201Val" to config.m1201Val.trim().take(32),
+                    "m1201Twod" to config.m1201Twod.trim().take(12),
+                    "e430Set" to config.e430Set.trim().take(32),
+                    "e430Val" to config.e430Val.trim().take(32),
+                    "e430Twod" to config.e430Twod.trim().take(12),
+                    "am930Modern" to config.am930Modern.trim().take(16),
+                    "am930Internet" to config.am930Internet.trim().take(16),
+                    "pm200Modern" to config.pm200Modern.trim().take(16),
+                    "pm200Internet" to config.pm200Internet.trim().take(16),
+                    "presentPakokku" to config.presentPakokku.trim().take(1500),
+                    "presentDailyCard" to config.presentDailyCard.trim().take(1500),
+                    "presentWeeklyCard" to config.presentWeeklyCard.trim().take(1500),
+                    "presentThaiCard" to config.presentThaiCard.trim().take(1500),
+                    "presentAtakeCard" to config.presentAtakeCard.trim().take(1500),
+                    "lastNotificationTitle" to config.lastNotificationTitle.trim().take(120),
+                    "lastNotificationBody" to config.lastNotificationBody.trim().take(400),
+                    "lastNotificationNonce" to config.lastNotificationNonce.coerceAtLeast(0L),
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveLottery2DMonthDay(
+        year: Int,
+        month: Int,
+        dayKey: String,
+        record: Lottery2DDayRecord
+    ): Result<Unit> {
+        val safeYear = year.coerceIn(2020, 2040)
+        val safeMonth = month.coerceIn(1, 12)
+        val safeDay = dayKey.filter { it.isDigit() }.padStart(2, '0').take(2)
+        val docId = "2d_${safeYear}_${safeMonth.toString().padStart(2, '0')}"
+        val path = "lottery_calendar/$docId"
+        return try {
+            val adminUid = requireUserId()
+            require(safeDay.length == 2 && safeDay.toInt() in 1..31) { "ရက်စွဲ 01-31 အတွင်း ထည့်ပါ" }
+            val docRef = db.collection("lottery_calendar").document(docId)
+            val snap = docRef.get().await()
+            val existingDays = (snap.get("days") as? Map<*, *>)?.entries
+                ?.associate { (k, v) ->
+                    k.toString() to Lottery2DDayRecord.fromMap(v as? Map<*, *>).toMap()
+                }
+                ?.toMutableMap()
+                ?: mutableMapOf()
+            existingDays[safeDay] = record.toMap()
+            docRef.set(
+                mapOf(
+                    "docType" to "2d_month",
+                    "year" to safeYear,
+                    "month" to safeMonth,
+                    "days" to existingDays,
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveLottery3DYearMonth(
+        year: Int,
+        monthKey: String,
+        entry: Lottery3DMonthEntry
+    ): Result<Unit> {
+        val safeYear = year.coerceIn(2020, 2040)
+        val safeMonth = monthKey.filter { it.isDigit() }.padStart(2, '0').take(2)
+        val docId = "3d_$safeYear"
+        val path = "lottery_calendar/$docId"
+        return try {
+            val adminUid = requireUserId()
+            require(safeMonth.length == 2 && safeMonth.toInt() in 1..12) { "လ 01-12 အတွင်း ရွေးချယ်ပါ" }
+            val docRef = db.collection("lottery_calendar").document(docId)
+            val snap = docRef.get().await()
+            val existingMonths = (snap.get("months") as? Map<*, *>)?.entries
+                ?.associate { (k, v) ->
+                    k.toString() to Lottery3DMonthEntry.fromMap(v as? Map<*, *>).toMap()
+                }
+                ?.toMutableMap()
+                ?: mutableMapOf()
+            existingMonths[safeMonth] = entry.toMap()
+            docRef.set(
+                mapOf(
+                    "docType" to "3d_year",
+                    "year" to safeYear,
+                    "months" to existingMonths,
+                    "updatedBy" to adminUid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun saveAppUpdateConfig(
         latestVersionCode: Int,
         latestVersionName: String,
         downloadUrl: String,
         releaseNotes: String,
-        forceUpdate: Boolean
+        forceUpdate: Boolean,
+        bannerTitle: String = AppUpdateConfig.DEFAULT_BANNER_TITLE,
+        bannerSubtitle: String = AppUpdateConfig.DEFAULT_BANNER_SUBTITLE,
+        dialogTitle: String = AppUpdateConfig.DEFAULT_DIALOG_TITLE,
+        installButtonLabel: String = AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL,
+        laterButtonLabel: String = AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL
     ): Result<Unit> {
         val path = "app_settings/app_update"
         return try {
@@ -3853,6 +4114,11 @@ class HtetThuYaRepository(
                     "downloadUrl" to safeUrl,
                     "releaseNotes" to releaseNotes.trim().take(500),
                     "forceUpdate" to forceUpdate,
+                    "bannerTitle" to bannerTitle.trim().ifBlank { AppUpdateConfig.DEFAULT_BANNER_TITLE }.take(120),
+                    "bannerSubtitle" to bannerSubtitle.trim().ifBlank { AppUpdateConfig.DEFAULT_BANNER_SUBTITLE }.take(240),
+                    "dialogTitle" to dialogTitle.trim().ifBlank { AppUpdateConfig.DEFAULT_DIALOG_TITLE }.take(120),
+                    "installButtonLabel" to installButtonLabel.trim().ifBlank { AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL }.take(60),
+                    "laterButtonLabel" to laterButtonLabel.trim().ifBlank { AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL }.take(40),
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )

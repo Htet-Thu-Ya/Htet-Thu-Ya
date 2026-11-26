@@ -789,5 +789,95 @@ class AutoSettleAndPauseTest {
         assertTrue(com.example.data.network.FootballFeedService.fuzzyTeamMatches("Le Havre AC", "Le Havre"))
         assertFalse(com.example.data.network.FootballFeedService.fuzzyTeamMatches("Arsenal", "Chelsea"))
     }
+
+    @Test
+    fun matchSheetCsvCodec_myanmar16ColAtoPRoundTrip_supports1xBet555MixAndTypoHeaders() {
+        val tsvAtoP = listOf(
+            "\tအိမ်ရှင်ဂိုး\tဧည့်သည်ဂိုး\tလိဂ်\tအိမ်ရှင်အသင်း\tဧည့်သည်အသင်း\tကန်ချိန်\tဘော်ဒီကြေး\tဂိုးပေါင်း\tW1\tသရေ\tW2\tဂိုးပါ်\tဂိုးအောက်\tBody Odds\tGoal Odds",
+            "1xBET\t2\t1\tPremier League\tArsenal\tChelsea\t21:30\tHome -0.5\t2.5\t1.92\t3.40\t4.10\t1.88\t1.95\t1.95\t1.90",
+            "555 Mix\t0\t0\tLa Liga\tReal Madrid\tBarcelona\t02:30\tHome -1\t3.0\t2.05\t3.50\t3.60\t1.90\t1.90\t1.92\t1.92"
+        ).joinToString("\n")
+
+        val parsed = MatchSheetCsvCodec.parseCsvOrTsv(tsvAtoP, defaultBoardSource = "standard")
+        assertEquals(2, parsed.size)
+
+        assertEquals("one_express", parsed[0].boardSource)
+        assertEquals(2L, parsed[0].homeScore)
+        assertEquals(1L, parsed[0].awayScore)
+        assertEquals("Premier League", parsed[0].league)
+        assertEquals("Arsenal", parsed[0].homeTeam)
+        assertEquals("Chelsea", parsed[0].awayTeam)
+        assertEquals("21:30", parsed[0].kickoffLabel)
+        assertEquals("Home -0.5", parsed[0].handicapLine)
+        assertEquals("2.5", parsed[0].goalLine)
+        assertEquals(1.92, parsed[0].win1Odds ?: 0.0, 0.001)
+        assertEquals(3.40, parsed[0].drawOdds ?: 0.0, 0.001)
+        assertEquals(4.10, parsed[0].win2Odds ?: 0.0, 0.001)
+        assertEquals(1.88, parsed[0].overOdds ?: 0.0, 0.001)
+        assertEquals(1.95, parsed[0].underOdds ?: 0.0, 0.001)
+        assertEquals(1.95, parsed[0].bodyOdds, 0.001)
+        assertEquals(1.90, parsed[0].goalOdds, 0.001)
+
+        assertEquals("five_five_five", parsed[1].boardSource)
+        assertEquals("Real Madrid", parsed[1].homeTeam)
+        assertEquals("Barcelona", parsed[1].awayTeam)
+
+        val exportedCsv = MatchSheetCsvCodec.exportToMyanmarSheetCsv(
+            listOf(
+                SportMatch(
+                    id = "s1",
+                    league = "Premier League",
+                    homeTeam = "Arsenal",
+                    awayTeam = "Chelsea",
+                    kickoffLabel = "21:30",
+                    handicapLine = "Home -0.5",
+                    goalLine = "2.5",
+                    bodyOdds = 1.95,
+                    goalOdds = 1.90,
+                    win1Odds = 1.92,
+                    drawOdds = 3.40,
+                    win2Odds = 4.10,
+                    overOdds = 1.88,
+                    underOdds = 1.95,
+                    homeScore = 2L,
+                    awayScore = 1L,
+                    boardSource = "one_express"
+                )
+            )
+        )
+        assertTrue(exportedCsv.contains("1xBET"))
+        assertTrue(exportedCsv.contains("ဂိုးပေါ်"))
+        val reParsed = MatchSheetCsvCodec.parseCsvOrTsv(exportedCsv)
+        assertEquals(1, reParsed.size)
+        assertEquals("one_express", reParsed[0].boardSource)
+        assertEquals(1.88, reParsed[0].overOdds ?: 0.0, 0.001)
+        assertEquals(1.95, reParsed[0].bodyOdds, 0.001)
+    }
+
+    @Test
+    fun adminPermissions_andLotteryAndUpdateDefaults_roundTripCleanly() {
+        val perms = com.example.data.model.AdminPermissions(
+            canApproveWallet = true,
+            canManage2D3DRoom = true,
+            canManageBoardSheet = true
+        )
+        val restored = com.example.data.model.AdminPermissions.fromMap(perms.toMap())
+        assertTrue(restored.canApproveWallet)
+        assertTrue(restored.canManage2D3DRoom)
+        assertTrue(restored.canManageBoardSheet)
+        assertFalse(restored.canManageOrders)
+
+        val lotteryCfg = com.example.data.model.Lottery2D3DControlConfig()
+        assertTrue(lotteryCfg.autoMode)
+        assertTrue(lotteryCfg.presentPakokku.isNotBlank())
+        assertTrue(lotteryCfg.presentAtakeCard.isNotBlank())
+
+        val updateCfg = com.example.data.model.AppUpdateConfig()
+        assertFalse(updateCfg.bannerTitle.contains("Htet Thu Ya", ignoreCase = true))
+        assertFalse(updateCfg.bannerSubtitle.contains("Htet Thu Ya", ignoreCase = true))
+        assertFalse(updateCfg.dialogTitle.contains("Htet Thu Ya", ignoreCase = true))
+        assertTrue(updateCfg.installButtonLabel.isNotBlank())
+        assertTrue(updateCfg.laterButtonLabel.isNotBlank())
+    }
 }
 

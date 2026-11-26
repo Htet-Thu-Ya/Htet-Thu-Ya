@@ -335,7 +335,18 @@ fun AdminUpdateAndQualityTab(
     appUpdateConfig: AppUpdateConfig?,
     reviews: List<AppQualityReview>,
     busy: Boolean,
-    onSaveAppUpdateConfig: (Int, String, String, String, Boolean) -> Unit,
+    onSaveAppUpdateConfig: (
+        latestVersionCode: Int,
+        latestVersionName: String,
+        downloadUrl: String,
+        releaseNotes: String,
+        forceUpdate: Boolean,
+        bannerTitle: String,
+        bannerSubtitle: String,
+        dialogTitle: String,
+        installButtonLabel: String,
+        laterButtonLabel: String
+    ) -> Unit,
     onDeleteReview: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -346,6 +357,11 @@ fun AdminUpdateAndQualityTab(
     var versionCodeText by remember { mutableStateOf((appUpdateConfig?.latestVersionCode ?: BuildConfig.VERSION_CODE).toString()) }
     var versionNameText by remember { mutableStateOf(appUpdateConfig?.latestVersionName ?: BuildConfig.VERSION_NAME) }
     var downloadUrlText by remember { mutableStateOf(appUpdateConfig?.downloadUrl ?: AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL) }
+    var bannerTitleText by remember { mutableStateOf(appUpdateConfig?.bannerTitle ?: AppUpdateConfig.DEFAULT_BANNER_TITLE) }
+    var bannerSubtitleText by remember { mutableStateOf(appUpdateConfig?.bannerSubtitle ?: AppUpdateConfig.DEFAULT_BANNER_SUBTITLE) }
+    var dialogTitleText by remember { mutableStateOf(appUpdateConfig?.dialogTitle ?: AppUpdateConfig.DEFAULT_DIALOG_TITLE) }
+    var installButtonLabelText by remember { mutableStateOf(appUpdateConfig?.installButtonLabel ?: AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL) }
+    var laterButtonLabelText by remember { mutableStateOf(appUpdateConfig?.laterButtonLabel ?: AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL) }
     var releaseNotesText by remember {
         mutableStateOf(
             appUpdateConfig?.releaseNotes
@@ -368,6 +384,11 @@ fun AdminUpdateAndQualityTab(
             downloadUrlText = appUpdateConfig.downloadUrl
             releaseNotesText = appUpdateConfig.releaseNotes
             forceUpdate = appUpdateConfig.forceUpdate
+            bannerTitleText = appUpdateConfig.bannerTitle.ifBlank { AppUpdateConfig.DEFAULT_BANNER_TITLE }
+            bannerSubtitleText = appUpdateConfig.bannerSubtitle.ifBlank { AppUpdateConfig.DEFAULT_BANNER_SUBTITLE }
+            dialogTitleText = appUpdateConfig.dialogTitle.ifBlank { AppUpdateConfig.DEFAULT_DIALOG_TITLE }
+            installButtonLabelText = appUpdateConfig.installButtonLabel.ifBlank { AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL }
+            laterButtonLabelText = appUpdateConfig.laterButtonLabel.ifBlank { AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL }
         }
     }
 
@@ -625,6 +646,63 @@ fun AdminUpdateAndQualityTab(
                         }
                     }
                     OutlinedTextField(
+                        value = bannerTitleText,
+                        onValueChange = { bannerTitleText = it },
+                        label = { Text("Customer Banner ခေါင်းစဉ်") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_update_banner_title")
+                    )
+                    OutlinedTextField(
+                        value = bannerSubtitleText,
+                        onValueChange = { bannerSubtitleText = it },
+                        label = { Text("Customer Banner စာသားခွဲ") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_update_banner_subtitle")
+                    )
+                    OutlinedTextField(
+                        value = dialogTitleText,
+                        onValueChange = { dialogTitleText = it },
+                        label = { Text("Update Popup ခေါင်းစဉ်") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_update_dialog_title")
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = installButtonLabelText,
+                            onValueChange = { installButtonLabelText = it },
+                            label = { Text("Download ခလုတ်စာ") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).testTag("admin_update_install_label")
+                        )
+                        OutlinedTextField(
+                            value = laterButtonLabelText,
+                            onValueChange = { laterButtonLabelText = it },
+                            label = { Text("နောက်မှ ခလုတ်စာ") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).testTag("admin_update_later_label")
+                        )
+                    }
+                    OutlinedTextField(
                         value = releaseNotesText,
                         onValueChange = { releaseNotesText = it },
                         label = { Text("Customer ဆွဲဆောင်မည့် Update မှတ်စု") },
@@ -672,7 +750,18 @@ fun AdminUpdateAndQualityTab(
                     Button(
                         onClick = {
                             val code = (versionCodeText.toIntOrNull() ?: (BuildConfig.VERSION_CODE + 1)).coerceAtLeast(1)
-                            onSaveAppUpdateConfig(code, versionNameText, resolvedDirectUrl, releaseNotesText, forceUpdate)
+                            onSaveAppUpdateConfig(
+                                code,
+                                versionNameText,
+                                resolvedDirectUrl,
+                                releaseNotesText,
+                                forceUpdate,
+                                bannerTitleText,
+                                bannerSubtitleText,
+                                dialogTitleText,
+                                installButtonLabelText,
+                                laterButtonLabelText
+                            )
                         },
                         enabled = !busy,
                         colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),

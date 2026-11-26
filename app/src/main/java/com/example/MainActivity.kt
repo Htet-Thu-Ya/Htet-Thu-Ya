@@ -84,12 +84,14 @@ import com.example.ui.screens.ApkUpdatePromptDialog
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ChatHubScreen
 import com.example.ui.screens.CustomerHomeScreen
+import com.example.ui.screens.CustomerLotteryHubWrapper
 import com.example.ui.screens.CustomerRoute
 import com.example.ui.screens.DiceGameScreen
 import com.example.ui.screens.DragonTigerGameScreen
 import com.example.ui.screens.ExpressOddsOrderScreen
 import com.example.ui.screens.IncomingCallDialog
 import com.example.ui.screens.LeaderboardScreen
+import com.example.ui.screens.LotteryHubTab
 import com.example.ui.screens.LuckyWheelGameScreen
 import com.example.ui.screens.OrdersHistoryScreen
 import com.example.ui.screens.PointExchangeScreen
@@ -280,6 +282,10 @@ private fun AuthenticatedRoot(
 
     val brandingConfig by vm.brandingConfig.collectAsStateWithLifecycle()
     val miniGameControlConfig by vm.miniGameControlConfig.collectAsStateWithLifecycle()
+    val effectiveLive2DStatus by vm.effectiveLive2DStatus.collectAsStateWithLifecycle()
+    val lottery2D3DConfig by vm.lottery2D3DConfig.collectAsStateWithLifecycle()
+    val lotteryCalendars by vm.lotteryCalendars.collectAsStateWithLifecycle()
+    val api2DHistory by vm.api2DHistory.collectAsStateWithLifecycle()
     val supportAgents by vm.supportAgents.collectAsStateWithLifecycle()
     val allMiniGameRoundsState by vm.allMiniGameRounds.collectAsStateWithLifecycle()
     val allTransactionsState by vm.allTransactions.collectAsStateWithLifecycle()
@@ -467,6 +473,8 @@ private fun AuthenticatedRoot(
                             securityConfig = securityConfig,
                             brandingConfig = brandingConfig,
                             miniGameControlConfig = miniGameControlConfig,
+                            live2DStatus = effectiveLive2DStatus,
+                            lottery2D3DConfig = lottery2D3DConfig,
                             currentPublicIp = currentPublicIp,
                             busy = busy,
                             onSwitchToCustomer = { vm.setAdminMode(false) },
@@ -486,6 +494,7 @@ private fun AuthenticatedRoot(
                             onClearProcessedWalletRequests = vm::clearProcessedWalletRequests,
                             onEditTransaction = vm::editTransaction,
                             onDeleteTransaction = vm::deleteTransaction,
+                            onClearAllTransactions = vm::clearAllTransactions,
                             onSaveWalletConfig = vm::saveWalletConfig,
                             onSaveBettingConfig = { pct, basis, autoSettle ->
                                 vm.saveBettingConfig(pct, basis, autoSettle)
@@ -530,6 +539,12 @@ private fun AuthenticatedRoot(
                             onSaveBoardSheetUrl = vm::saveBoardSheetUrl,
                             onSyncMatchesFromSheet = vm::syncMatchesFromGoogleSheet,
                             onImportCsvText = vm::importMatchesFromCsvText,
+                            onUpdateMatchFromSheetRow = vm::updateMatchFromSheetRow,
+                            onSync2D3DFromApiNow = vm::sync2D3DFromApiNow,
+                            onSaveLottery2D3DConfig = vm::saveLottery2D3DConfig,
+                            onTriggerManual2D3DNotification = vm::triggerManual2D3DNotification,
+                            onSave2DCalendarDay = vm::save2DCalendarDay,
+                            onSave3DCalendarMonth = vm::save3DCalendarMonth,
                             onCreateAdminInvite = { label, email, pin, perms ->
                                 vm.createAdminInvite(label, email, pin, perms)
                             },
@@ -716,37 +731,162 @@ private fun AuthenticatedRoot(
                             }
                         )
                     }
-                    composable(CustomerRoute.TWO_D.name) {
-                        TwoDLotteryScreen(
-                            drawsState = drawsState,
-                            live2DStatus = live2DStatus,
-                            balanceKs = balanceKs,
-                            systemGameConfig = systemGameConfig,
-                            busy = busy,
+                    composable(CustomerRoute.LOTTERY_HUB.name) {
+                        val drawsList = (drawsState as? UiState.Success)?.data.orEmpty()
+                        CustomerLotteryHubWrapper(
+                            initialTab = LotteryHubTab.LIVE,
+                            initialBetType = if (!systemGameConfig.hideTwoD) "2d" else "3d",
+                            live2DStatus = effectiveLive2DStatus,
+                            lottery2D3DConfig = lottery2D3DConfig,
+                            lotteryCalendars = lotteryCalendars,
+                            api2DHistory = api2DHistory,
+                            draws = drawsList,
+                            hideTwoD = systemGameConfig.hideTwoD,
+                            hideThreeD = systemGameConfig.hideThreeD,
                             onRefreshLive2D = vm::refreshLive2DStatus,
+                            onOpenQualityRating = { navController.navigate(CustomerRoute.QUALITY.name) },
                             onBack = { navController.popBackStack() },
-                            onSubmit2DOrder = { sel, round, stake, mult ->
-                                vm.placeOrder("two_d", sel, emptyList(), round, stake, mult) {
-                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
-                                        popUpTo(ROUTE_HOME)
+                            twoDBetContent = {
+                                TwoDLotteryScreen(
+                                    drawsState = drawsState,
+                                    live2DStatus = effectiveLive2DStatus,
+                                    balanceKs = balanceKs,
+                                    systemGameConfig = systemGameConfig,
+                                    busy = busy,
+                                    embeddedInHub = true,
+                                    onRefreshLive2D = vm::refreshLive2DStatus,
+                                    onBack = { navController.popBackStack() },
+                                    onSubmit2DOrder = { sel, round, stake, mult ->
+                                        vm.placeOrder("two_d", sel, emptyList(), round, stake, mult) {
+                                            navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                                popUpTo(ROUTE_HOME)
+                                            }
+                                        }
                                     }
-                                }
+                                )
+                            },
+                            threeDBetContent = {
+                                ThreeDLotteryScreen(
+                                    drawsState = drawsState,
+                                    balanceKs = balanceKs,
+                                    systemGameConfig = systemGameConfig,
+                                    busy = busy,
+                                    embeddedInHub = true,
+                                    onBack = { navController.popBackStack() },
+                                    onSubmit3DOrder = { sel, round, stake, mult ->
+                                        vm.placeOrder("three_d", sel, emptyList(), round, stake, mult) {
+                                            navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                                popUpTo(ROUTE_HOME)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        )
+                    }
+                    composable(CustomerRoute.TWO_D.name) {
+                        val drawsList = (drawsState as? UiState.Success)?.data.orEmpty()
+                        CustomerLotteryHubWrapper(
+                            initialTab = LotteryHubTab.BET,
+                            initialBetType = "2d",
+                            live2DStatus = effectiveLive2DStatus,
+                            lottery2D3DConfig = lottery2D3DConfig,
+                            lotteryCalendars = lotteryCalendars,
+                            api2DHistory = api2DHistory,
+                            draws = drawsList,
+                            hideTwoD = systemGameConfig.hideTwoD,
+                            hideThreeD = systemGameConfig.hideThreeD,
+                            onRefreshLive2D = vm::refreshLive2DStatus,
+                            onOpenQualityRating = { navController.navigate(CustomerRoute.QUALITY.name) },
+                            onBack = { navController.popBackStack() },
+                            twoDBetContent = {
+                                TwoDLotteryScreen(
+                                    drawsState = drawsState,
+                                    live2DStatus = effectiveLive2DStatus,
+                                    balanceKs = balanceKs,
+                                    systemGameConfig = systemGameConfig,
+                                    busy = busy,
+                                    embeddedInHub = true,
+                                    onRefreshLive2D = vm::refreshLive2DStatus,
+                                    onBack = { navController.popBackStack() },
+                                    onSubmit2DOrder = { sel, round, stake, mult ->
+                                        vm.placeOrder("two_d", sel, emptyList(), round, stake, mult) {
+                                            navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                                popUpTo(ROUTE_HOME)
+                                            }
+                                        }
+                                    }
+                                )
+                            },
+                            threeDBetContent = {
+                                ThreeDLotteryScreen(
+                                    drawsState = drawsState,
+                                    balanceKs = balanceKs,
+                                    systemGameConfig = systemGameConfig,
+                                    busy = busy,
+                                    embeddedInHub = true,
+                                    onBack = { navController.popBackStack() },
+                                    onSubmit3DOrder = { sel, round, stake, mult ->
+                                        vm.placeOrder("three_d", sel, emptyList(), round, stake, mult) {
+                                            navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                                popUpTo(ROUTE_HOME)
+                                            }
+                                        }
+                                    }
+                                )
                             }
                         )
                     }
                     composable(CustomerRoute.THREE_D.name) {
-                        ThreeDLotteryScreen(
-                            drawsState = drawsState,
-                            balanceKs = balanceKs,
-                            systemGameConfig = systemGameConfig,
-                            busy = busy,
+                        val drawsList = (drawsState as? UiState.Success)?.data.orEmpty()
+                        CustomerLotteryHubWrapper(
+                            initialTab = LotteryHubTab.BET,
+                            initialBetType = "3d",
+                            live2DStatus = effectiveLive2DStatus,
+                            lottery2D3DConfig = lottery2D3DConfig,
+                            lotteryCalendars = lotteryCalendars,
+                            api2DHistory = api2DHistory,
+                            draws = drawsList,
+                            hideTwoD = systemGameConfig.hideTwoD,
+                            hideThreeD = systemGameConfig.hideThreeD,
+                            onRefreshLive2D = vm::refreshLive2DStatus,
+                            onOpenQualityRating = { navController.navigate(CustomerRoute.QUALITY.name) },
                             onBack = { navController.popBackStack() },
-                            onSubmit3DOrder = { sel, round, stake, mult ->
-                                vm.placeOrder("three_d", sel, emptyList(), round, stake, mult) {
-                                    navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
-                                        popUpTo(ROUTE_HOME)
+                            twoDBetContent = {
+                                TwoDLotteryScreen(
+                                    drawsState = drawsState,
+                                    live2DStatus = effectiveLive2DStatus,
+                                    balanceKs = balanceKs,
+                                    systemGameConfig = systemGameConfig,
+                                    busy = busy,
+                                    embeddedInHub = true,
+                                    onRefreshLive2D = vm::refreshLive2DStatus,
+                                    onBack = { navController.popBackStack() },
+                                    onSubmit2DOrder = { sel, round, stake, mult ->
+                                        vm.placeOrder("two_d", sel, emptyList(), round, stake, mult) {
+                                            navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                                popUpTo(ROUTE_HOME)
+                                            }
+                                        }
                                     }
-                                }
+                                )
+                            },
+                            threeDBetContent = {
+                                ThreeDLotteryScreen(
+                                    drawsState = drawsState,
+                                    balanceKs = balanceKs,
+                                    systemGameConfig = systemGameConfig,
+                                    busy = busy,
+                                    embeddedInHub = true,
+                                    onBack = { navController.popBackStack() },
+                                    onSubmit3DOrder = { sel, round, stake, mult ->
+                                        vm.placeOrder("three_d", sel, emptyList(), round, stake, mult) {
+                                            navController.navigate(CustomerRoute.ACTIVE_ORDERS.name) {
+                                                popUpTo(ROUTE_HOME)
+                                            }
+                                        }
+                                    }
+                                )
                             }
                         )
                     }

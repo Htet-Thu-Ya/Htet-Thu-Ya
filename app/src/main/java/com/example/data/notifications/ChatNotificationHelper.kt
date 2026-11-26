@@ -17,6 +17,8 @@ import com.example.R
 object ChatNotificationHelper {
     private const val CHANNEL_ID = "lotaya_chat_messages"
     private const val CHANNEL_NAME = "လိုတရ Chat Messages"
+    private const val CHANNEL_ID_2D3D = "lotaya_2d3d_results"
+    private const val CHANNEL_NAME_2D3D = "လိုတရ 2D / 3D ထီရလဒ် Noti"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -32,11 +34,53 @@ object ChatNotificationHelper {
                 }
                 mgr.createNotificationChannel(channel)
             }
+            if (mgr.getNotificationChannel(CHANNEL_ID_2D3D) == null) {
+                val lotteryChannel = NotificationChannel(
+                    CHANNEL_ID_2D3D,
+                    CHANNEL_NAME_2D3D,
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "2D (12:01 / 4:30 / Modern & Internet) နှင့် 3D ထီရလဒ် သီးသန့်အသိပေးချက်များ"
+                    enableVibration(true)
+                }
+                mgr.createNotificationChannel(lotteryChannel)
+            }
         }
     }
 
     fun showIncomingChatNotification(
         context: Context,
+        title: String,
+        body: String,
+        notificationId: Int
+    ) {
+        showNotificationOnChannel(
+            context = context,
+            channelId = CHANNEL_ID,
+            title = title,
+            body = body,
+            notificationId = notificationId
+        )
+    }
+
+    fun show2D3DNotification(
+        context: Context,
+        title: String,
+        body: String,
+        notificationId: Int
+    ) {
+        showNotificationOnChannel(
+            context = context,
+            channelId = CHANNEL_ID_2D3D,
+            title = title,
+            body = body,
+            notificationId = notificationId
+        )
+    }
+
+    private fun showNotificationOnChannel(
+        context: Context,
+        channelId: String,
         title: String,
         body: String,
         notificationId: Int
@@ -60,7 +104,7 @@ object ChatNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)

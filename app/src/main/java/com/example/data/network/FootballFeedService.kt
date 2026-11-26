@@ -5,6 +5,7 @@ import com.example.data.betting.KyayFormatter
 import com.example.data.model.GitHubReleaseInfo
 import com.example.data.model.Live2DStatus
 import com.example.data.model.LiveFootballFixture
+import com.example.data.model.Lottery2DDayRecord
 import com.example.data.util.MyanmarTimeUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -745,16 +746,63 @@ class FootballFeedService(
             val timeStr = live.optString("time").ifBlank { "" }
 
             var m1201 = "--"
+            var m1201Set = "--"
+            var m1201Val = "--"
             var e1630 = "--"
+            var e430Set = "--"
+            var e430Val = "--"
+            var am930Mod = "--"
+            var am930Int = "--"
+            var pm200Mod = "--"
+            var pm200Int = "--"
+
             val resultArr = root.optJSONArray("result")
             if (resultArr != null) {
                 for (i in 0 until resultArr.length()) {
                     val item = resultArr.optJSONObject(i) ?: continue
                     val openTime = item.optString("open_time")
-                    val r2d = item.optString("twod")
-                    if (openTime.contains("12:01") && r2d.isNotBlank()) m1201 = r2d
-                    if (openTime.contains("16:30") && r2d.isNotBlank()) e1630 = r2d
+                    val r2d = item.optString("twod").ifBlank { "--" }
+                    val rSet = item.optString("set").ifBlank { "--" }
+                    val rVal = item.optString("value").ifBlank { "--" }
+                    val mod = item.optString("modern", item.optString("modern_digit", "")).ifBlank { "--" }
+                    val intl = item.optString("internet", item.optString("internet_digit", "")).ifBlank { "--" }
+                    when {
+                        openTime.contains("12:01") -> {
+                            if (r2d != "--") m1201 = r2d
+                            if (rSet != "--") m1201Set = rSet
+                            if (rVal != "--") m1201Val = rVal
+                        }
+                        openTime.contains("16:30") || openTime.contains("4:30") -> {
+                            if (r2d != "--") e1630 = r2d
+                            if (rSet != "--") e430Set = rSet
+                            if (rVal != "--") e430Val = rVal
+                        }
+                        openTime.contains("9:30") -> {
+                            if (mod != "--") am930Mod = mod
+                            if (intl != "--") am930Int = intl
+                        }
+                        openTime.contains("14:00") || openTime.contains("2:00") -> {
+                            if (mod != "--") pm200Mod = mod
+                            if (intl != "--") pm200Int = intl
+                        }
+                    }
                 }
+            }
+
+            val holidayObj = root.optJSONObject("holiday")
+            val serverDate = root.optString("server_time", timeStr)
+            val nowMs = MyanmarTimeUtil.nowMs()
+            val cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Yangon")).apply {
+                timeInMillis = nowMs
+            }
+            val dayName = SimpleDateFormat("EEEE", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("Asia/Yangon")
+            }.format(Date(nowMs))
+            val dateLabel = SimpleDateFormat("MMM dd yyyy", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("Asia/Yangon")
+            }.format(Date(nowMs))
+            val updatedText = if (timeStr.isNotBlank()) timeStr else serverDate.ifBlank {
+                if (holidayObj != null) holidayObj.optString("name", "") else ""
             }
 
             Live2DStatus(
@@ -763,11 +811,93 @@ class FootballFeedService(
                 valueText = valStr,
                 liveTime = timeStr,
                 morning1201 = m1201,
-                evening430 = e1630
+                evening430 = e1630,
+                m1201Set = m1201Set,
+                m1201Val = m1201Val,
+                e430Set = e430Set,
+                e430Val = e430Val,
+                am930Modern = am930Mod,
+                am930Internet = am930Int,
+                pm200Modern = pm200Mod,
+                pm200Internet = pm200Int,
+                updatedAtText = updatedText,
+                dayLabel = dayName,
+                dateLabel = dateLabel.ifBlank {
+                    String.format(Locale.US, "%04d-%02d-%02d", cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
+                }
             )
         } catch (e: Exception) {
             Log.d(TAG, "2D live fetch skipped: ${e.message}")
             null
+        }
+    }
+
+    suspend fun fetch2DCalendarHistory(): Map<String, Lottery2DDayRecord> = withContext(Dispatchers.IO) {
+        try {
+            val body = httpGet("https://api.thaistock2d.com/2d_result") ?: return@withContext emptyMap()
+            val arr = org.json.JSONArray(body)
+            val out = LinkedHashMap<String, Lottery2DDayRecord>()
+            for (i in 0 until arr.length()) {
+                val dayObj = arr.optJSONObject(i) ?: continue
+                val dateKey = dayObj.optString("date").trim().take(10)
+                if (dateKey.length != 10) continue
+                val childArr = dayObj.optJSONArray("child") ?: continue
+                var m1201Set = "--"
+                var m1201Val = "--"
+                var m1201Twod = "--"
+                var e430Set = "--"
+                var e430Val = "--"
+                var e430Twod = "--"
+                var am930Mod = "--"
+                var am930Int = "--"
+                var pm200Mod = "--"
+                var pm200Int = "--"
+                for (j in 0 until childArr.length()) {
+                    val item = childArr.optJSONObject(j) ?: continue
+                    val t = item.optString("time")
+                    val set = item.optString("set").ifBlank { "--" }
+                    val value = item.optString("value").ifBlank { "--" }
+                    val twod = item.optString("twod").ifBlank { "--" }
+                    val mod = item.optString("modern", item.optString("modern_digit", "")).ifBlank { "--" }
+                    val intl = item.optString("internet", item.optString("internet_digit", "")).ifBlank { "--" }
+                    when {
+                        t.contains("12:01") -> {
+                            m1201Set = set
+                            m1201Val = value
+                            m1201Twod = twod
+                        }
+                        t.contains("16:30") || t.contains("4:30") -> {
+                            e430Set = set
+                            e430Val = value
+                            e430Twod = twod
+                        }
+                        t.contains("9:30") -> {
+                            if (mod != "--") am930Mod = mod
+                            if (intl != "--") am930Int = intl
+                        }
+                        t.contains("14:00") || t.contains("2:00") -> {
+                            if (mod != "--") pm200Mod = mod
+                            if (intl != "--") pm200Int = intl
+                        }
+                    }
+                }
+                out[dateKey] = Lottery2DDayRecord(
+                    m1201Set = m1201Set,
+                    m1201Val = m1201Val,
+                    m1201Twod = m1201Twod,
+                    e430Set = e430Set,
+                    e430Val = e430Val,
+                    e430Twod = e430Twod,
+                    am930Modern = am930Mod,
+                    am930Internet = am930Int,
+                    pm200Modern = pm200Mod,
+                    pm200Internet = pm200Int
+                )
+            }
+            out
+        } catch (e: Exception) {
+            Log.d(TAG, "2D history fetch skipped: ${e.message}")
+            emptyMap()
         }
     }
 

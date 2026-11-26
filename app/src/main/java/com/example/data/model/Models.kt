@@ -66,7 +66,9 @@ data class AdminPermissions(
     val canEditWalletRates: Boolean = false,
     val canEditGameConfig: Boolean = false,
     val canViewAllLogs: Boolean = false,
-    val canAdjustBalance: Boolean = false
+    val canAdjustBalance: Boolean = false,
+    val canManage2D3DRoom: Boolean = false,
+    val canManageBoardSheet: Boolean = false
 ) {
     fun toMap(): Map<String, Boolean> = mapOf(
         "canApproveWallet" to canApproveWallet,
@@ -78,7 +80,9 @@ data class AdminPermissions(
         "canEditWalletRates" to canEditWalletRates,
         "canEditGameConfig" to canEditGameConfig,
         "canViewAllLogs" to canViewAllLogs,
-        "canAdjustBalance" to canAdjustBalance
+        "canAdjustBalance" to canAdjustBalance,
+        "canManage2D3DRoom" to canManage2D3DRoom,
+        "canManageBoardSheet" to canManageBoardSheet
     )
 
     companion object {
@@ -92,7 +96,9 @@ data class AdminPermissions(
             canEditWalletRates = true,
             canEditGameConfig = true,
             canViewAllLogs = true,
-            canAdjustBalance = true
+            canAdjustBalance = true,
+            canManage2D3DRoom = true,
+            canManageBoardSheet = true
         )
 
         val PRESET_WALLET_CASHIER = AdminPermissions(
@@ -105,7 +111,8 @@ data class AdminPermissions(
             canManageOrders = true,
             canManageBoard = true,
             canViewUsers = true,
-            canChat = true
+            canChat = true,
+            canManageBoardSheet = true
         )
 
         val PRESET_SUPPORT_ONLY = AdminPermissions(
@@ -126,7 +133,9 @@ data class AdminPermissions(
                 canEditWalletRates = map["canEditWalletRates"] == true,
                 canEditGameConfig = map["canEditGameConfig"] == true,
                 canViewAllLogs = map["canViewAllLogs"] == true,
-                canAdjustBalance = map["canAdjustBalance"] == true
+                canAdjustBalance = map["canAdjustBalance"] == true,
+                canManage2D3DRoom = map["canManage2D3DRoom"] == true,
+                canManageBoardSheet = map["canManageBoardSheet"] == true
             )
         }
     }
@@ -557,7 +566,132 @@ data class Live2DStatus(
     val valueText: String = "--",
     val liveTime: String = "",
     val morning1201: String = "--",
-    val evening430: String = "--"
+    val evening430: String = "--",
+    val m1201Set: String = "--",
+    val m1201Val: String = "--",
+    val e430Set: String = "--",
+    val e430Val: String = "--",
+    val am930Modern: String = "--",
+    val am930Internet: String = "--",
+    val pm200Modern: String = "--",
+    val pm200Internet: String = "--",
+    val updatedAtText: String = "",
+    val dayLabel: String = "",
+    val dateLabel: String = ""
+)
+
+@Keep
+@IgnoreExtraProperties
+data class Lottery2D3DControlConfig(
+    val autoMode: Boolean = true,
+    val autoNotifyOnResult: Boolean = true,
+    val liveTwod: String = "--",
+    val liveSet: String = "--",
+    val liveVal: String = "--",
+    val liveUpdatedText: String = "",
+    val m1201Set: String = "--",
+    val m1201Val: String = "--",
+    val m1201Twod: String = "--",
+    val e430Set: String = "--",
+    val e430Val: String = "--",
+    val e430Twod: String = "--",
+    val am930Modern: String = "--",
+    val am930Internet: String = "--",
+    val pm200Modern: String = "--",
+    val pm200Internet: String = "--",
+    val presentPakokku: String = "ပခုက္ကူ ရွှေစွန်ညို • ယနေ့ အထူးဂဏန်းများကို Admin ထိန်းချုပ်ခန်းမှ အချိန်နှင့်တပြေးညီ တင်ဆက်ပေးနေပါသည်။",
+    val presentDailyCard: String = "နေ့တိုက်ကဒ် • မနက်ပိုင်း 12:01 နှင့် ညနေပိုင်း 4:30 အတွက် အထူးတွက်ချက်ထားသော နေ့တိုက်ဂဏန်းများ။",
+    val presentWeeklyCard: String = "တစ်ပတ်စာကဒ် • တစ်ပတ်လုံးအတွက် အားထားရသော အထူးပတ်သီးနှင့် ဘရိတ်ဂဏန်းစဉ်များ။",
+    val presentThaiCard: String = "Thai Cards (နေ့တိုက်ထိုင်းကဒ်) • ထိုင်းစတော့အိတ်ချိန်း (SET) နှင့် ချိတ်ဆက်တွက်ချက်ထားသော နေ့တိုက်ဂဏန်းများ။",
+    val presentAtakeCard: String = "Atake Cards (အတိတ်စာရွက်) • ယနေ့ 2D နှင့် လစဉ် 3D အတွက် ရွေးချယ်ထားသော အတိတ်နိမိတ်ကဒ်များ။",
+    val lastNotificationTitle: String = "",
+    val lastNotificationBody: String = "",
+    val lastNotificationNonce: Long = 0L,
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+data class Lottery2DDayRecord(
+    val m1201Set: String = "--",
+    val m1201Val: String = "--",
+    val m1201Twod: String = "--",
+    val e430Set: String = "--",
+    val e430Val: String = "--",
+    val e430Twod: String = "--",
+    val am930Modern: String = "--",
+    val am930Internet: String = "--",
+    val pm200Modern: String = "--",
+    val pm200Internet: String = "--"
+) {
+    fun toMap(): Map<String, String> = mapOf(
+        "m1201Set" to m1201Set,
+        "m1201Val" to m1201Val,
+        "m1201Twod" to m1201Twod,
+        "e430Set" to e430Set,
+        "e430Val" to e430Val,
+        "e430Twod" to e430Twod,
+        "am930Modern" to am930Modern,
+        "am930Internet" to am930Internet,
+        "pm200Modern" to pm200Modern,
+        "pm200Internet" to pm200Internet
+    )
+
+    companion object {
+        fun fromMap(map: Map<*, *>?): Lottery2DDayRecord {
+            if (map == null) return Lottery2DDayRecord()
+            return Lottery2DDayRecord(
+                m1201Set = (map["m1201Set"] as? String).orEmpty().ifBlank { "--" },
+                m1201Val = (map["m1201Val"] as? String).orEmpty().ifBlank { "--" },
+                m1201Twod = (map["m1201Twod"] as? String).orEmpty().ifBlank { "--" },
+                e430Set = (map["e430Set"] as? String).orEmpty().ifBlank { "--" },
+                e430Val = (map["e430Val"] as? String).orEmpty().ifBlank { "--" },
+                e430Twod = (map["e430Twod"] as? String).orEmpty().ifBlank { "--" },
+                am930Modern = (map["am930Modern"] as? String).orEmpty().ifBlank { "--" },
+                am930Internet = (map["am930Internet"] as? String).orEmpty().ifBlank { "--" },
+                pm200Modern = (map["pm200Modern"] as? String).orEmpty().ifBlank { "--" },
+                pm200Internet = (map["pm200Internet"] as? String).orEmpty().ifBlank { "--" }
+            )
+        }
+    }
+}
+
+data class Lottery3DMonthEntry(
+    val firstDay: String = "01",
+    val firstNum: String = "---",
+    val secondDay: String = "16",
+    val secondNum: String = "---"
+) {
+    fun toMap(): Map<String, String> = mapOf(
+        "firstDay" to firstDay,
+        "firstNum" to firstNum,
+        "secondDay" to secondDay,
+        "secondNum" to secondNum
+    )
+
+    companion object {
+        fun fromMap(map: Map<*, *>?): Lottery3DMonthEntry {
+            if (map == null) return Lottery3DMonthEntry()
+            return Lottery3DMonthEntry(
+                firstDay = (map["firstDay"] as? String).orEmpty().ifBlank { "01" },
+                firstNum = (map["firstNum"] as? String).orEmpty().ifBlank { "---" },
+                secondDay = (map["secondDay"] as? String).orEmpty().ifBlank { "16" },
+                secondNum = (map["secondNum"] as? String).orEmpty().ifBlank { "---" }
+            )
+        }
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class LotteryCalendarDoc(
+    @DocumentId val id: String = "",
+    val docType: String = "2d_month", // "2d_month" or "3d_year"
+    val year: Int = 2026,
+    val month: Int = 1,
+    val days: Map<String, Map<String, String>> = emptyMap(),
+    val months: Map<String, Map<String, String>> = emptyMap(),
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
 @Keep
@@ -568,12 +702,22 @@ data class AppUpdateConfig(
     val downloadUrl: String = DEFAULT_APK_DOWNLOAD_URL,
     val releaseNotes: String = "",
     val forceUpdate: Boolean = false,
+    val bannerTitle: String = DEFAULT_BANNER_TITLE,
+    val bannerSubtitle: String = DEFAULT_BANNER_SUBTITLE,
+    val dialogTitle: String = DEFAULT_DIALOG_TITLE,
+    val installButtonLabel: String = DEFAULT_INSTALL_BUTTON_LABEL,
+    val laterButtonLabel: String = DEFAULT_LATER_BUTTON_LABEL,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     companion object {
         const val DEFAULT_APK_DOWNLOAD_URL =
             "https://github.com/Htet-Thu-Ya/Htet-Thu-Ya/releases/download/latest/LoTaYa.apk"
+        const val DEFAULT_BANNER_TITLE = "✨ စနစ်သစ် အဆင်သင့်ဖြစ်ပါပြီ!"
+        const val DEFAULT_BANNER_SUBTITLE = "1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေး + Live ရလဒ် မြန်နှုန်းမြှင့်တင်ပြီး • နှိပ်၍ ချက်ချင်း Update ရယူပါ"
+        const val DEFAULT_DIALOG_TITLE = "🔥 လိုတရ ဗားရှင်းအသစ်"
+        const val DEFAULT_INSTALL_BUTTON_LABEL = "တိုက်ရိုက် Download & Install"
+        const val DEFAULT_LATER_BUTTON_LABEL = "နောက်မှ"
     }
 }
 
@@ -624,7 +768,12 @@ data class AvailableApkUpdate(
     val releaseNotes: String,
     val downloadUrl: String,
     val forceUpdate: Boolean,
-    val source: String
+    val source: String,
+    val bannerTitle: String = AppUpdateConfig.DEFAULT_BANNER_TITLE,
+    val bannerSubtitle: String = AppUpdateConfig.DEFAULT_BANNER_SUBTITLE,
+    val dialogTitle: String = AppUpdateConfig.DEFAULT_DIALOG_TITLE,
+    val installButtonLabel: String = AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL,
+    val laterButtonLabel: String = AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL
 )
 
 @Keep

@@ -137,13 +137,13 @@ fun ApkUpdateBanner(
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "✨ စနစ်သစ် ${update.versionLabel} အဆင်သင့်ဖြစ်ပါပြီ!",
+                        text = "${update.bannerTitle} (${update.versionLabel})",
                         color = ChampionshipGold,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေး + Live ရလဒ် မြန်နှုန်းမြှင့်တင်ပြီး • နှိပ်၍ ချက်ချင်း Update ရယူပါ",
+                        text = update.bannerSubtitle,
                         color = Color(0xFFD7EAE1),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 2,
@@ -205,7 +205,7 @@ fun ApkUpdatePromptDialog(
         },
         title = {
             Text(
-                text = "🔥 လိုတရ ဗားရှင်းအသစ် (${update.versionLabel})",
+                text = "${update.dialogTitle} (${update.versionLabel})",
                 fontWeight = FontWeight.Bold
             )
         },
@@ -357,7 +357,7 @@ fun ApkUpdatePromptDialog(
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (downloading) "ဒေါင်းနေသည်..." else "တိုက်ရိုက် Download & Install")
+                    Text(if (downloading) "ဒေါင်းနေသည်..." else update.installButtonLabel)
                 }
             }
         },
@@ -374,7 +374,7 @@ fun ApkUpdatePromptDialog(
                 }
                 if (!update.forceUpdate && !downloading) {
                     TextButton(onClick = onDismiss) {
-                        Text("နောက်မှ")
+                        Text(update.laterButtonLabel)
                     }
                 }
             }

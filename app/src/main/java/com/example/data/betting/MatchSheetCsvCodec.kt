@@ -29,6 +29,25 @@ data class SheetMatchRow(
 
 object MatchSheetCsvCodec {
 
+    val MYANMAR_SHEET_HEADERS = listOf(
+        "",             // A: boardSource (1xBET / 555 Mix / Standard)
+        "အိမ်ရှင်ဂိုး", // B: homeScore
+        "ဧည့်သည်ဂိုး", // C: awayScore
+        "လိဂ်",         // D: league
+        "အိမ်ရှင်အသင်း",// E: homeTeam
+        "ဧည့်သည်အသင်း",// F: awayTeam
+        "ကန်ချိန်",      // G: kickoffLabel
+        "ဘော်ဒီကြေး",   // H: handicapLine
+        "ဂိုးပေါင်း",    // I: goalLine
+        "W1",           // J: win1Odds
+        "သရေ",         // K: drawOdds
+        "W2",           // L: win2Odds
+        "ဂိုးပေါ်",      // M: overOdds (also accepts ဂိုးပါ်)
+        "ဂိုးအောက်",    // N: underOdds
+        "Body Odds",    // O: bodyOdds
+        "Goal Odds"     // P: goalOdds
+    )
+
     private val CSV_HEADERS = listOf(
         "league",
         "homeTeam",
@@ -51,6 +70,49 @@ object MatchSheetCsvCodec {
         "oneExpressKyay",
         "fiveFiveFiveKyay"
     )
+
+    fun formatBoardSourceDisplay(boardSource: String): String = when (boardSource.lowercase(Locale.US)) {
+        "one_express", "1xbet", "oneexpress", "1x" -> "1xBET"
+        "five_five_five", "555", "555mix", "mix", "555 mix" -> "555 Mix"
+        else -> "Standard"
+    }
+
+    fun parseBoardSource(raw: String, fallback: String = "standard"): String {
+        val low = raw.trim().lowercase(Locale.US)
+        return when {
+            low in listOf("one_express", "1xbet", "1x bet", "oneexpress", "1x") -> "one_express"
+            low in listOf("five_five_five", "555", "555mix", "555 mix", "mix") -> "five_five_five"
+            low == "standard" -> "standard"
+            else -> fallback
+        }
+    }
+
+    fun exportToMyanmarSheetCsv(matches: List<SportMatch>): String {
+        val sb = StringBuilder()
+        sb.appendLine(MYANMAR_SHEET_HEADERS.joinToString(",") { escapeCsv(it) })
+        matches.forEach { m ->
+            val cols = listOf(
+                formatBoardSourceDisplay(m.boardSource),
+                m.homeScore.toString(),
+                m.awayScore.toString(),
+                m.league,
+                m.homeTeam,
+                m.awayTeam,
+                m.kickoffLabel,
+                m.handicapLine,
+                m.goalLine,
+                fmtNum(m.win1Odds),
+                fmtNum(m.drawOdds),
+                fmtNum(m.win2Odds),
+                fmtNum(m.overOdds),
+                fmtNum(m.underOdds),
+                fmtNum(m.bodyOdds),
+                fmtNum(m.goalOdds)
+            )
+            sb.appendLine(cols.joinToString(",") { escapeCsv(it) })
+        }
+        return sb.toString()
+    }
 
     fun exportToCsv(matches: List<SportMatch>): String {
         val sb = StringBuilder()
@@ -93,13 +155,31 @@ object MatchSheetCsvCodec {
         val firstLine = lines.first().removePrefix("\uFEFF")
         val delimiter = if (firstLine.count { it == '\t' } > firstLine.count { it == ',' }) '\t' else ','
         val firstCells = parseDelimitedLine(firstLine, delimiter)
-        val hasHeader = firstCells.any { cell ->
-            val key = cell.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
-            key in setOf("league", "hometeam", "home", "awayteam", "away", "handicapline", "goalline", "status")
-        }
+        val knownHeaderTokens = setOf(
+            "league", "hometeam", "home", "awayteam", "away", "handicapline", "goalline", "status",
+            "bodyodds", "goalodds", "w1", "w2",
+            "အိမ်ရှင်ဂိုး", "ဧည့်သည်ဂိုး", "လိဂ်", "အိမ်ရှင်အသင်း", "ဧည့်သည်အသင်း",
+            "ကန်ချိန်", "ဘော်ဒီကြေး", "ဂိုးပေါင်း", "သရေ", "ဂိုးပေါ်", "ဂိုးပါ်", "ဂိုးအောက်"
+        )
+        val normalizedFirst = firstCells.map { normalizeHeaderKey(it) }
+        val hasHeader = normalizedFirst.any { it in knownHeaderTokens }
+        val isMyanmarSheetLayout = hasHeader && (
+            normalizedFirst.firstOrNull().isNullOrBlank() ||
+                normalizedFirst.contains("အိမ်ရှင်အသင်း") ||
+                normalizedFirst.contains("လိဂ်")
+            )
 
         val headerIndex = if (hasHeader) {
-            firstCells.mapIndexed { idx, h -> normalizeHeaderKey(h) to idx }.toMap()
+            buildMap {
+                firstCells.forEachIndexed { idx, h ->
+                    val k = normalizeHeaderKey(h)
+                    if (k.isBlank() && idx == 0) {
+                        put("_col_a", idx)
+                    } else if (k.isNotBlank()) {
+                        put(k, idx)
+                    }
+                }
+            }
         } else {
             emptyMap()
         }
@@ -116,7 +196,7 @@ object MatchSheetCsvCodec {
             fun cell(vararg keys: String, fallbackIdx: Int): String {
                 if (hasHeader) {
                     for (k in keys) {
-                        val idx = headerIndex[k]
+                        val idx = headerIndex[normalizeHeaderKey(k)] ?: headerIndex[k]
                         if (idx != null && idx in cells.indices) {
                             return cells[idx].trim()
                         }
@@ -126,34 +206,49 @@ object MatchSheetCsvCodec {
                 return cells.getOrNull(fallbackIdx)?.trim().orEmpty()
             }
 
-            val league = cell("league", "cup", "competition", fallbackIdx = 0).ifBlank { "Football" }
-            val home = cell("hometeam", "home", "team1", fallbackIdx = 1)
-            val away = cell("awayteam", "away", "team2", fallbackIdx = 2)
+            val league = cell("လိဂ်", "league", "cup", "competition", fallbackIdx = if (isMyanmarSheetLayout) 3 else 0)
+                .ifBlank { "Football" }
+            val home = cell("အိမ်ရှင်အသင်း", "hometeam", "home", "team1", fallbackIdx = if (isMyanmarSheetLayout) 4 else 1)
+            val away = cell("ဧည့်သည်အသင်း", "awayteam", "away", "team2", fallbackIdx = if (isMyanmarSheetLayout) 5 else 2)
             if (home.isBlank() || away.isBlank()) continue
 
-            val kickoff = cell("kickofflabel", "kickoff", "time", "start", fallbackIdx = 3)
-            val handicap = cell("handicapline", "handicap", "body", "ah", fallbackIdx = 4).ifBlank { "Home -0.5" }
-            val goal = cell("goalline", "goal", "ou", "total", fallbackIdx = 5).ifBlank { "2.5" }
-            val bodyOdds = cell("bodyodds", "body_odds", fallbackIdx = 6).toDoubleOrNull()?.coerceIn(1.05, 50.0)
+            val kickoff = cell("ကန်ချိန်", "kickofflabel", "kickoff", "time", "start", fallbackIdx = if (isMyanmarSheetLayout) 6 else 3)
+            val handicap = cell("ဘော်ဒီကြေး", "handicapline", "handicap", "body", "ah", fallbackIdx = if (isMyanmarSheetLayout) 7 else 4)
+                .ifBlank { "Home -0.5" }
+            val goal = cell("ဂိုးပေါင်း", "goalline", "goal", "ou", "total", fallbackIdx = if (isMyanmarSheetLayout) 8 else 5)
+                .ifBlank { "2.5" }
+            val bodyOdds = cell("bodyodds", "body_odds", fallbackIdx = if (isMyanmarSheetLayout) 14 else 6)
+                .toDoubleOrNull()?.coerceIn(1.05, 50.0)
                 ?: KyayFormatter.LOTAYA_STANDARD_BODY_ODDS
-            val goalOdds = cell("goalodds", "goal_odds", fallbackIdx = 7).toDoubleOrNull()?.coerceIn(1.05, 50.0)
+            val goalOdds = cell("goalodds", "goal_odds", fallbackIdx = if (isMyanmarSheetLayout) 15 else 7)
+                .toDoubleOrNull()?.coerceIn(1.05, 50.0)
                 ?: KyayFormatter.LOTAYA_STANDARD_GOAL_ODDS
 
-            val win1 = cell("win1odds", "win1", "w1", fallbackIdx = 8).toDoubleOrNull()?.coerceIn(1.01, 99.0)
-            val draw = cell("drawodds", "draw", "x", fallbackIdx = 9).toDoubleOrNull()?.coerceIn(1.01, 99.0)
-            val win2 = cell("win2odds", "win2", "w2", fallbackIdx = 10).toDoubleOrNull()?.coerceIn(1.01, 99.0)
-            val over = cell("overodds", "over", fallbackIdx = 11).toDoubleOrNull()?.coerceIn(1.01, 99.0)
-            val under = cell("underodds", "under", fallbackIdx = 12).toDoubleOrNull()?.coerceIn(1.01, 99.0)
+            val win1 = cell("w1", "win1odds", "win1", fallbackIdx = if (isMyanmarSheetLayout) 9 else 8)
+                .toDoubleOrNull()?.coerceIn(1.01, 99.0)
+            val draw = cell("သရေ", "drawodds", "draw", "x", fallbackIdx = if (isMyanmarSheetLayout) 10 else 9)
+                .toDoubleOrNull()?.coerceIn(1.01, 99.0)
+            val win2 = cell("w2", "win2odds", "win2", fallbackIdx = if (isMyanmarSheetLayout) 11 else 10)
+                .toDoubleOrNull()?.coerceIn(1.01, 99.0)
+            val over = cell("ဂိုးပေါ်", "ဂိုးပါ်", "overodds", "over", fallbackIdx = if (isMyanmarSheetLayout) 12 else 11)
+                .toDoubleOrNull()?.coerceIn(1.01, 99.0)
+            val under = cell("ဂိုးအောက်", "underodds", "under", fallbackIdx = if (isMyanmarSheetLayout) 13 else 12)
+                .toDoubleOrNull()?.coerceIn(1.01, 99.0)
 
-            val rawStatus = cell("status", "state", fallbackIdx = if (hasHeader) 13 else 8).lowercase(Locale.US)
+            val rawStatus = cell("status", "state", fallbackIdx = if (hasHeader && !isMyanmarSheetLayout) 13 else -1)
+                .lowercase(Locale.US)
             val mappedStatus = when {
                 rawStatus in listOf("finished", "ft", "done", "ended", "completed", "ပြီးဆုံး") -> "finished"
                 rawStatus in listOf("closed", "live", "started", "locked", "ပိတ်") -> "closed"
+                kickoff.equals("FT", ignoreCase = true) || kickoff.equals("Finished", ignoreCase = true) -> "finished"
+                kickoff.startsWith("LIVE", ignoreCase = true) -> "closed"
                 else -> "open"
             }
 
-            var homeScore = cell("homescore", "score1", fallbackIdx = if (hasHeader) 14 else 9).toLongOrNull()
-            var awayScore = cell("awayscore", "score2", fallbackIdx = if (hasHeader) 15 else 10).toLongOrNull()
+            var homeScore = cell("အိမ်ရှင်ဂိုး", "homescore", "score1", fallbackIdx = if (isMyanmarSheetLayout) 1 else if (hasHeader) 14 else 9)
+                .toLongOrNull()
+            var awayScore = cell("ဧည့်သည်ဂိုး", "awayscore", "score2", fallbackIdx = if (isMyanmarSheetLayout) 2 else if (hasHeader) 15 else 10)
+                .toLongOrNull()
             if (homeScore == null || awayScore == null) {
                 val combinedScore = cell("score", "result", "ft", fallbackIdx = -1)
                 val scoreMatch = Regex("""(\d+)\s*[-:]\s*(\d+)""").find(combinedScore)
@@ -163,13 +258,8 @@ object MatchSheetCsvCodec {
                 }
             }
 
-            val rawBoard = cell("boardsource", "board", "source", fallbackIdx = 16).lowercase(Locale.US)
-            val boardSource = when {
-                rawBoard in listOf("one_express", "1xbet", "oneexpress", "1x") -> "one_express"
-                rawBoard in listOf("five_five_five", "555", "555mix", "mix") -> "five_five_five"
-                rawBoard == "standard" -> "standard"
-                else -> defaultBoardSource
-            }
+            val rawBoard = cell("_col_a", "boardsource", "board", "source", fallbackIdx = if (isMyanmarSheetLayout) 0 else 16)
+            val boardSource = parseBoardSource(rawBoard, defaultBoardSource)
 
             val matchDate = cell("matchdate", "date", fallbackIdx = 17).ifBlank { todayIso }
             val oneExpKyay = cell("oneexpresskyay", "1xbetkyay", fallbackIdx = 18)
@@ -204,7 +294,9 @@ object MatchSheetCsvCodec {
     }
 
     private fun normalizeHeaderKey(raw: String): String {
-        return raw.trim().lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
+        return raw.trim()
+            .lowercase(Locale.US)
+            .replace(Regex("""[\s_\-/().,:]+"""), "")
     }
 
     private fun parseDelimitedLine(line: String, delimiter: Char): List<String> {

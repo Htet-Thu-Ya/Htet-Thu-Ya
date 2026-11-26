@@ -39,6 +39,18 @@ val JetBrainsMonoFontFamily = FontFamily(
     Font(R.font.jetbrains_mono, FontWeight.Bold)
 )
 
+val SyneFontFamily = FontFamily(
+    Font(R.font.syne, FontWeight.SemiBold),
+    Font(R.font.syne, FontWeight.Bold)
+)
+
+val ManropeFontFamily = FontFamily(
+    Font(R.font.manrope, FontWeight.Normal),
+    Font(R.font.manrope, FontWeight.Medium),
+    Font(R.font.manrope, FontWeight.SemiBold),
+    Font(R.font.manrope, FontWeight.Bold)
+)
+
 val AppTypography = Typography(
     displaySmall = TextStyle(
         fontFamily = PadaukFontFamily,

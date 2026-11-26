@@ -28,6 +28,10 @@ import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
 import com.example.data.model.Live2DStatus
 import com.example.data.model.LiveFootballFixture
+import com.example.data.model.Lottery2D3DControlConfig
+import com.example.data.model.Lottery2DDayRecord
+import com.example.data.model.Lottery3DMonthEntry
+import com.example.data.model.LotteryCalendarDoc
 import com.example.data.model.LotteryDraw
 import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
@@ -103,6 +107,9 @@ class MainViewModel(
 
     private val _live2DStatus = MutableStateFlow<Live2DStatus?>(null)
     val live2DStatus: StateFlow<Live2DStatus?> = _live2DStatus.asStateFlow()
+
+    private val _api2DHistory = MutableStateFlow<Map<String, Lottery2DDayRecord>>(emptyMap())
+    val api2DHistory: StateFlow<Map<String, Lottery2DDayRecord>> = _api2DHistory.asStateFlow()
 
     private val _githubRelease = MutableStateFlow<GitHubReleaseInfo?>(null)
     private val _updateDismissed = MutableStateFlow(false)
@@ -256,6 +263,64 @@ class MainViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
+    val lottery2D3DConfig: StateFlow<Lottery2D3DControlConfig> = repository.observeLottery2D3DConfig(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Lottery 2D/3D config stream error", error)
+            emit(Lottery2D3DControlConfig())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), Lottery2D3DControlConfig())
+
+    val lotteryCalendars: StateFlow<List<LotteryCalendarDoc>> = repository.observeLotteryCalendars(currentUserId)
+        .catch { error ->
+            if (isPureCancellation(error)) throw error
+            Log.w(TAG, "Lottery calendar stream error", error)
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val effectiveLive2DStatus: StateFlow<Live2DStatus?> = combine(
+        _live2DStatus,
+        lottery2D3DConfig
+    ) { api, cfg ->
+        if (cfg.autoMode) {
+            if (api == null) null
+            else api.copy(
+                twod = api.twod.takeIf { it != "--" } ?: cfg.liveTwod,
+                morning1201 = api.morning1201.takeIf { it != "--" } ?: cfg.m1201Twod,
+                evening430 = api.evening430.takeIf { it != "--" } ?: cfg.e430Twod,
+                am930Modern = api.am930Modern.takeIf { it != "--" } ?: cfg.am930Modern,
+                am930Internet = api.am930Internet.takeIf { it != "--" } ?: cfg.am930Internet,
+                pm200Modern = api.pm200Modern.takeIf { it != "--" } ?: cfg.pm200Modern,
+                pm200Internet = api.pm200Internet.takeIf { it != "--" } ?: cfg.pm200Internet
+            )
+        } else {
+            val base = api ?: Live2DStatus()
+            val manualLiveTwod = cfg.liveTwod.ifBlank {
+                cfg.e430Twod.takeIf { it != "--" && it.isNotBlank() }
+                    ?: cfg.m1201Twod.takeIf { it != "--" && it.isNotBlank() }
+                    ?: base.twod
+            }
+            base.copy(
+                twod = manualLiveTwod,
+                setText = cfg.liveSet.takeIf { it.isNotBlank() && it != "--" } ?: base.setText,
+                valueText = cfg.liveVal.takeIf { it.isNotBlank() && it != "--" } ?: base.valueText,
+                liveTime = cfg.liveUpdatedText.ifBlank { base.liveTime },
+                updatedAtText = cfg.liveUpdatedText.ifBlank { base.updatedAtText },
+                morning1201 = cfg.m1201Twod.takeIf { it.isNotBlank() && it != "--" } ?: base.morning1201,
+                evening430 = cfg.e430Twod.takeIf { it.isNotBlank() && it != "--" } ?: base.evening430,
+                m1201Set = cfg.m1201Set.takeIf { it.isNotBlank() && it != "--" } ?: base.m1201Set,
+                m1201Val = cfg.m1201Val.takeIf { it.isNotBlank() && it != "--" } ?: base.m1201Val,
+                e430Set = cfg.e430Set.takeIf { it.isNotBlank() && it != "--" } ?: base.e430Set,
+                e430Val = cfg.e430Val.takeIf { it.isNotBlank() && it != "--" } ?: base.e430Val,
+                am930Modern = cfg.am930Modern.takeIf { it.isNotBlank() && it != "--" } ?: base.am930Modern,
+                am930Internet = cfg.am930Internet.takeIf { it.isNotBlank() && it != "--" } ?: base.am930Internet,
+                pm200Modern = cfg.pm200Modern.takeIf { it.isNotBlank() && it != "--" } ?: base.pm200Modern,
+                pm200Internet = cfg.pm200Internet.takeIf { it.isNotBlank() && it != "--" } ?: base.pm200Internet
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
     val appUpdateConfig: StateFlow<AppUpdateConfig?> = repository.observeAppUpdateConfig(currentUserId)
         .catch { error ->
             if (isPureCancellation(error)) throw error
@@ -270,7 +335,7 @@ class MainViewModel(
     ) { fsCfg, ghRel ->
         val fsNewer = fsCfg != null && fsCfg.latestVersionCode > BuildConfig.VERSION_CODE
         val ghNewer = ghRel != null && ghRel.updatedAtEpochMs > (BuildConfig.BUILD_EPOCH_MS + 180_000L)
-        fun sanitizeReleaseNotes(raw: String, label: String): String {
+        fun sanitizeLineText(raw: String, fallback: String): String {
             val cleaned = raw.lines()
                 .filterNot { line ->
                     val low = line.lowercase(java.util.Locale.US)
@@ -283,9 +348,13 @@ class MainViewModel(
                 }
                 .joinToString("\n")
                 .trim()
-            return cleaned.ifBlank {
+            return cleaned.ifBlank { fallback }
+        }
+        fun sanitizeReleaseNotes(raw: String, label: String): String {
+            return sanitizeLineText(
+                raw,
                 "🔥 စနစ်သစ် ($label) အဆင်သင့်ဖြစ်ပါပြီ!\n• 1xBET နှင့် 555 Mix တိုက်ရိုက်ကြေးနှုန်းများ ပိုမိုမြန်ဆန်တိကျ\n• တိုက်ရိုက်ပွဲစဉ်ရလဒ်နှင့် ငွေသွင်း/ငွေထုတ် ပိုမိုချောမွေ့\n• အကောင်းဆုံးစွမ်းဆောင်ရည်အတွက် ယခုပဲ Update တင်လိုက်ပါ!"
-            }
+            )
         }
         when {
             fsNewer && fsCfg != null -> {
@@ -297,7 +366,12 @@ class MainViewModel(
                         fsCfg.downloadUrl.ifBlank { AppUpdateConfig.DEFAULT_APK_DOWNLOAD_URL }
                     ),
                     forceUpdate = fsCfg.forceUpdate,
-                    source = "Admin Push"
+                    source = "Admin Push",
+                    bannerTitle = sanitizeLineText(fsCfg.bannerTitle, AppUpdateConfig.DEFAULT_BANNER_TITLE),
+                    bannerSubtitle = sanitizeLineText(fsCfg.bannerSubtitle, AppUpdateConfig.DEFAULT_BANNER_SUBTITLE),
+                    dialogTitle = sanitizeLineText(fsCfg.dialogTitle, AppUpdateConfig.DEFAULT_DIALOG_TITLE),
+                    installButtonLabel = sanitizeLineText(fsCfg.installButtonLabel, AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL),
+                    laterButtonLabel = sanitizeLineText(fsCfg.laterButtonLabel, AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL)
                 )
             }
             ghNewer && ghRel != null -> {
@@ -624,6 +698,77 @@ class MainViewModel(
                     }
                 }
             }
+
+            // Dedicated 2D / 3D Results Notification Watcher (Channel: lotaya_2d3d_results)
+            val lotteryPrefs = appContext.getSharedPreferences("lotaya_2d3d_noti_prefs", Context.MODE_PRIVATE)
+            viewModelScope.launch {
+                lottery2D3DConfig.collect { cfg ->
+                    if (cfg.lastNotificationNonce > 0L) {
+                        val lastSeenNonce = lotteryPrefs.getLong("last_noti_nonce", -1L)
+                        if (lastSeenNonce == -1L) {
+                            lotteryPrefs.edit().putLong("last_noti_nonce", cfg.lastNotificationNonce).apply()
+                        } else if (cfg.lastNotificationNonce > lastSeenNonce && cfg.lastNotificationBody.isNotBlank()) {
+                            lotteryPrefs.edit().putLong("last_noti_nonce", cfg.lastNotificationNonce).apply()
+                            ChatNotificationHelper.show2D3DNotification(
+                                context = appContext,
+                                title = cfg.lastNotificationTitle.ifBlank { "🎯 လိုတရ 2D / 3D ထီရလဒ်" },
+                                body = cfg.lastNotificationBody,
+                                notificationId = ("2d3d_manual_" + cfg.lastNotificationNonce).hashCode()
+                            )
+                        }
+                    }
+                }
+            }
+            viewModelScope.launch {
+                combine(effectiveLive2DStatus, lottery2D3DConfig, lotteryDraws) { live, cfg, drawsState ->
+                    Triple(live, cfg, drawsState)
+                }.collect { (live, cfg, drawsState) ->
+                    if (!cfg.autoNotifyOnResult) return@collect
+                    val todayIso = MyanmarTimeUtil.todayIsoDate()
+                    if (live != null) {
+                        if (live.morning1201.length == 2 && live.morning1201.all { it.isDigit() }) {
+                            val key = "${todayIso}_1201_${live.morning1201}"
+                            if (lotteryPrefs.getString("last_1201_key", "") != key) {
+                                lotteryPrefs.edit().putString("last_1201_key", key).apply()
+                                ChatNotificationHelper.show2D3DNotification(
+                                    context = appContext,
+                                    title = "🎯 2D 12:01 PM ရလဒ်: ${live.morning1201}",
+                                    body = "SET: ${live.m1201Set} • VAL: ${live.m1201Val} • 12:01 PM 2D: ${live.morning1201}",
+                                    notificationId = key.hashCode()
+                                )
+                            }
+                        }
+                        if (live.evening430.length == 2 && live.evening430.all { it.isDigit() }) {
+                            val key = "${todayIso}_430_${live.evening430}"
+                            if (lotteryPrefs.getString("last_430_key", "") != key) {
+                                lotteryPrefs.edit().putString("last_430_key", key).apply()
+                                ChatNotificationHelper.show2D3DNotification(
+                                    context = appContext,
+                                    title = "🎯 2D 4:30 PM ရလဒ်: ${live.evening430}",
+                                    body = "SET: ${live.e430Set} • VAL: ${live.e430Val} • 4:30 PM 2D: ${live.evening430}",
+                                    notificationId = key.hashCode()
+                                )
+                            }
+                        }
+                    }
+                    val draws = (drawsState as? UiState.Success)?.data.orEmpty()
+                    val latestFinished3D = draws.firstOrNull {
+                        it.drawType == "3d" && it.status == "finished" && it.winningNumber.length == 3
+                    }
+                    if (latestFinished3D != null) {
+                        val key = "3d_${latestFinished3D.id}_${latestFinished3D.winningNumber}"
+                        if (lotteryPrefs.getString("last_3d_key", "") != key) {
+                            lotteryPrefs.edit().putString("last_3d_key", key).apply()
+                            ChatNotificationHelper.show2D3DNotification(
+                                context = appContext,
+                                title = "🏆 3D ထီရလဒ်: ${latestFinished3D.winningNumber}",
+                                body = "${latestFinished3D.roundTitle} ထွက်ဂဏန်း: ${latestFinished3D.winningNumber}",
+                                notificationId = key.hashCode()
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -687,6 +832,10 @@ class MainViewModel(
     fun refreshLive2DStatus() {
         viewModelScope.launch {
             _live2DStatus.value = feedService.fetchLive2DResult()
+            val history = feedService.fetch2DCalendarHistory()
+            if (history.isNotEmpty()) {
+                _api2DHistory.value = history
+            }
         }
     }
 
@@ -2147,6 +2296,12 @@ class MainViewModel(
         res
     }
 
+    fun clearAllTransactions(txIds: List<String>) = runAction("Ledger မှတ်တမ်းအားလုံး ရှင်းလင်းဖျက်သိမ်းပြီးပါပြီ") {
+        val res = repository.clearAllTransactions(txIds)
+        if (res.isSuccess) logAuditAsync("Cleared all ledger transactions", "wallet", "all", "", "Count=${res.getOrDefault(0)}")
+        res.map { }
+    }
+
     fun deleteAuditLog(logId: String) = runAction("Audit မှတ်တမ်း ဖျက်ပြီးပါပြီ") {
         repository.deleteAuditLog(logId)
     }
@@ -2247,15 +2402,156 @@ class MainViewModel(
         }
     }
 
+    fun updateMatchFromSheetRow(
+        match: SportMatch,
+        boardSource: String,
+        homeScore: Long,
+        awayScore: Long,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        win1Odds: Double,
+        drawOdds: Double,
+        win2Odds: Double,
+        overOdds: Double,
+        underOdds: Double,
+        bodyOdds: Double,
+        goalOdds: Double
+    ) = runAction("ဇယားအချက်အလက် တိုက်ရိုက်သိမ်းဆည်းပြီးပါပြီ") {
+        val res = repository.updateMatchFromSheetRow(
+            match = match,
+            boardSource = boardSource,
+            homeScore = homeScore,
+            awayScore = awayScore,
+            league = league,
+            homeTeam = homeTeam,
+            awayTeam = awayTeam,
+            kickoffLabel = kickoffLabel,
+            handicapLine = handicapLine,
+            goalLine = goalLine,
+            win1Odds = win1Odds,
+            drawOdds = drawOdds,
+            win2Odds = win2Odds,
+            overOdds = overOdds,
+            underOdds = underOdds,
+            bodyOdds = bodyOdds,
+            goalOdds = goalOdds
+        )
+        if (res.isSuccess) {
+            logAuditAsync("Updated match via A-P sheet table", "board", match.id, "$homeTeam vs $awayTeam", boardSource)
+        }
+        res
+    }
+
+    fun saveLottery2D3DConfig(config: Lottery2D3DControlConfig) = runAction("2D/3D ထိန်းချုပ်ခန်း ဆက်တင်သိမ်းဆည်းပြီးပါပြီ") {
+        val res = repository.saveLottery2D3DConfig(config)
+        if (res.isSuccess) {
+            logAuditAsync("Updated 2D/3D Control Room", "settings", "lottery_2d3d_config", "", "Auto=${config.autoMode}")
+        }
+        res
+    }
+
+    fun triggerManual2D3DNotification(title: String, body: String) {
+        val cur = lottery2D3DConfig.value
+        val cleanTitle = title.trim().ifBlank { "🎯 လိုတရ 2D / 3D ထီရလဒ် အသိပေးချက်" }.take(120)
+        val cleanBody = body.trim().ifBlank {
+            val st = effectiveLive2DStatus.value
+            "Live 2D: ${st?.twod ?: "--"} • 12:01: ${st?.morning1201 ?: "--"} • 4:30: ${st?.evening430 ?: "--"}"
+        }.take(400)
+        runAction("2D/3D Noti ကို Customer များထံ ပေးပို့ပြီးပါပြီ") {
+            val updated = cur.copy(
+                lastNotificationTitle = cleanTitle,
+                lastNotificationBody = cleanBody,
+                lastNotificationNonce = System.currentTimeMillis()
+            )
+            val res = repository.saveLottery2D3DConfig(updated)
+            if (res.isSuccess) {
+                logAuditAsync("Sent 2D/3D notification", "settings", "lottery_2d3d_config", cleanTitle, cleanBody.take(120))
+            }
+            res
+        }
+    }
+
+    fun sync2D3DFromApiNow() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val live = feedService.fetchLive2DResult()
+                val history = feedService.fetch2DCalendarHistory()
+                if (live != null) _live2DStatus.value = live
+                if (history.isNotEmpty()) _api2DHistory.value = history
+                if (live != null) {
+                    val cur = lottery2D3DConfig.value
+                    repository.saveLottery2D3DConfig(
+                        cur.copy(
+                            liveTwod = live.twod,
+                            liveSet = live.setText,
+                            liveVal = live.valueText,
+                            liveUpdatedText = live.updatedAtText,
+                            m1201Set = live.m1201Set,
+                            m1201Val = live.m1201Val,
+                            m1201Twod = live.morning1201,
+                            e430Set = live.e430Set,
+                            e430Val = live.e430Val,
+                            e430Twod = live.evening430,
+                            am930Modern = live.am930Modern,
+                            am930Internet = live.am930Internet,
+                            pm200Modern = live.pm200Modern,
+                            pm200Internet = live.pm200Internet
+                        )
+                    )
+                    _events.emit("2D/3D Thai SET Live (${live.twod}) အလိုအလျောက် ဆွဲယူသိမ်းဆည်းပြီးပါပြီ")
+                } else {
+                    _events.emit("2D Thai SET API မှ ယခုအချိန် ဒေတာမရရှိသေးပါ")
+                }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun save2DCalendarDay(year: Int, month: Int, dayKey: String, record: Lottery2DDayRecord) =
+        runAction("2D ပြက္ခဒိန် ($year-$month-$dayKey) သိမ်းဆည်းပြီးပါပြီ") {
+            val res = repository.saveLottery2DMonthDay(year, month, dayKey, record)
+            if (res.isSuccess) logAuditAsync("Saved 2D calendar day", "board", "2d_${year}_$month", dayKey, "${record.m1201Twod}/${record.e430Twod}")
+            res
+        }
+
+    fun save3DCalendarMonth(year: Int, monthKey: String, entry: Lottery3DMonthEntry) =
+        runAction("3D ပြက္ခဒိန် ($year - လ $monthKey) သိမ်းဆည်းပြီးပါပြီ") {
+            val res = repository.saveLottery3DYearMonth(year, monthKey, entry)
+            if (res.isSuccess) logAuditAsync("Saved 3D calendar month", "board", "3d_$year", monthKey, "${entry.firstNum}/${entry.secondNum}")
+            res
+        }
+
     // --- APK Update, Chat & Quality Rating ---
     fun saveAppUpdateConfig(
         latestVersionCode: Int,
         latestVersionName: String,
         downloadUrl: String,
         releaseNotes: String,
-        forceUpdate: Boolean
+        forceUpdate: Boolean,
+        bannerTitle: String = AppUpdateConfig.DEFAULT_BANNER_TITLE,
+        bannerSubtitle: String = AppUpdateConfig.DEFAULT_BANNER_SUBTITLE,
+        dialogTitle: String = AppUpdateConfig.DEFAULT_DIALOG_TITLE,
+        installButtonLabel: String = AppUpdateConfig.DEFAULT_INSTALL_BUTTON_LABEL,
+        laterButtonLabel: String = AppUpdateConfig.DEFAULT_LATER_BUTTON_LABEL
     ) = runAction("APK Update အချက်အလက် Customer များထံ ပေးပို့ပြီးပါပြီ") {
-        val res = repository.saveAppUpdateConfig(latestVersionCode, latestVersionName, downloadUrl, releaseNotes, forceUpdate)
+        val res = repository.saveAppUpdateConfig(
+            latestVersionCode = latestVersionCode,
+            latestVersionName = latestVersionName,
+            downloadUrl = downloadUrl,
+            releaseNotes = releaseNotes,
+            forceUpdate = forceUpdate,
+            bannerTitle = bannerTitle,
+            bannerSubtitle = bannerSubtitle,
+            dialogTitle = dialogTitle,
+            installButtonLabel = installButtonLabel,
+            laterButtonLabel = laterButtonLabel
+        )
         if (res.isSuccess) logAuditAsync("Published APK update", "settings", "app_update", "v$latestVersionName ($latestVersionCode)")
         res
     }

@@ -33,3 +33,15 @@ val WhiteCardBorder = Color(0xFFE2E8F0)
 val PauseBannerBg = Color(0xFF3A240B)
 val PauseBannerPillBg = Color(0xFF54330C)
 
+// Copyright-free Midnight Indigo, Ivory & Royal Teal palette for 2D/3D Live & Calendar Hub
+val LotteryHubBg = Color(0xFF0E1726)
+val LotteryHubSurface = Color(0xFF162238)
+val LotteryHubSurfaceAlt = Color(0xFF1E2E4A)
+val LotteryHubIvory = Color(0xFFFAF7F0)
+val LotteryHubIvoryBorder = Color(0xFFE6DEC8)
+val LotteryHubTeal = Color(0xFF0D9488)
+val LotteryHubTealSoft = Color(0xFFCCFBF1)
+val LotteryHubAmber = Color(0xFFD97706)
+val LotteryHubInk = Color(0xFF101B2D)
+val LotteryHubMuted = Color(0xFF64748B)
+

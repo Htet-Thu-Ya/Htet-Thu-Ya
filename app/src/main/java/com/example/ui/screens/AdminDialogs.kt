@@ -1788,6 +1788,8 @@ fun EditAdminInviteDialog(
                     Triple("Customer စာရင်းကြည့်ခွင့်", perms.canViewUsers) { v: Boolean -> perms.copy(canViewUsers = v) },
                     Triple("Customer Lock ခွင့်", perms.canLockUsers) { v: Boolean -> perms.copy(canLockUsers = v) },
                     Triple("Board စီမံခွင့်", perms.canManageBoard) { v: Boolean -> perms.copy(canManageBoard = v) },
+                    Triple("2D/3D ထိန်းချုပ်ခန်း ဝင်ခွင့်", perms.canManage2D3DRoom) { v: Boolean -> perms.copy(canManage2D3DRoom = v) },
+                    Triple("Google Sheet ဇယား စီမံခွင့်", perms.canManageBoardSheet) { v: Boolean -> perms.copy(canManageBoardSheet = v) },
                     Triple("Chat/Call ခွင့်", perms.canChat) { v: Boolean -> perms.copy(canChat = v) },
                     Triple("Wallet % ပြင်ခွင့်", perms.canEditWalletRates) { v: Boolean -> perms.copy(canEditWalletRates = v) },
                     Triple("Game Config ပြင်ခွင့်", perms.canEditGameConfig) { v: Boolean -> perms.copy(canEditGameConfig = v) },
