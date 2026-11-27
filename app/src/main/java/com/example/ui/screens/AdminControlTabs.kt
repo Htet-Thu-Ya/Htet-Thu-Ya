@@ -1,7 +1,14 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +33,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Casino
@@ -36,6 +44,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -75,6 +84,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.model.AdminMember
 import com.example.data.model.BrandingConfig
 import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
@@ -86,6 +96,7 @@ import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.formatKs
 import com.example.ui.components.formatTimestamp
+import java.io.ByteArrayOutputStream
 import com.example.ui.theme.AdminCrimson
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchElevated
@@ -706,6 +717,38 @@ fun AdminMiniGameControlTab(
     }
 }
 
+private fun encodeLogoUriToBase64(context: android.content.Context, uri: Uri): String? {
+    return try {
+        val raw = context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream)
+        } ?: return null
+        val maxDim = 256f
+        val scale = minOf(maxDim / raw.width.toFloat(), maxDim / raw.height.toFloat(), 1f)
+        val scaled = if (scale < 1f) {
+            Bitmap.createScaledBitmap(
+                raw,
+                (raw.width * scale).toInt().coerceAtLeast(1),
+                (raw.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else raw
+        var quality = 85
+        var b64 = ""
+        while (quality >= 30) {
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            if (b64.length <= 180_000) break
+            quality -= 15
+        }
+        if (scaled != raw) scaled.recycle()
+        raw.recycle()
+        b64.takeIf { it.isNotBlank() && it.length <= 180_000 }
+    } catch (_: Exception) {
+        null
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminBrandingTab(
@@ -713,19 +756,37 @@ fun AdminBrandingTab(
     busy: Boolean,
     onSaveBrandingConfig: (BrandingConfig) -> Unit
 ) {
+    val context = LocalContext.current
     var appName by remember { mutableStateOf(brandingConfig.appName) }
     var logoVariant by remember { mutableStateOf(brandingConfig.logoVariant) }
     var customLogoUrl by remember { mutableStateOf(brandingConfig.customLogoUrl) }
+    var customLogoBase64 by remember { mutableStateOf(brandingConfig.customLogoBase64) }
     var themePreset by remember { mutableStateOf(brandingConfig.themePreset) }
     var showRulesOnStartup by remember { mutableStateOf(brandingConfig.showRulesOnStartup) }
     var maxContactKs by remember { mutableStateOf(brandingConfig.maxContactMainAdminKs.toString()) }
     var mainAdminContactNote by remember { mutableStateOf(brandingConfig.mainAdminContactNote) }
     var rulesText by remember { mutableStateOf(brandingConfig.rulesText) }
 
+    val logoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val encoded = encodeLogoUriToBase64(context, uri)
+            if (encoded != null) {
+                customLogoBase64 = encoded
+                logoVariant = "custom_upload"
+                Toast.makeText(context, "Logo ပုံ ရွေးချယ်ပြီးပါပြီ (သိမ်းဆည်းမည် နှိပ်ပါ)", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "ပုံဖိုင် ဖတ်မရပါ သို့မဟုတ် အရွယ်အစားကြီးနေပါသည်", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     LaunchedEffect(brandingConfig) {
         appName = brandingConfig.appName
         logoVariant = brandingConfig.logoVariant
         customLogoUrl = brandingConfig.customLogoUrl
+        customLogoBase64 = brandingConfig.customLogoBase64
         themePreset = brandingConfig.themePreset
         showRulesOnStartup = brandingConfig.showRulesOnStartup
         maxContactKs = brandingConfig.maxContactMainAdminKs.toString()
@@ -737,6 +798,7 @@ fun AdminBrandingTab(
         appName = appName.ifBlank { "လိုတရ" },
         logoVariant = logoVariant,
         customLogoUrl = customLogoUrl.trim(),
+        customLogoBase64 = customLogoBase64,
         themePreset = themePreset
     )
 
@@ -788,6 +850,7 @@ fun AdminBrandingTab(
                             "crest" to "Crest",
                             "gold_badge" to "Gold Badge",
                             "emerald_shield" to "Emerald Shield",
+                            "custom_upload" to "Gallery မှ Upload",
                             "custom_url" to "Custom URL"
                         ).forEach { (key, label) ->
                             FilterChip(
@@ -795,6 +858,34 @@ fun AdminBrandingTab(
                                 onClick = { logoVariant = key },
                                 label = { Text(label) }
                             )
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                logoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                            modifier = Modifier.weight(1f).testTag("branding_pick_logo_button")
+                        ) {
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Gallery မှ Logo ရွေး", maxLines = 1)
+                        }
+                        if (customLogoBase64.isNotBlank() || logoVariant == "custom_upload") {
+                            OutlinedButton(
+                                onClick = {
+                                    customLogoBase64 = ""
+                                    logoVariant = "crest"
+                                },
+                                modifier = Modifier.testTag("branding_reset_logo_button")
+                            ) {
+                                Text("မူလ Logo ပြန်ထား", color = ChampionshipGold, maxLines = 1)
+                            }
                         }
                     }
 
@@ -874,6 +965,7 @@ fun AdminBrandingTab(
                                     appName = appName.trim().ifBlank { "လိုတရ" },
                                     logoVariant = logoVariant,
                                     customLogoUrl = customLogoUrl.trim(),
+                                    customLogoBase64 = customLogoBase64,
                                     themePreset = themePreset,
                                     showRulesOnStartup = showRulesOnStartup,
                                     rulesText = rulesText.trim().ifBlank { BrandingConfig.DEFAULT_RULES_TEXT },
@@ -901,6 +993,7 @@ fun AdminAgentSelfProfileTab(
     defaultDisplayName: String,
     supportAgents: List<SupportAgentProfile>,
     paymentAccounts: List<PaymentAccount>,
+    adminMember: AdminMember? = null,
     busy: Boolean,
     onSaveSupportAgentProfile: (SupportAgentProfile) -> Unit,
     onSavePaymentAccount: (id: String?, providerName: String, accountName: String, accountNumber: String, note: String, active: Boolean) -> Unit,
@@ -943,6 +1036,43 @@ fun AdminAgentSelfProfileTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (!isOwnerAdmin && adminMember != null) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A22)),
+                    border = BorderStroke(1.5.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("self_admin_float_card")
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = ChampionshipGold)
+                                Spacer(Modifier.width(8.dp))
+                                Text("မိမိ၏ Float ငွေလက်ကျန်", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
+                            Text(
+                                text = formatKs(adminMember.walletBalanceKs),
+                                color = if (adminMember.walletBalanceKs > 0L) Color(0xFF34D399) else AdminCrimson,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "Main Admin ခွဲဝေပေးငွေ: ${formatKs(adminMember.totalAllocatedKs)} • ထည့်ပေးပြီး: ${formatKs(adminMember.totalTopupsGivenKs)} • ငွေထုတ်လက်ခံ: ${formatKs(adminMember.totalWithdrawalsTakenKs)}",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = JetBrainsMonoFontFamily
+                        )
+                    }
+                }
+            }
+        }
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),

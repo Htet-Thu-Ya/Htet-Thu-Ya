@@ -2292,6 +2292,134 @@ test("2D/3D Control Room, Lottery Calendar, Board Sheet RBAC, editable app_updat
   await assertSucceeds(ownerDb.collection("transactions").doc("tx_ledger_clear_1").delete());
 });
 
+test("Second Admin Wallet Float Ledger Parity, Board Sheet Two-Way Fields, Privacy Flags, and Custom Upload Logo", async () => {
+  const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
+    email: OWNER_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const secondCashierDb = testEnv.authenticatedContext("sub_cashier", {
+    email: "cashier@example.com",
+    email_verified: true,
+  }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.collection("admins").doc("sub_cashier").set({
+      userId: "sub_cashier",
+      displayName: "Cashier 1",
+      email: "cashier@example.com",
+      role: "admin",
+      status: "active",
+      addedBy: OWNER_UID,
+      inviteCodeUsed: "INV_CASHIER",
+      permissions: { canApproveWallet: true, canAdjustBalance: true },
+      walletBalanceKs: 500000,
+      totalAllocatedKs: 500000,
+      totalTopupsGivenKs: 0,
+      totalWithdrawalsTakenKs: 0,
+      createdAt: pastDate(10000),
+      updatedAt: pastDate(10000),
+    });
+  });
+
+  // 1. Main Admin allocates extra float to Second Admin
+  await assertSucceeds(
+    ownerDb.collection("admins").doc("sub_cashier").update({
+      walletBalanceKs: 700000,
+      totalAllocatedKs: 700000,
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // 2. Second Admin cannot mint arbitrary float without matching withdrawal counter
+  await assertFails(
+    secondCashierDb.collection("admins").doc("sub_cashier").update({
+      walletBalanceKs: 900000,
+      updatedAt: pastDate(3500),
+    })
+  );
+
+  // 3. Second Admin deducts 50,000 Ks for a customer topup with exact parity
+  await assertSucceeds(
+    secondCashierDb.collection("admins").doc("sub_cashier").update({
+      walletBalanceKs: 650000,
+      totalTopupsGivenKs: 50000,
+      totalWithdrawalsTakenKs: 0,
+      updatedAt: pastDate(3000),
+    })
+  );
+
+  // 4. Second Admin adds 20,000 Ks back from a customer withdrawal with exact parity
+  await assertSucceeds(
+    secondCashierDb.collection("admins").doc("sub_cashier").update({
+      walletBalanceKs: 670000,
+      totalTopupsGivenKs: 50000,
+      totalWithdrawalsTakenKs: 20000,
+      updatedAt: pastDate(2500),
+    })
+  );
+
+  // 5. BoardConfig accepts googleSheetEditUrl, googleSheetWebhookUrl, autoTwoWaySheetSync, activeMatchDateFilter
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("board_config").set({
+      autoSyncDailyMatches: true,
+      autoSyncLiveResults: true,
+      lastSyncedDate: "2026-11-27",
+      allowedLeagues: ["Thai League 1", "English Premier League"],
+      autoSyncOneExpress: true,
+      autoSyncFiveFiveFive: true,
+      googleSheetCsvUrl: "https://docs.google.com/spreadsheets/d/abc123/export?format=csv",
+      googleSheetEditUrl: "https://docs.google.com/spreadsheets/d/abc123/edit#gid=0",
+      googleSheetWebhookUrl: "https://script.google.com/macros/s/sample/exec",
+      autoTwoWaySheetSync: true,
+      activeMatchDateFilter: "2026-11-27",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(2000),
+    })
+  );
+
+  // 6. SecurityConfig accepts privacy & screenshot protection flags
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("security_config").set({
+      requireAdminPin: false,
+      ipWhitelistEnabled: false,
+      allowedIps: [],
+      globalForceLogoutAtMs: 0,
+      hidePublicIpDisplay: true,
+      maskCustomerPiiForSubAdmins: true,
+      screenshotProtectionEnabled: true,
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(1800),
+    })
+  );
+
+  // 7. BrandingConfig accepts custom_upload & customLogoBase64 (customer cannot modify)
+  await assertSucceeds(
+    ownerDb.collection("app_settings").doc("branding_config").set({
+      appName: "လိုတရ",
+      logoVariant: "custom_upload",
+      customLogoUrl: "",
+      customLogoBase64: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+      themePreset: "emerald_gold",
+      showRulesOnStartup: true,
+      rulesText: "Rules",
+      maxContactMainAdminKs: 500000,
+      mainAdminContactNote: "Contact owner",
+      updatedBy: OWNER_UID,
+      updatedAt: pastDate(1500),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("app_settings").doc("security_config").update({
+      screenshotProtectionEnabled: false,
+      updatedBy: ALICE_UID,
+      updatedAt: pastDate(1200),
+    })
+  );
+});
+
+
 
 
 

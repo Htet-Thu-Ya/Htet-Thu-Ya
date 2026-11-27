@@ -12,8 +12,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.net.URLEncoder
@@ -99,8 +102,7 @@ class FootballFeedService(
                 espnLeagues
             } else {
                 espnLeagues.filter { (_, name) ->
-                    val low = name.lowercase(Locale.US)
-                    allowedSet.any { a -> low == a || low.contains(a) || a.contains(low) }
+                    matchesAllowedLeague(name, allowedSet)
                 }.ifEmpty { espnLeagues }
             }
             val allFixtures = linkedMapOf<String, LiveFootballFixture>()
@@ -128,8 +130,7 @@ class FootballFeedService(
                 }.awaitAll().flatten()
             }
             espnJobs.forEach { fix ->
-                val lLow = fix.league.lowercase(Locale.US)
-                if (allowedSet.isEmpty() || allowedSet.any { lLow.contains(it) || it.contains(lLow) }) {
+                if (matchesAllowedLeague(fix.league, allowedSet)) {
                     mergeFixture(allFixtures, fix)
                 }
             }
@@ -141,8 +142,7 @@ class FootballFeedService(
                 }.awaitAll().flatten()
             }
             tsdbJobs.forEach { fix ->
-                val lLow = fix.league.lowercase(Locale.US)
-                if (allowedSet.isEmpty() || allowedSet.any { lLow.contains(it) || it.contains(lLow) }) {
+                if (matchesAllowedLeague(fix.league, allowedSet)) {
                     mergeFixture(allFixtures, fix)
                 }
             }
@@ -203,8 +203,7 @@ class FootballFeedService(
                     rawList
                 } else {
                     rawList.filter { fix ->
-                        val lLow = fix.league.lowercase(Locale.US)
-                        allowedSet.any { allowed -> lLow.contains(allowed) || allowed.contains(lLow) }
+                        matchesAllowedLeague(fix.league, allowedSet)
                     }.ifEmpty { rawList }
                 }
                 return@withContext Result.success(
@@ -533,7 +532,7 @@ class FootballFeedService(
             list.add(
                 LiveFootballFixture(
                     externalId = "espn_$eventId",
-                    league = leagueName.take(60),
+                    league = canonicalLeagueName(leagueName).take(60),
                     homeTeam = homeName.take(60),
                     awayTeam = awayName.take(60),
                     homeLogoUrl = homeLogoUrl.take(300),
@@ -636,6 +635,42 @@ class FootballFeedService(
         }
     }
 
+    suspend fun pushMatchesToGoogleSheetWebhook(
+        webhookUrl: String,
+        csvText: String,
+        rowsArray: JSONArray? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val cleaned = webhookUrl.trim()
+            require(cleaned.startsWith("https://", ignoreCase = true)) {
+                "Apps Script Webhook URL (https://...) ထည့်သွင်းပါ"
+            }
+            val payload = JSONObject().apply {
+                put("action", "sync_ap_sheet")
+                put("csv", csvText)
+                if (rowsArray != null) put("rows", rowsArray)
+            }
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val req = Request.Builder()
+                .url(cleaned)
+                .post(payload.toString().toRequestBody(mediaType))
+                .header("User-Agent", "LoTaYa-Android/5.0")
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val bodyStr = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful && resp.code !in 300..399) {
+                    return@withContext Result.failure(
+                        IllegalStateException("Google Sheet Push မအောင်မြင်ပါ (HTTP ${resp.code})")
+                    )
+                }
+                Result.success(bodyStr.ifBlank { "OK" })
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun parseTheSportsDbEvents(
         body: String,
         fallbackIsoDate: String,
@@ -708,7 +743,7 @@ class FootballFeedService(
             list.add(
                 LiveFootballFixture(
                     externalId = "tsdb_$eventId",
-                    league = league.take(60),
+                    league = canonicalLeagueName(league).take(60),
                     homeTeam = home.take(60),
                     awayTeam = away.take(60),
                     homeLogoUrl = homeBadge.take(300),
@@ -805,10 +840,29 @@ class FootballFeedService(
                 if (holidayObj != null) holidayObj.optString("name", "") else ""
             }
 
+            val resolvedTwod = when {
+                twod != "--" && twod.isNotBlank() -> twod
+                e1630 != "--" && e1630.isNotBlank() -> e1630
+                m1201 != "--" && m1201.isNotBlank() -> m1201
+                else -> "--"
+            }
+            val resolvedSet = when {
+                setStr != "--" && setStr.isNotBlank() -> setStr
+                e430Set != "--" && e430Set.isNotBlank() -> e430Set
+                m1201Set != "--" && m1201Set.isNotBlank() -> m1201Set
+                else -> "--"
+            }
+            val resolvedVal = when {
+                valStr != "--" && valStr.isNotBlank() -> valStr
+                e430Val != "--" && e430Val.isNotBlank() -> e430Val
+                m1201Val != "--" && m1201Val.isNotBlank() -> m1201Val
+                else -> "--"
+            }
+
             Live2DStatus(
-                twod = twod,
-                setText = setStr,
-                valueText = valStr,
+                twod = resolvedTwod,
+                setText = resolvedSet,
+                valueText = resolvedVal,
                 liveTime = timeStr,
                 morning1201 = m1201,
                 evening430 = e1630,
@@ -1032,62 +1086,128 @@ class FootballFeedService(
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
         val DEFAULT_LEAGUE_OPTIONS = listOf(
-            "UEFA Champions League",
-            "UEFA Champions League. Duel of the players. Goals",
-            "UEFA Champions League. Winner",
-            "UEFA Youth League",
-            "Europa League",
-            "UEFA Conference League",
-            "Premier League",
-            "FA Cup",
-            "Carabao Cup",
-            "Championship",
-            "La Liga",
-            "La Liga 2",
-            "Copa del Rey",
-            "Spain",
-            "Bundesliga",
-            "2. Bundesliga",
-            "Serie A",
-            "Serie B",
-            "Coppa Italia",
-            "Italy",
-            "Ligue 1",
-            "Ligue 2",
-            "AFC Champions League Elite",
-            "AFC Champions League 2",
-            "Gulf Club Championship",
             "Thai League 1",
-            "J1 League (Japan)",
-            "K League 1 (Korea)",
-            "Saudi Pro League",
-            "Chinese Super League",
-            "A-League",
-            "Russian Premier League",
-            "Russian Cup",
-            "Egypt. Premier League",
-            "Peru Cup",
-            "Botswana Championship",
-            "Austria. Amateur Cup",
-            "El Salvador. Reserve League",
-            "Greece. Amateur Cup",
-            "Israel",
-            "Brazil",
-            "Brasileirao Serie A",
-            "Senegal. League des Pepites U20",
-            "Short Football 3x3",
-            "Short Football 4x4",
-            "Short Football 5x5",
-            "Short Football 3x3 L1",
-            "Short Football 4x4 L2",
-            "Student League",
-            "Student League 2",
-            "BudnesLiga LFL 5x5",
-            "Division 4x4",
-            "FIFA 27. Amateur daily league",
-            "FIFA 23. Volta daily league",
-            "World Cup Qualifiers"
+            "Saudi Professional League",
+            "Indian Super League",
+            "Romania Liga I",
+            "Bulgaria First League",
+            "Croatia 1.Division",
+            "Poland Ekstraklasa",
+            "Poland Liga 1",
+            "Slovenia 1.Liga",
+            "Turkey Super Lig",
+            "Turkey 1. Lig",
+            "Cyprus 1 Division",
+            "German Bundesliga 2",
+            "Danish 1st Division",
+            "Denmark Superliga",
+            "Liga Portugal 2",
+            "German 3.Liga",
+            "Switzerland Challenge League",
+            "Austrian Bundesliga",
+            "Holland Eredivisie",
+            "Holland Eerste Divisie",
+            "Spanish La Liga 2",
+            "Austria Erste Division",
+            "German Bundesliga",
+            "Italy Serie A",
+            "France Ligue 1",
+            "Belgian Pro League",
+            "Welsh Premier League",
+            "England National League",
+            "English Premier League",
+            "England Championship",
+            "Spanish La Liga",
+            "Liga Portugal 1",
+            "Primera Division de Paraguay",
+            "Brazil Serie A",
+            "Brazil Serie B"
         )
+
+        private val LEAGUE_ALIAS_MAP = mapOf(
+            "premier league" to "English Premier League",
+            "english premier league" to "English Premier League",
+            "championship" to "England Championship",
+            "efl championship" to "England Championship",
+            "england championship" to "England Championship",
+            "english league championship" to "England Championship",
+            "national league" to "England National League",
+            "england national league" to "England National League",
+            "la liga" to "Spanish La Liga",
+            "spanish la liga" to "Spanish La Liga",
+            "spanish laliga" to "Spanish La Liga",
+            "la liga 2" to "Spanish La Liga 2",
+            "spanish la liga 2" to "Spanish La Liga 2",
+            "segunda division" to "Spanish La Liga 2",
+            "bundesliga" to "German Bundesliga",
+            "german bundesliga" to "German Bundesliga",
+            "2. bundesliga" to "German Bundesliga 2",
+            "german bundesliga 2" to "German Bundesliga 2",
+            "3. liga" to "German 3.Liga",
+            "german 3.liga" to "German 3.Liga",
+            "serie a" to "Italy Serie A",
+            "italian serie a" to "Italy Serie A",
+            "italy serie a" to "Italy Serie A",
+            "ligue 1" to "France Ligue 1",
+            "french ligue 1" to "France Ligue 1",
+            "france ligue 1" to "France Ligue 1",
+            "saudi pro league" to "Saudi Professional League",
+            "saudi professional league" to "Saudi Professional League",
+            "thai league 1" to "Thai League 1",
+            "indian super league" to "Indian Super League",
+            "super lig" to "Turkey Super Lig",
+            "turkey super lig" to "Turkey Super Lig",
+            "turkey 1. lig" to "Turkey 1. Lig",
+            "tff 1. lig" to "Turkey 1. Lig",
+            "eredivisie" to "Holland Eredivisie",
+            "dutch eredivisie" to "Holland Eredivisie",
+            "holland eredivisie" to "Holland Eredivisie",
+            "eerste divisie" to "Holland Eerste Divisie",
+            "holland eerste divisie" to "Holland Eerste Divisie",
+            "primeira liga" to "Liga Portugal 1",
+            "liga portugal" to "Liga Portugal 1",
+            "liga portugal 1" to "Liga Portugal 1",
+            "liga portugal 2" to "Liga Portugal 2",
+            "belgian pro league" to "Belgian Pro League",
+            "austrian bundesliga" to "Austrian Bundesliga",
+            "brasileirao serie a" to "Brazil Serie A",
+            "brazil serie a" to "Brazil Serie A",
+            "brasileirao serie b" to "Brazil Serie B",
+            "brazil serie b" to "Brazil Serie B",
+            "danish superliga" to "Denmark Superliga",
+            "denmark superliga" to "Denmark Superliga",
+            "ekstraklasa" to "Poland Ekstraklasa",
+            "poland ekstraklasa" to "Poland Ekstraklasa",
+            "cymru premier" to "Welsh Premier League",
+            "welsh premier league" to "Welsh Premier League"
+        )
+
+        fun canonicalLeagueName(raw: String): String {
+            val cleaned = raw.trim()
+            if (cleaned.isBlank()) return ""
+            val key = cleaned.lowercase(Locale.US)
+            LEAGUE_ALIAS_MAP[key]?.let { return it }
+            val exact = DEFAULT_LEAGUE_OPTIONS.firstOrNull { it.equals(cleaned, ignoreCase = true) }
+            if (exact != null) return exact
+            return cleaned
+        }
+
+        fun leagueSortOrderIndex(league: String): Int {
+            val canon = canonicalLeagueName(league)
+            val idx = DEFAULT_LEAGUE_OPTIONS.indexOfFirst { it.equals(canon, ignoreCase = true) }
+            return if (idx >= 0) idx else Int.MAX_VALUE
+        }
+
+        fun matchesAllowedLeague(rawLeague: String, allowedLowerSet: Set<String>): Boolean {
+            if (allowedLowerSet.isEmpty()) return true
+            val rawLow = rawLeague.trim().lowercase(Locale.US)
+            val canonLow = canonicalLeagueName(rawLeague).lowercase(Locale.US)
+            return allowedLowerSet.any { a ->
+                rawLow == a || canonLow == a ||
+                    rawLow.contains(a) || a.contains(rawLow) ||
+                    canonLow.contains(a) || a.contains(canonLow)
+            }
+        }
 
         fun normalizeGoogleSheetCsvUrl(raw: String): String {
             val cleaned = raw.trim()
@@ -1103,6 +1223,24 @@ class FootballFeedService(
                 val gidMatch = Regex("""gid=(\d+)""").find(withHttps)
                 val gidPart = if (gidMatch != null) "&gid=${gidMatch.groupValues[1]}" else ""
                 return "https://docs.google.com/spreadsheets/d/$docId/export?format=csv$gidPart"
+            }
+            return withHttps.take(500)
+        }
+
+        fun normalizeGoogleSheetEditUrl(raw: String): String {
+            val cleaned = raw.trim()
+            if (cleaned.isBlank()) return ""
+            val withHttps = when {
+                cleaned.startsWith("https://", ignoreCase = true) -> cleaned
+                cleaned.startsWith("http://", ignoreCase = true) -> "https://" + cleaned.removePrefix("http://").removePrefix("HTTP://")
+                else -> "https://$cleaned"
+            }
+            val sheetMatch = Regex("""docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)""").find(withHttps)
+            if (sheetMatch != null) {
+                val docId = sheetMatch.groupValues[1]
+                val gidMatch = Regex("""gid=(\d+)""").find(withHttps)
+                val gidPart = if (gidMatch != null) "#gid=${gidMatch.groupValues[1]}" else "#gid=0"
+                return "https://docs.google.com/spreadsheets/d/$docId/edit$gidPart"
             }
             return withHttps.take(500)
         }
@@ -1200,7 +1338,7 @@ class FootballFeedService(
 
             return LiveFootballFixture(
                 externalId = "1xbet_$gameId",
-                league = league.take(60),
+                league = canonicalLeagueName(league).take(60),
                 homeTeam = homeTeam.take(60),
                 awayTeam = awayTeam.take(60),
                 homeLogoUrl = homeLogoUrl.take(300),

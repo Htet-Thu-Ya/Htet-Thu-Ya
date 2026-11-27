@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
@@ -718,6 +719,7 @@ fun AdminSubAdminsTab(
     onSetAdminStatus: (String, String, Boolean) -> Unit,
     onResetAdminPin: (String, String, String) -> Unit,
     onForceLogoutAdmin: (String, String) -> Unit,
+    onAllocateAdminFloat: (targetAdminUid: String, adminName: String, deltaKs: Long) -> Unit = { _, _, _ -> },
     onRemoveAdmin: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -732,6 +734,7 @@ fun AdminSubAdminsTab(
 
     var editingPermissionsMember by remember { mutableStateOf<AdminMember?>(null) }
     var resettingPinMember by remember { mutableStateOf<AdminMember?>(null) }
+    var floatAdjustMember by remember { mutableStateOf<AdminMember?>(null) }
     var editingInvite by remember { mutableStateOf<AdminInvite?>(null) }
     var deletingInvite by remember { mutableStateOf<AdminInvite?>(null) }
 
@@ -1103,8 +1106,47 @@ fun AdminSubAdminsTab(
                         }
                     }
 
+                    if (member.role != "owner") {
+                        Surface(
+                            color = Color(0xFFEFF6FF),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Float ငွေလက်ကျန်", color = InkDark, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = formatKs(member.walletBalanceKs),
+                                        color = if (member.walletBalanceKs > 0L) PitchEmeraldDark else AdminCrimson,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "ခွဲဝေငွေ: ${formatKs(member.totalAllocatedKs)} • ငွေသွင်းပေး: ${formatKs(member.totalTopupsGivenKs)} • ငွေထုတ်လက်ခံ: ${formatKs(member.totalWithdrawalsTakenKs)}",
+                                    color = InkMuted,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily
+                                )
+                            }
+                        }
+                    }
+
                     if (member.role != "owner" && member.userId != currentUserId) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { floatAdjustMember = member },
+                                modifier = Modifier.testTag("allocate_float_${member.userId}")
+                            ) {
+                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Float ငွေထည့်/နှုတ်", color = PitchEmeraldDark)
+                            }
                             OutlinedButton(onClick = { editingPermissionsMember = member }) {
                                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(Modifier.width(4.dp))
@@ -1216,6 +1258,51 @@ fun AdminSubAdminsTab(
                 val c = inv.code
                 deletingInvite = null
                 onDeleteInvite(c)
+            }
+        )
+    }
+
+    floatAdjustMember?.let { member ->
+        var amountInput by remember { mutableStateOf("100000") }
+        var isAdd by remember { mutableStateOf(true) }
+        val amtVal = amountInput.toLongOrNull() ?: 0L
+        AlertDialog(
+            onDismissRequest = { floatAdjustMember = null },
+            title = { Text("${member.displayName} Float ငွေထည့်/နှုတ်") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("လက်ရှိ Float လက်ကျန်: ${formatKs(member.walletBalanceKs)}", fontWeight = FontWeight.Bold, color = PitchEmeraldDark)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = isAdd, onClick = { isAdd = true }, label = { Text("+ Float ထည့်မည်") })
+                        FilterChip(selected = !isAdd, onClick = { isAdd = false }, label = { Text("- ပြန်နှုတ်မည်") })
+                    }
+                    OutlinedTextField(
+                        value = amountInput,
+                        onValueChange = { amountInput = it.filter { c -> c.isDigit() }.take(10) },
+                        label = { Text("ပမာဏ (Ks)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("allocate_float_amount_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val uid = member.userId
+                        val name = member.displayName.ifBlank { "Second Admin" }
+                        floatAdjustMember = null
+                        onAllocateAdminFloat(uid, name, if (isAdd) amtVal else -amtVal)
+                    },
+                    enabled = amtVal > 0L,
+                    colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
+                    modifier = Modifier.testTag("confirm_allocate_float_button")
+                ) {
+                    Text("အတည်ပြုမည်")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { floatAdjustMember = null }) { Text("ပိတ်မည်") }
             }
         )
     }
@@ -1811,12 +1898,18 @@ fun AdminSecurityControlsTab(
     var requirePin by remember { mutableStateOf(securityConfig.requireAdminPin) }
     var ipWhitelistEnabled by remember { mutableStateOf(securityConfig.ipWhitelistEnabled) }
     var ipsText by remember { mutableStateOf(securityConfig.allowedIps.joinToString("\n")) }
+    var hidePublicIpDisplay by remember { mutableStateOf(securityConfig.hidePublicIpDisplay) }
+    var maskCustomerPiiForSubAdmins by remember { mutableStateOf(securityConfig.maskCustomerPiiForSubAdmins) }
+    var screenshotProtectionEnabled by remember { mutableStateOf(securityConfig.screenshotProtectionEnabled) }
     var showForceLogoutConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(securityConfig) {
         requirePin = securityConfig.requireAdminPin
         ipWhitelistEnabled = securityConfig.ipWhitelistEnabled
         ipsText = securityConfig.allowedIps.joinToString("\n")
+        hidePublicIpDisplay = securityConfig.hidePublicIpDisplay
+        maskCustomerPiiForSubAdmins = securityConfig.maskCustomerPiiForSubAdmins
+        screenshotProtectionEnabled = securityConfig.screenshotProtectionEnabled
     }
 
     LazyColumn(
@@ -1835,7 +1928,7 @@ fun AdminSecurityControlsTab(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Security, contentDescription = null, tint = ChampionshipGold)
                         Spacer(Modifier.width(8.dp))
-                        Text("လုံခြုံရေး ထိန်းချုပ်မှု (Security Controls)", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("လုံခြုံရေး ထိန်းချုပ်မှု (Security & Privacy)", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
                     Row(
@@ -1858,10 +1951,14 @@ fun AdminSecurityControlsTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text("IP Whitelist ကန့်သတ်မည်", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text("သတ်မှတ်ထားသော IP မှသာ Second Admin ဝင်ခွင့်ပြုမည်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                            Text("Screenshot & Screen Record ကာကွယ်မှု (FLAG_SECURE)", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("App မျက်နှာပြင်အား Screenshot/Record ရိုက်ယူခြင်းမှ ကာကွယ်ပေးမည်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
                         }
-                        Switch(checked = ipWhitelistEnabled, onCheckedChange = { ipWhitelistEnabled = it })
+                        Switch(
+                            checked = screenshotProtectionEnabled,
+                            onCheckedChange = { screenshotProtectionEnabled = it },
+                            modifier = Modifier.testTag("security_screenshot_protection_switch")
+                        )
                     }
 
                     Row(
@@ -1869,21 +1966,76 @@ fun AdminSecurityControlsTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text("Second Admin များထံ Customer Email/UID ဖုံးကွယ်မည်", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("Second Admin Dashboard တွင် Customer Email/UID ကို Mask လုပ်ထားပါမည်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(
+                            checked = maskCustomerPiiForSubAdmins,
+                            onCheckedChange = { maskCustomerPiiForSubAdmins = it },
+                            modifier = Modifier.testTag("security_mask_pii_switch")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text("Public IP ဖော်ပြမှု ဖုံးကွယ်မည် (Privacy Mode)", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("IP Whitelist မသုံးချိန်တွင် စက်၏ Public IP မဖော်ပြဘဲ ဖုံးကွယ်ထားမည်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(
+                            checked = hidePublicIpDisplay,
+                            onCheckedChange = { hidePublicIpDisplay = it },
+                            modifier = Modifier.testTag("security_hide_ip_switch")
+                        )
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text("IP Whitelist ကန့်သတ်မည်", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("သတ်မှတ်ထားသော IP မှသာ Second Admin ဝင်ခွင့်ပြုမည်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = ipWhitelistEnabled, onCheckedChange = { ipWhitelistEnabled = it })
+                    }
+
+                    if (hidePublicIpDisplay && !ipWhitelistEnabled) {
                         Text(
-                            "သင့်လက်ရှိ Public IP: ${currentPublicIp ?: "Checking..."}",
-                            color = ChampionshipGold,
+                            "IP ဖုံးကွယ်ထားသည် (Privacy Mode ON)",
+                            color = Color(0xFF34D399),
                             fontFamily = JetBrainsMonoFontFamily,
                             style = MaterialTheme.typography.bodySmall
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(onClick = onRefreshIp) { Text("Refresh", color = ChampionshipGold) }
-                            if (!currentPublicIp.isNullOrBlank()) {
-                                OutlinedButton(onClick = {
-                                    val existing = ipsText.lines().map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
-                                    if (!existing.contains(currentPublicIp)) existing.add(currentPublicIp)
-                                    ipsText = existing.joinToString("\n")
-                                }) {
-                                    Text("+ My IP", color = Color.White)
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "သင့်လက်ရှိ Public IP: ${currentPublicIp ?: "Checking..."}",
+                                color = ChampionshipGold,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                TextButton(onClick = onRefreshIp) { Text("Refresh", color = ChampionshipGold) }
+                                if (!currentPublicIp.isNullOrBlank()) {
+                                    OutlinedButton(onClick = {
+                                        val existing = ipsText.lines().map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+                                        if (!existing.contains(currentPublicIp)) existing.add(currentPublicIp)
+                                        ipsText = existing.joinToString("\n")
+                                    }) {
+                                        Text("+ My IP", color = Color.White)
+                                    }
                                 }
                             }
                         }
@@ -1905,7 +2057,10 @@ fun AdminSecurityControlsTab(
                                 securityConfig.copy(
                                     requireAdminPin = requirePin,
                                     ipWhitelistEnabled = ipWhitelistEnabled,
-                                    allowedIps = list
+                                    allowedIps = list,
+                                    hidePublicIpDisplay = hidePublicIpDisplay,
+                                    maskCustomerPiiForSubAdmins = maskCustomerPiiForSubAdmins,
+                                    screenshotProtectionEnabled = screenshotProtectionEnabled
                                 )
                             )
                         },

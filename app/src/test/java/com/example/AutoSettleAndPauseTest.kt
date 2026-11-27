@@ -879,5 +879,129 @@ class AutoSettleAndPauseTest {
         assertTrue(updateCfg.installButtonLabel.isNotBlank())
         assertTrue(updateCfg.laterButtonLabel.isNotBlank())
     }
-}
 
+    @Test
+    fun canonical36Leagues_andGoogleSheetEditUrlNormalization_workCorrectly() {
+        val leagues = com.example.data.network.FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        assertEquals(36, leagues.size)
+        assertEquals("Thai League 1", leagues.first())
+        assertEquals("Brazil Serie B", leagues.last())
+
+        assertEquals(
+            "English Premier League",
+            com.example.data.network.FootballFeedService.canonicalLeagueName("Premier League")
+        )
+        assertEquals(
+            "Italy Serie A",
+            com.example.data.network.FootballFeedService.canonicalLeagueName("Italian Serie A")
+        )
+        assertEquals(
+            "England Championship",
+            com.example.data.network.FootballFeedService.canonicalLeagueName("EFL Championship")
+        )
+        assertTrue(
+            com.example.data.network.FootballFeedService.leagueSortOrderIndex("Thai League 1") <
+                com.example.data.network.FootballFeedService.leagueSortOrderIndex("English Premier League")
+        )
+        assertTrue(
+            com.example.data.network.FootballFeedService.leagueSortOrderIndex("English Premier League") <
+                com.example.data.network.FootballFeedService.leagueSortOrderIndex("Unknown Friendly Cup")
+        )
+
+        val csvUrl = "https://docs.google.com/spreadsheets/d/abc123XYZ/export?format=csv&gid=42"
+        val editUrl = com.example.data.network.FootballFeedService.normalizeGoogleSheetEditUrl(csvUrl)
+        assertEquals("https://docs.google.com/spreadsheets/d/abc123XYZ/edit#gid=42", editUrl)
+        assertEquals(
+            "https://docs.google.com/spreadsheets/d/abc123XYZ/export?format=csv&gid=42",
+            com.example.data.network.FootballFeedService.normalizeGoogleSheetCsvUrl(editUrl)
+        )
+    }
+
+    @Test
+    fun autoSettleEngine_twoDSessionSplitAndDateIsolation() {
+        val cal = java.util.Calendar.getInstance(com.example.data.util.MyanmarTimeUtil.YANGON_TZ).apply {
+            set(2026, java.util.Calendar.NOVEMBER, 27, 12, 10, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val noonTodayMs = cal.timeInMillis
+        val todayIso = com.example.data.util.MyanmarTimeUtil.todayIsoDate(noonTodayMs)
+        val tomorrowIso = com.example.data.util.MyanmarTimeUtil.formatMatchDateIso(noonTodayMs + 86_400_000L)
+
+        val liveStatus = com.example.data.model.Live2DStatus(
+            twod = "42",
+            morning1201 = "42",
+            evening430 = "88"
+        )
+        val config = com.example.data.model.Lottery2D3DControlConfig(autoMode = true)
+
+        val morningOrderToday = BetOrder(
+            id = "2d_m_today",
+            orderType = "two_d",
+            drawRound = "2D နေ့လည် (12:01 PM) • $todayIso",
+            selections = listOf("42 (1,000 Ks)"),
+            stakeKs = 1_000L,
+            multiplier = 80.0,
+            potentialPayoutKs = 80_000L,
+            status = "accepted"
+        )
+        val eveningOrderToday = BetOrder(
+            id = "2d_e_today",
+            orderType = "two_d",
+            drawRound = "2D ညနေ (4:30 PM) • $todayIso",
+            selections = listOf("88 (1,000 Ks)"),
+            stakeKs = 1_000L,
+            multiplier = 80.0,
+            potentialPayoutKs = 80_000L,
+            status = "accepted"
+        )
+        val morningOrderTomorrow = morningOrderToday.copy(
+            id = "2d_m_tomorrow",
+            drawRound = "2D နေ့လည် (12:01 PM) • $tomorrowIso"
+        )
+
+        // At 12:10 PM Yangon time: 12:01 PM settles, 4:30 PM does NOT settle yet, tomorrow does NOT settle
+        val mDecision = AutoSettleEngine.evaluate(
+            order = morningOrderToday,
+            matchesById = emptyMap(),
+            draws = emptyList(),
+            live2DConfig = config,
+            live2DStatus = liveStatus,
+            nowMs = noonTodayMs
+        )
+        assertTrue(mDecision is AutoSettleDecision.Win)
+        assertEquals(80_000L, (mDecision as AutoSettleDecision.Win).grossPayoutKs)
+
+        val eDecisionBefore430 = AutoSettleEngine.evaluate(
+            order = eveningOrderToday,
+            matchesById = emptyMap(),
+            draws = emptyList(),
+            live2DConfig = config,
+            live2DStatus = liveStatus,
+            nowMs = noonTodayMs
+        )
+        assertEquals(AutoSettleDecision.NotReady, eDecisionBefore430)
+
+        val tomorrowDecision = AutoSettleEngine.evaluate(
+            order = morningOrderTomorrow,
+            matchesById = emptyMap(),
+            draws = emptyList(),
+            live2DConfig = config,
+            live2DStatus = liveStatus,
+            nowMs = noonTodayMs
+        )
+        assertEquals(AutoSettleDecision.NotReady, tomorrowDecision)
+
+        // At 16:35 PM Yangon time: 4:30 PM settles cleanly
+        val after430Ms = noonTodayMs + (4 * 60 + 25) * 60_000L
+        val eDecisionAfter430 = AutoSettleEngine.evaluate(
+            order = eveningOrderToday,
+            matchesById = emptyMap(),
+            draws = emptyList(),
+            live2DConfig = config,
+            live2DStatus = liveStatus,
+            nowMs = after430Ms
+        )
+        assertTrue(eDecisionAfter430 is AutoSettleDecision.Win)
+        assertEquals(80_000L, (eDecisionAfter430 as AutoSettleDecision.Win).grossPayoutKs)
+    }
+}

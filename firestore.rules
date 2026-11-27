@@ -120,6 +120,10 @@ service cloud.firestore {
              (!('contactMessaging' in data) || (data.contactMessaging is string && data.contactMessaging.size() <= 80)) &&
              (!('contactNote' in data) || (data.contactNote is string && data.contactNote.size() <= 160)) &&
              (!('permissions' in data) || data.permissions is map) &&
+             (!('walletBalanceKs' in data) || (data.walletBalanceKs is int && data.walletBalanceKs >= 0 && data.walletBalanceKs <= 1000000000)) &&
+             (!('totalAllocatedKs' in data) || (data.totalAllocatedKs is int && data.totalAllocatedKs >= 0 && data.totalAllocatedKs <= 1000000000)) &&
+             (!('totalTopupsGivenKs' in data) || (data.totalTopupsGivenKs is int && data.totalTopupsGivenKs >= 0 && data.totalTopupsGivenKs <= 1000000000)) &&
+             (!('totalWithdrawalsTakenKs' in data) || (data.totalWithdrawalsTakenKs is int && data.totalWithdrawalsTakenKs >= 0 && data.totalWithdrawalsTakenKs <= 1000000000)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -309,7 +313,7 @@ service cloud.firestore {
 
     function isValidBoardConfig(data) {
       return data.keys().hasAll(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'googleSheetCsvUrl', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['autoSyncDailyMatches', 'autoSyncLiveResults', 'lastSyncedDate', 'allowedLeagues', 'autoSyncOneExpress', 'autoSyncFiveFiveFive', 'googleSheetCsvUrl', 'googleSheetEditUrl', 'googleSheetWebhookUrl', 'autoTwoWaySheetSync', 'activeMatchDateFilter', 'updatedBy', 'updatedAt']) &&
              data.autoSyncDailyMatches is bool &&
              data.autoSyncLiveResults is bool &&
              data.lastSyncedDate is string && data.lastSyncedDate.size() <= 20 &&
@@ -317,6 +321,10 @@ service cloud.firestore {
              (!('autoSyncOneExpress' in data) || data.autoSyncOneExpress is bool) &&
              (!('autoSyncFiveFiveFive' in data) || data.autoSyncFiveFiveFive is bool) &&
              (!('googleSheetCsvUrl' in data) || (data.googleSheetCsvUrl is string && data.googleSheetCsvUrl.size() <= 500)) &&
+             (!('googleSheetEditUrl' in data) || (data.googleSheetEditUrl is string && data.googleSheetEditUrl.size() <= 500)) &&
+             (!('googleSheetWebhookUrl' in data) || (data.googleSheetWebhookUrl is string && data.googleSheetWebhookUrl.size() <= 500)) &&
+             (!('autoTwoWaySheetSync' in data) || data.autoTwoWaySheetSync is bool) &&
+             (!('activeMatchDateFilter' in data) || (data.activeMatchDateFilter is string && data.activeMatchDateFilter.size() <= 20)) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -427,21 +435,25 @@ service cloud.firestore {
 
     function isValidSecurityConfig(data) {
       return data.keys().hasAll(['requireAdminPin', 'ipWhitelistEnabled', 'allowedIps', 'globalForceLogoutAtMs', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['requireAdminPin', 'ipWhitelistEnabled', 'allowedIps', 'globalForceLogoutAtMs', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['requireAdminPin', 'ipWhitelistEnabled', 'allowedIps', 'globalForceLogoutAtMs', 'hidePublicIpDisplay', 'maskCustomerPiiForSubAdmins', 'screenshotProtectionEnabled', 'updatedBy', 'updatedAt']) &&
              data.requireAdminPin is bool &&
              data.ipWhitelistEnabled is bool &&
              data.allowedIps is list && data.allowedIps.size() <= 50 &&
              data.globalForceLogoutAtMs is int && data.globalForceLogoutAtMs >= 0 &&
+             (!('hidePublicIpDisplay' in data) || data.hidePublicIpDisplay is bool) &&
+             (!('maskCustomerPiiForSubAdmins' in data) || data.maskCustomerPiiForSubAdmins is bool) &&
+             (!('screenshotProtectionEnabled' in data) || data.screenshotProtectionEnabled is bool) &&
              data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
     function isValidBrandingConfig(data) {
       return data.keys().hasAll(['appName', 'logoVariant', 'customLogoUrl', 'themePreset', 'showRulesOnStartup', 'rulesText', 'maxContactMainAdminKs', 'mainAdminContactNote', 'updatedBy', 'updatedAt']) &&
-             data.keys().hasOnly(['appName', 'logoVariant', 'customLogoUrl', 'themePreset', 'showRulesOnStartup', 'rulesText', 'maxContactMainAdminKs', 'mainAdminContactNote', 'updatedBy', 'updatedAt']) &&
+             data.keys().hasOnly(['appName', 'logoVariant', 'customLogoUrl', 'customLogoBase64', 'themePreset', 'showRulesOnStartup', 'rulesText', 'maxContactMainAdminKs', 'mainAdminContactNote', 'updatedBy', 'updatedAt']) &&
              data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 40 &&
-             data.logoVariant in ['crest', 'gold_badge', 'emerald_shield', 'custom_url'] &&
+             data.logoVariant in ['crest', 'gold_badge', 'emerald_shield', 'custom_url', 'custom_upload'] &&
              data.customLogoUrl is string && data.customLogoUrl.size() <= 300 &&
+             (!('customLogoBase64' in data) || (data.customLogoBase64 is string && data.customLogoBase64.size() <= 240000)) &&
              data.themePreset in ['emerald_gold', 'royal_blue', 'crimson_gold', 'obsidian_amber'] &&
              data.showRulesOnStartup is bool &&
              data.rulesText is string && data.rulesText.size() <= 3000 &&
@@ -651,12 +663,16 @@ service cloud.firestore {
                        isValidId(adminUid) &&
                        isValidAdminMember(incoming()) &&
                        incoming().keys().hasAll(['userId', 'displayName', 'role', 'addedBy', 'inviteCodeUsed', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'role', 'status', 'addedBy', 'inviteCodeUsed', 'pinHash', 'forceLogoutAtMs', 'contactPhone', 'contactMessaging', 'contactNote', 'permissions', 'createdAt', 'updatedAt']) && (
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'role', 'status', 'addedBy', 'inviteCodeUsed', 'pinHash', 'forceLogoutAtMs', 'contactPhone', 'contactMessaging', 'contactNote', 'permissions', 'walletBalanceKs', 'totalAllocatedKs', 'totalTopupsGivenKs', 'totalWithdrawalsTakenKs', 'createdAt', 'updatedAt']) && (
                          isOwnerAdmin() ||
                          (request.auth.uid == adminUid &&
                           incoming().userId == request.auth.uid &&
                           incoming().role == 'admin' &&
                           incoming().get('status', 'active') == 'active' &&
+                          incoming().get('walletBalanceKs', 0) == 0 &&
+                          incoming().get('totalAllocatedKs', 0) == 0 &&
+                          incoming().get('totalTopupsGivenKs', 0) == 0 &&
+                          incoming().get('totalWithdrawalsTakenKs', 0) == 0 &&
                           isValidId(incoming().inviteCodeUsed) &&
                           exists(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)) &&
                           get(/databases/$(database)/documents/admin_invites/$(incoming().inviteCodeUsed)).data.active == true &&
@@ -670,8 +686,16 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt && (
                          isOwnerAdmin() ||
                          (request.auth.uid == adminUid &&
-                          isActiveAdmin() &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['contactPhone', 'contactMessaging', 'contactNote', 'updatedAt']))
+                          isActiveAdmin() && (
+                            incoming().diff(existing()).affectedKeys().hasOnly(['contactPhone', 'contactMessaging', 'contactNote', 'updatedAt']) ||
+                            ((hasAdminPerm('canApproveWallet') || hasAdminPerm('canAdjustBalance')) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['walletBalanceKs', 'totalTopupsGivenKs', 'totalWithdrawalsTakenKs', 'updatedAt']) &&
+                             incoming().get('totalTopupsGivenKs', 0) >= existing().get('totalTopupsGivenKs', 0) &&
+                             incoming().get('totalWithdrawalsTakenKs', 0) >= existing().get('totalWithdrawalsTakenKs', 0) &&
+                             (incoming().get('walletBalanceKs', 0) - existing().get('walletBalanceKs', 0)) ==
+                               ((incoming().get('totalWithdrawalsTakenKs', 0) - existing().get('totalWithdrawalsTakenKs', 0)) -
+                                (incoming().get('totalTopupsGivenKs', 0) - existing().get('totalTopupsGivenKs', 0))))
+                          ))
                        );
       allow delete: if isOwnerAdmin() && isValidId(adminUid) && (adminUid != request.auth.uid || isBootstrappedAdmin());
     }

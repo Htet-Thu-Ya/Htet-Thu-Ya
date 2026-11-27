@@ -158,6 +158,10 @@ data class AdminMember(
     val contactMessaging: String = "",
     val contactNote: String = "",
     val permissions: Map<String, Boolean> = emptyMap(),
+    val walletBalanceKs: Long = 0L,
+    val totalAllocatedKs: Long = 0L,
+    val totalTopupsGivenKs: Long = 0L,
+    val totalWithdrawalsTakenKs: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -413,6 +417,10 @@ data class BoardConfig(
     val lastSyncedDate: String = "",
     val allowedLeagues: List<String> = emptyList(),
     val googleSheetCsvUrl: String = "",
+    val googleSheetEditUrl: String = "",
+    val googleSheetWebhookUrl: String = "",
+    val autoTwoWaySheetSync: Boolean = true,
+    val activeMatchDateFilter: String = "",
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -486,6 +494,9 @@ data class SecurityConfig(
     val ipWhitelistEnabled: Boolean = false,
     val allowedIps: List<String> = emptyList(),
     val globalForceLogoutAtMs: Long = 0L,
+    val hidePublicIpDisplay: Boolean = false,
+    val maskCustomerPiiForSubAdmins: Boolean = false,
+    val screenshotProtectionEnabled: Boolean = false,
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -494,8 +505,9 @@ data class SecurityConfig(
 @IgnoreExtraProperties
 data class BrandingConfig(
     val appName: String = "လိုတရ",
-    val logoVariant: String = "crest", // "crest", "gold_badge", "emerald_shield", "custom_url"
+    val logoVariant: String = "crest", // "crest", "gold_badge", "emerald_shield", "custom_url", "custom_upload"
     val customLogoUrl: String = "",
+    val customLogoBase64: String = "",
     val themePreset: String = "emerald_gold", // "emerald_gold", "royal_blue", "crimson_gold", "obsidian_amber"
     val showRulesOnStartup: Boolean = true,
     val rulesText: String = DEFAULT_RULES_TEXT,

@@ -2,8 +2,13 @@ package com.example.data.betting
 
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
+import com.example.data.model.Live2DStatus
+import com.example.data.model.Lottery2D3DControlConfig
 import com.example.data.model.LotteryDraw
 import com.example.data.model.SportMatch
+import com.example.data.util.MyanmarTimeUtil
+import java.util.Calendar
+import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -33,12 +38,15 @@ object AutoSettleEngine {
         order: BetOrder,
         matchesById: Map<String, SportMatch>,
         draws: List<LotteryDraw>,
-        bettingConfig: BettingConfig = BettingConfig()
+        bettingConfig: BettingConfig = BettingConfig(),
+        live2DConfig: Lottery2D3DControlConfig? = null,
+        live2DStatus: Live2DStatus? = null,
+        nowMs: Long = MyanmarTimeUtil.nowMs()
     ): AutoSettleDecision {
         if (order.status !in listOf("pending", "accepted")) return AutoSettleDecision.NotReady
         return when (order.orderType) {
-            "three_d" -> evaluateLottery(order, draws, digitCount = 3, label = "3D")
-            "two_d" -> evaluateLottery(order, draws, digitCount = 2, label = "2D")
+            "three_d" -> evaluateLottery(order, draws, digitCount = 3, label = "3D", live2DConfig = null, live2DStatus = null, nowMs = nowMs)
+            "two_d" -> evaluateLottery(order, draws, digitCount = 2, label = "2D", live2DConfig = live2DConfig, live2DStatus = live2DStatus, nowMs = nowMs)
             "body_goal", "parlay", "one_express", "five_five_five" -> evaluateSports(order, matchesById)
             else -> AutoSettleDecision.NotReady
         }
@@ -48,16 +56,79 @@ object AutoSettleEngine {
         order: BetOrder,
         draws: List<LotteryDraw>,
         digitCount: Int,
-        label: String
+        label: String,
+        live2DConfig: Lottery2D3DControlConfig?,
+        live2DStatus: Live2DStatus?,
+        nowMs: Long
     ): AutoSettleDecision {
         val round = order.drawRound.trim()
-        val draw = draws.firstOrNull {
-            it.status == "finished" &&
-                it.winningNumber.trim().length == digitCount &&
-                (round.isBlank() || it.roundTitle.equals(round, ignoreCase = true))
-        } ?: return AutoSettleDecision.NotReady
+        val isMorningRound = round.contains("12:01") || round.contains("နေ့လည်") || round.contains("မနက်")
+        val isEveningRound = round.contains("4:30") || round.contains("16:30") || round.contains("ညနေ")
 
-        val winNum = draw.winningNumber.trim()
+        val draw = draws.firstOrNull { d ->
+            d.status == "finished" &&
+                d.winningNumber.trim().length == digitCount &&
+                (round.isBlank() ||
+                    d.roundTitle.equals(round, ignoreCase = true) ||
+                    (isMorningRound && d.roundTitle.contains("12:01")) ||
+                    (isEveningRound && (d.roundTitle.contains("4:30") || d.roundTitle.contains("16:30"))))
+        }
+
+        val resolvedWinNum: String
+        val resolvedMultiplier: Double
+        val sessionTag: String
+        if (draw != null) {
+            resolvedWinNum = draw.winningNumber.trim()
+            resolvedMultiplier = draw.payoutMultiplier
+            sessionTag = draw.roundTitle.ifBlank { label }
+        } else if (digitCount == 2) {
+            val todayIso = MyanmarTimeUtil.todayIsoDate(nowMs)
+            val embeddedDate = Regex("""\d{4}-\d{2}-\d{2}""").find(round)?.value
+            val createdDate = order.createdAt?.toDate()?.time?.let { MyanmarTimeUtil.formatMatchDateIso(it) }
+            val targetDate = embeddedDate ?: createdDate ?: todayIso
+            // Only auto-settle from today's live feed if targetDate matches today
+            if (targetDate > todayIso) return AutoSettleDecision.NotReady
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Yangon")).apply { timeInMillis = nowMs }
+            val minutesOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+            val twoDigitRegex = Regex("""^\d{2}$""")
+            val isManualRoom = live2DConfig != null && !live2DConfig.autoMode
+
+            val candidate = when {
+                isMorningRound -> {
+                    val mVal = if (isManualRoom) {
+                        live2DConfig?.m1201Twod?.trim().orEmpty()
+                    } else {
+                        live2DStatus?.morning1201?.trim().orEmpty()
+                            .ifBlank { live2DConfig?.m1201Twod?.trim().orEmpty() }
+                    }
+                    val timePassed = isManualRoom || targetDate < todayIso || minutesOfDay >= (12 * 60 + 1)
+                    if (timePassed && targetDate == todayIso && twoDigitRegex.matches(mVal)) mVal else ""
+                }
+                isEveningRound -> {
+                    val eVal = if (isManualRoom) {
+                        live2DConfig?.e430Twod?.trim().orEmpty()
+                    } else {
+                        live2DStatus?.evening430?.trim().orEmpty()
+                            .ifBlank { live2DConfig?.e430Twod?.trim().orEmpty() }
+                    }
+                    val timePassed = isManualRoom || targetDate < todayIso || minutesOfDay >= (16 * 60 + 30)
+                    if (timePassed && targetDate == todayIso && twoDigitRegex.matches(eVal)) eVal else ""
+                }
+                else -> {
+                    if (isManualRoom && targetDate == todayIso) {
+                        val lVal = live2DConfig?.liveTwod?.trim().orEmpty()
+                        if (twoDigitRegex.matches(lVal)) lVal else ""
+                    } else ""
+                }
+            }
+            if (!twoDigitRegex.matches(candidate)) return AutoSettleDecision.NotReady
+            resolvedWinNum = candidate
+            resolvedMultiplier = order.multiplier.takeIf { it > 1.0 } ?: 80.0
+            sessionTag = if (isMorningRound) "2D 12:01 PM" else if (isEveningRound) "2D 4:30 PM" else label
+        } else {
+            return AutoSettleDecision.NotReady
+        }
+
         val regex = Regex("""(\d{$digitCount})""")
         val stakeRegex = Regex("""\((\d[\d,]*)\s*Ks\)""")
 
@@ -73,9 +144,9 @@ object AutoSettleEngine {
             val pickedNum = regex.find(sel)?.groupValues?.get(1) ?: return@forEach
             val pickStake = stakeRegex.find(sel)?.groupValues?.get(1)
                 ?.replace(",", "")?.toDoubleOrNull() ?: defaultStakePerPick
-            if (pickedNum == winNum) {
+            if (pickedNum == resolvedWinNum) {
                 matchedCount++
-                matchedGrossKs += pickStake * draw.payoutMultiplier
+                matchedGrossKs += pickStake * resolvedMultiplier
             }
         }
 
@@ -83,11 +154,11 @@ object AutoSettleEngine {
             val gross = matchedGrossKs.roundToLong().coerceAtLeast(order.stakeKs)
             AutoSettleDecision.Win(
                 grossPayoutKs = gross,
-                note = "အလိုအလျောက် $label ထွက်ဂဏန်း $winNum အနိုင်"
+                note = "အလိုအလျောက် $sessionTag ထွက်ဂဏန်း $resolvedWinNum အနိုင်"
             )
         } else {
             AutoSettleDecision.Loss(
-                note = "အလိုအလျောက် $label ထွက်ဂဏန်း $winNum ရှုံး"
+                note = "အလိုအလျောက် $sessionTag ထွက်ဂဏန်း $resolvedWinNum ရှုံး"
             )
         }
     }

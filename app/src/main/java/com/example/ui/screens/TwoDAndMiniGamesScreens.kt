@@ -91,6 +91,7 @@ import com.example.data.model.MiniGameControlConfig
 import com.example.data.model.MiniGameRound
 import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.SubScreenTopBar
@@ -110,7 +111,9 @@ import com.example.ui.theme.PitchEmerald
 import com.example.ui.theme.PitchEmeraldDark
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.cos
 import kotlin.math.roundToLong
 import kotlin.math.sin
@@ -148,11 +151,49 @@ fun TwoDLotteryScreen(
     var stakePerNumberInput by remember { mutableStateOf("500") }
     var showTwoDGrid by remember { mutableStateOf(true) }
 
-    val openDraw = when (drawsState) {
-        is UiState.Success -> drawsState.data.firstOrNull { it.status == "open" && it.drawType == "2d" }
-        else -> null
+    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+    val initialSession = remember {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Yangon"))
+        val mins = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        if (mins < (12 * 60 + 5)) "1201" else "430"
     }
-    val drawMultiplier = openDraw?.payoutMultiplier ?: systemGameConfig.twoDPayoutMultiplier
+    var selectedSession by remember { mutableStateOf(initialSession) }
+
+    val twoDDraws = when (drawsState) {
+        is UiState.Success -> drawsState.data.filter { it.drawType == "2d" }
+        else -> emptyList()
+    }
+    val morningOpenDraw = twoDDraws.firstOrNull {
+        it.status == "open" && (it.roundTitle.contains("12:01") || it.roundTitle.contains("နေ့"))
+    }
+    val eveningOpenDraw = twoDDraws.firstOrNull {
+        it.status == "open" && (it.roundTitle.contains("4:30") || it.roundTitle.contains("16:30") || it.roundTitle.contains("ည"))
+    }
+    val genericOpenDraw = twoDDraws.firstOrNull { it.status == "open" }
+    val selectedOpenDraw = if (selectedSession == "1201") {
+        morningOpenDraw ?: genericOpenDraw
+    } else {
+        eveningOpenDraw ?: genericOpenDraw
+    }
+    val sessionExplicitlyClosed = remember(twoDDraws, selectedSession, todayIso) {
+        val matchingForSession = twoDDraws.filter { d ->
+            if (selectedSession == "1201") d.roundTitle.contains("12:01") || d.roundTitle.contains("နေ့")
+            else d.roundTitle.contains("4:30") || d.roundTitle.contains("16:30") || d.roundTitle.contains("ည")
+        }
+        matchingForSession.isNotEmpty() && matchingForSession.none { it.status == "open" }
+    }
+    val sessionRoundTitle = if (selectedSession == "1201") {
+        "2D နေ့လည် (12:01 PM) • $todayIso"
+    } else {
+        "2D ညနေ (4:30 PM) • $todayIso"
+    }
+    val sessionCloseLabel = if (selectedSession == "1201") {
+        morningOpenDraw?.closeTimeLabel ?: "11:55 AM Close"
+    } else {
+        eveningOpenDraw?.closeTimeLabel ?: "3:55 PM Close"
+    }
+
+    val drawMultiplier = selectedOpenDraw?.payoutMultiplier ?: systemGameConfig.twoDPayoutMultiplier
     val stakePerNumber = stakePerNumberInput.toLongOrNull() ?: 0L
     val totalStake = stakePerNumber * selectedNumbers.size
     val minStake = systemGameConfig.minStakeKs.coerceAtLeast(100L)
@@ -160,7 +201,7 @@ fun TwoDLotteryScreen(
 
     val canSubmit = !busy &&
         !isGamesPaused &&
-        openDraw != null &&
+        !sessionExplicitlyClosed &&
         selectedNumbers.isNotEmpty() &&
         stakePerNumber >= 100L &&
         totalStake in minStake..maxStake &&
@@ -266,7 +307,7 @@ fun TwoDLotteryScreen(
                 }
             }
 
-            // Open Round Info
+            // 12:01 PM vs 4:30 PM Session Selection Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
@@ -280,10 +321,11 @@ fun TwoDLotteryScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = openDraw?.roundTitle ?: "လက်ရှိ ၂လုံးထီ အကြိမ် မဖွင့်သေးပါ",
+                                text = sessionRoundTitle,
                                 color = InkDark,
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
                             )
                             Surface(color = PitchEmeraldDark, shape = RoundedCornerShape(8.dp)) {
                                 Text(
@@ -294,10 +336,72 @@ fun TwoDLotteryScreen(
                                 )
                             }
                         }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val isMorningSelected = selectedSession == "1201"
+                            Surface(
+                                color = if (isMorningSelected) PitchEmeraldDark else Color(0xFFE7ECE9),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(
+                                    width = if (isMorningSelected) 1.5.dp else 1.dp,
+                                    color = if (isMorningSelected) ChampionshipGold else PearlCardBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { selectedSession = "1201" }
+                                    .testTag("two_d_session_1201")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "နေ့လည်ပိုင်း (12:01 PM)",
+                                        color = if (isMorningSelected) Color.White else InkDark,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "ရလဒ်: ${live2DStatus?.morning1201 ?: "--"} • 11:55 AM ပိတ်",
+                                        color = if (isMorningSelected) ChampionshipGoldBright else InkMuted,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily
+                                    )
+                                }
+                            }
+                            Surface(
+                                color = if (!isMorningSelected) PitchEmeraldDark else Color(0xFFE7ECE9),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(
+                                    width = if (!isMorningSelected) 1.5.dp else 1.dp,
+                                    color = if (!isMorningSelected) ChampionshipGold else PearlCardBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { selectedSession = "430" }
+                                    .testTag("two_d_session_430")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "ညနေပိုင်း (4:30 PM)",
+                                        color = if (!isMorningSelected) Color.White else InkDark,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "ရလဒ်: ${live2DStatus?.evening430 ?: "--"} • 3:55 PM ပိတ်",
+                                        color = if (!isMorningSelected) ChampionshipGoldBright else InkMuted,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily
+                                    )
+                                }
+                            }
+                        }
+
                         Text(
-                            text = if (openDraw != null) "ပိတ်ချိန်: ${openDraw.closeTimeLabel} • လက်ကျန်: ${formatKs(balanceKs)}"
-                            else "Admin မှ ၂လုံးထီ (2D) အကြိမ်သစ် ဖွင့်လှစ်ပေးရန် စောင့်ဆိုင်းပါ။",
-                            color = InkMuted,
+                            text = if (sessionExplicitlyClosed) "ဤအကြိမ်အတွက် ထီပိတ်ထားပါသည် • လက်ကျန်: ${formatKs(balanceKs)}"
+                            else "ပိတ်ချိန်: $sessionCloseLabel • လက်ကျန်: ${formatKs(balanceKs)}",
+                            color = if (sessionExplicitlyClosed) AdminCrimson else InkMuted,
                             style = MaterialTheme.typography.bodyMedium
                         )
 
@@ -510,7 +614,7 @@ fun TwoDLotteryScreen(
 
                         Button(
                             onClick = {
-                                val round = openDraw?.roundTitle ?: "2D Round"
+                                val round = sessionRoundTitle
                                 val selections = selectedNumbers.map { num ->
                                     "2D: $num (${formatKs(stakePerNumber)})"
                                 }

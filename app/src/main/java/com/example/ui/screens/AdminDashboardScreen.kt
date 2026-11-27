@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
@@ -83,6 +87,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -166,11 +171,20 @@ private enum class AdminTabKey {
     UPDATE_QUALITY
 }
 
+private fun maskEmailForSubAdmin(email: String): String {
+    val trimmed = email.trim()
+    if (trimmed.isBlank()) return ""
+    val atIdx = trimmed.indexOf('@')
+    if (atIdx <= 1) return "***${trimmed.substring(atIdx.coerceAtLeast(0))}"
+    return "${trimmed.substring(0, 2)}***${trimmed.substring(atIdx)}"
+}
+
 @Composable
 fun AdminDashboardScreen(
     currentUserId: String,
     defaultDisplayName: String = "Admin",
     isOwnerAdmin: Boolean = true,
+    adminMember: AdminMember? = null,
     permissions: AdminPermissions = AdminPermissions.ALL_GRANTED,
     allOrdersState: UiState<List<BetOrder>>,
     allWalletRequestsState: UiState<List<WalletRequest>>,
@@ -251,7 +265,14 @@ fun AdminDashboardScreen(
     onToggleAuto555: (Boolean) -> Unit = {},
     onSaveAllowedLeagues: (List<String>) -> Unit = {},
     onSaveBoardSheetUrl: (String) -> Unit = {},
+    onSaveBoardSheetSettings: (String, String, Boolean) -> Unit = { s, _, _ -> onSaveBoardSheetUrl(s) },
     onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
+    onSyncMatchesFromSheetSilent: (String, String, Boolean) -> Unit = { src, url, _ -> onSyncMatchesFromSheet(src, url) },
+    onPushToGoogleSheetWebhook: () -> Unit = {},
+    onSaveActiveMatchDateFilter: (String) -> Unit = {},
+    onAllocateAdminFloat: (String, String, Long) -> Unit = { _, _, _ -> },
+    onSaveNewMatchWithDate: ((String, String, String, String, String, String, Double, Double, String, String, String, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null,
+    onUpdateMatchDetailsWithDate: ((String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null,
     onImportCsvText: (String, String) -> Unit = { _, _ -> },
     onUpdateMatchFromSheetRow: (SportMatch, String, Long, Long, String, String, String, String, String, String, Double, Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
     onSync2D3DFromApiNow: () -> Unit = {},
@@ -331,13 +352,26 @@ fun AdminDashboardScreen(
         }
     }
 
-    var activeTabKey by remember { mutableStateOf(visibleTabs.firstOrNull() ?: AdminTabKey.AUDIT_LOGS) }
-    LaunchedEffect(visibleTabs) {
-        if (!visibleTabs.contains(activeTabKey)) {
+    var didAutoRouteSubAdmin by remember(currentUserId, isOwnerAdmin) { mutableStateOf(false) }
+    var activeTabKey by remember {
+        mutableStateOf(
+            if (!isOwnerAdmin && permissions.canManageBoardSheet && visibleTabs.contains(AdminTabKey.SHEET_TABLE)) {
+                AdminTabKey.SHEET_TABLE
+            } else {
+                visibleTabs.firstOrNull() ?: AdminTabKey.AUDIT_LOGS
+            }
+        )
+    }
+    LaunchedEffect(visibleTabs, isOwnerAdmin, permissions.canManageBoardSheet) {
+        if (!isOwnerAdmin && permissions.canManageBoardSheet && !didAutoRouteSubAdmin && visibleTabs.contains(AdminTabKey.SHEET_TABLE)) {
+            activeTabKey = AdminTabKey.SHEET_TABLE
+            didAutoRouteSubAdmin = true
+        } else if (!visibleTabs.contains(activeTabKey)) {
             activeTabKey = visibleTabs.firstOrNull() ?: AdminTabKey.AUDIT_LOGS
         }
     }
     val selectedTabIndex = visibleTabs.indexOf(activeTabKey).coerceAtLeast(0)
+    val maskCustomerPii = !isOwnerAdmin && securityConfig.maskCustomerPiiForSubAdmins
 
     var chatCustomerUid by remember { mutableStateOf<String?>(null) }
     var inspectingUserId by remember { mutableStateOf<String?>(null) }
@@ -506,6 +540,7 @@ fun AdminDashboardScreen(
                         usersById = usersById,
                         bettingConfig = bettingConfig,
                         isOwnerAdmin = isOwnerAdmin,
+                        maskCustomerPii = maskCustomerPii,
                         canEditGameConfig = isOwnerAdmin || permissions.canEditGameConfig,
                         canManageBoard = isOwnerAdmin || permissions.canManageBoard,
                         busy = busy,
@@ -555,6 +590,8 @@ fun AdminDashboardScreen(
                         walletConfig = walletConfig,
                         systemGameConfig = systemGameConfig,
                         isOwnerAdmin = isOwnerAdmin,
+                        adminMember = adminMember,
+                        maskCustomerPii = maskCustomerPii,
                         canApproveWallet = isOwnerAdmin || permissions.canApproveWallet,
                         canEditWalletRates = isOwnerAdmin || permissions.canEditWalletRates,
                         busy = busy,
@@ -583,7 +620,11 @@ fun AdminDashboardScreen(
                         onSaveAllowedLeagues = onSaveAllowedLeagues,
                         onSaveSheetUrl = onSaveBoardSheetUrl,
                         onSyncMatchesFromSheet = onSyncMatchesFromSheet,
-                        onImportCsvText = onImportCsvText
+                        onImportCsvText = onImportCsvText,
+                        onSaveActiveMatchDateFilter = onSaveActiveMatchDateFilter,
+                        onPushToWebhook = onPushToGoogleSheetWebhook,
+                        onSaveNewMatchWithDate = onSaveNewMatchWithDate,
+                        onUpdateMatchDetailsWithDate = onUpdateMatchDetailsWithDate
                     )
                     AdminTabKey.ONE_EXPRESS -> AdminExpressBoardTab(
                         boardMode = "one_express",
@@ -607,7 +648,11 @@ fun AdminDashboardScreen(
                             if (visibleTabs.contains(AdminTabKey.SHEET_TABLE)) {
                                 activeTabKey = AdminTabKey.SHEET_TABLE
                             }
-                        }
+                        },
+                        onSaveActiveMatchDateFilter = onSaveActiveMatchDateFilter,
+                        onPushToWebhook = onPushToGoogleSheetWebhook,
+                        onSaveNewMatchWithDate = onSaveNewMatchWithDate,
+                        onUpdateMatchDetailsWithDate = onUpdateMatchDetailsWithDate
                     )
                     AdminTabKey.FIVE_FIVE_FIVE -> AdminExpressBoardTab(
                         boardMode = "five_five_five",
@@ -631,17 +676,26 @@ fun AdminDashboardScreen(
                             if (visibleTabs.contains(AdminTabKey.SHEET_TABLE)) {
                                 activeTabKey = AdminTabKey.SHEET_TABLE
                             }
-                        }
+                        },
+                        onSaveActiveMatchDateFilter = onSaveActiveMatchDateFilter,
+                        onPushToWebhook = onPushToGoogleSheetWebhook,
+                        onSaveNewMatchWithDate = onSaveNewMatchWithDate,
+                        onUpdateMatchDetailsWithDate = onUpdateMatchDetailsWithDate
                     )
                     AdminTabKey.SHEET_TABLE -> AdminMatchSheetTableTab(
                         matches = matches,
                         boardConfig = boardConfig,
                         busy = busy,
                         onSaveSheetUrl = onSaveBoardSheetUrl,
+                        onSaveBoardSheetSettings = onSaveBoardSheetSettings,
                         onSyncMatchesFromSheet = onSyncMatchesFromSheet,
+                        onSyncMatchesFromSheetSilent = onSyncMatchesFromSheetSilent,
+                        onPushToWebhook = onPushToGoogleSheetWebhook,
+                        onSaveActiveMatchDateFilter = onSaveActiveMatchDateFilter,
                         onImportCsvText = onImportCsvText,
                         onUpdateMatchFromSheetRow = onUpdateMatchFromSheetRow,
-                        onSaveNewMatch = onSaveNewMatch
+                        onSaveNewMatch = onSaveNewMatch,
+                        onSaveNewMatchWithDate = onSaveNewMatchWithDate
                     )
                     AdminTabKey.LOTTERY_2D3D_ROOM -> Admin2D3DControlRoomTab(
                         config = lottery2D3DConfig,
@@ -665,6 +719,7 @@ fun AdminDashboardScreen(
                         users = users,
                         orders = orders,
                         busy = busy,
+                        maskCustomerPii = maskCustomerPii,
                         canAdjustBalance = isOwnerAdmin || permissions.canAdjustBalance,
                         canLockUsers = isOwnerAdmin || permissions.canLockUsers,
                         canChat = isOwnerAdmin || permissions.canChat,
@@ -721,6 +776,7 @@ fun AdminDashboardScreen(
                         onSetAdminStatus = onSetAdminStatus,
                         onResetAdminPin = onResetAdminPin,
                         onForceLogoutAdmin = onForceLogoutAdmin,
+                        onAllocateAdminFloat = onAllocateAdminFloat,
                         onRemoveAdmin = onRemoveAdminMember
                     )
                     AdminTabKey.MY_PROFILE -> AdminAgentSelfProfileTab(
@@ -729,6 +785,7 @@ fun AdminDashboardScreen(
                         defaultDisplayName = defaultDisplayName,
                         supportAgents = supportAgents,
                         paymentAccounts = paymentAccounts,
+                        adminMember = adminMember,
                         busy = busy,
                         onSaveSupportAgentProfile = onSaveSupportAgentProfile,
                         onSavePaymentAccount = onSavePaymentAccount,
@@ -794,7 +851,11 @@ fun AdminDashboardScreen(
         val custOrders = remember(orders, uid) { orders.filter { it.userId == uid } }
         val custReqs = remember(walletReqs, uid) { walletReqs.filter { it.userId == uid } }
         AdminCustomerDetailDialog(
-            user = inspectedUser,
+            user = if (maskCustomerPii && inspectedUser.email.isNotBlank()) {
+                inspectedUser.copy(email = maskEmailForSubAdmin(inspectedUser.email))
+            } else {
+                inspectedUser
+            },
             customerOrders = custOrders,
             customerWalletReqs = custReqs,
             matchesById = matchesById,
@@ -885,6 +946,7 @@ private fun AdminOrdersTab(
     usersById: Map<String, UserAccount>,
     bettingConfig: BettingConfig,
     isOwnerAdmin: Boolean,
+    maskCustomerPii: Boolean = false,
     canEditGameConfig: Boolean,
     canManageBoard: Boolean,
     busy: Boolean,
@@ -918,6 +980,7 @@ private fun AdminOrdersTab(
     var deletingOrder by remember { mutableStateOf<BetOrder?>(null) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
     val collapsedCustomers = remember { mutableStateMapOf<String, Boolean>() }
+    val collapsedSubGroups = remember { mutableStateMapOf<String, Boolean>() }
     val matchesById = remember(matches) { matches.associateBy { it.id } }
 
     var commissionPctText by remember { mutableStateOf(bettingConfig.winCommissionPercent.toString()) }
@@ -1359,7 +1422,12 @@ private fun AdminOrdersTab(
                 val custName = userAccount?.displayName?.ifBlank { null }
                     ?: customerOrders.firstOrNull()?.customerName?.ifBlank { null }
                     ?: "Member"
-                val custEmail = userAccount?.email.orEmpty()
+                val rawCustEmail = userAccount?.email.orEmpty()
+                val custEmail = if (maskCustomerPii && rawCustEmail.isNotBlank()) {
+                    maskEmailForSubAdmin(rawCustEmail)
+                } else {
+                    rawCustEmail
+                }
                 val totalStake = customerOrders.sumOf { it.stakeKs }
                 val hasActiveForUser = customerOrders.any { it.status in listOf("pending", "accepted") }
 
@@ -1454,22 +1522,86 @@ private fun AdminOrdersTab(
                 }
 
                 if (!isCollapsed) {
-                    items(customerOrders, key = { it.id }) { order ->
-                        OrderSlipCard(
-                            order = order,
-                            matchesById = matchesById,
-                            isAdminView = true,
-                            busy = busy,
-                            canDeleteAnyOrder = isOwnerAdmin,
-                            onAccept = onAccept,
-                            onAutoSettleOrder = onAutoSettleOrder,
-                            onSettleWin = onRequestSettleWin,
-                            onSettleLoss = onLose,
-                            onReject = onReject,
-                            onDeleteOrder = { target -> deletingOrder = target },
-                            onToggleHideOrder = onToggleHideOrder,
-                            onEditOrder = { target -> editingOrder = target }
-                        )
+                    val morning2DOrders = customerOrders.filter {
+                        it.orderType == "two_d" && (
+                            it.drawRound.contains("12:01") ||
+                                it.drawRound.contains("နေ့") ||
+                                it.drawRound.contains("Morning", ignoreCase = true)
+                            )
+                    }
+                    val evening2DOrders = customerOrders.filter {
+                        it.orderType == "two_d" && !(
+                            it.drawRound.contains("12:01") ||
+                                it.drawRound.contains("နေ့") ||
+                                it.drawRound.contains("Morning", ignoreCase = true)
+                            )
+                    }
+                    val otherOrders = customerOrders.filter { it.orderType != "two_d" }
+                    val subSections = listOf(
+                        Triple("morning_2d", "နေ့ဘက် (12:01 PM)", morning2DOrders),
+                        Triple("evening_2d", "ညဘက် (4:30 PM)", evening2DOrders),
+                        Triple("other", "3D / ဘောလုံး & ဂိမ်း", otherOrders)
+                    ).filter { it.third.isNotEmpty() }
+
+                    subSections.forEach { (subKey, subTitle, subOrders) ->
+                        val subMapKey = "${uid}_$subKey"
+                        val isSubCollapsed = collapsedSubGroups[subMapKey] == true
+                        val subStake = subOrders.sumOf { it.stakeKs }
+                        item(key = "sub_header_$subMapKey") {
+                            Surface(
+                                color = Color(0xFF102B24),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, PitchEmeraldDark.copy(alpha = 0.55f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 10.dp)
+                                    .clickable { collapsedSubGroups[subMapKey] = !isSubCollapsed }
+                                    .testTag("toggle_sub_group_$subMapKey")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "$subTitle • ${subOrders.size} ခု (${formatKs(subStake)})",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = if (isSubCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                        contentDescription = if (isSubCollapsed) "Expand" else "Hide",
+                                        tint = ChampionshipGold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                        if (!isSubCollapsed) {
+                            items(subOrders, key = { it.id }) { order ->
+                                OrderSlipCard(
+                                    order = order,
+                                    matchesById = matchesById,
+                                    isAdminView = true,
+                                    busy = busy,
+                                    canDeleteAnyOrder = isOwnerAdmin,
+                                    onAccept = onAccept,
+                                    onAutoSettleOrder = onAutoSettleOrder,
+                                    onSettleWin = onRequestSettleWin,
+                                    onSettleLoss = onLose,
+                                    onReject = onReject,
+                                    onDeleteOrder = { target -> deletingOrder = target },
+                                    onToggleHideOrder = onToggleHideOrder,
+                                    onEditOrder = { target -> editingOrder = target }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1540,6 +1672,8 @@ private fun AdminWalletRequestsTab(
     walletConfig: WalletConfig,
     systemGameConfig: SystemGameConfig,
     isOwnerAdmin: Boolean,
+    adminMember: AdminMember? = null,
+    maskCustomerPii: Boolean = false,
     canApproveWallet: Boolean,
     canEditWalletRates: Boolean,
     busy: Boolean,
@@ -1585,6 +1719,48 @@ private fun AdminWalletRequestsTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (!isOwnerAdmin && adminMember != null) {
+            item {
+                val isLowFloat = adminMember.walletBalanceKs <= 50_000L
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (isLowFloat) AdminCrimson.copy(alpha = 0.85f) else PitchEmeraldDark.copy(alpha = 0.85f)
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("second_admin_wallet_float_banner")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Second Admin Float လက်ကျန်ငွေ",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Text(
+                            text = formatKs(adminMember.walletBalanceKs),
+                            color = if (isLowFloat) Color(0xFFFCA5A5) else ChampionshipGold,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "စုစုပေါင်းထည့်ပေးငွေ: ${formatKs(adminMember.totalAllocatedKs)} • ထည့်ပေးပြီး: ${formatKs(adminMember.totalTopupsGivenKs)} • ထုတ်ပေးပြီး: ${formatKs(adminMember.totalWithdrawalsTakenKs)}",
+                            color = Color(0xFFC5D7CE),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (isLowFloat) {
+                            Text(
+                                text = "Float ငွေလက်ကျန်နည်းနေပါပြီ — Main Admin ထံမှ Float ထပ်မံတောင်းခံပါ။",
+                                color = Color(0xFFFCA5A5),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
         if (canEditWalletRates) {
             item {
                 Card(
@@ -1955,10 +2131,36 @@ private fun AdminBoardTab(
     onSaveAllowedLeagues: (List<String>) -> Unit = {},
     onSaveSheetUrl: (String) -> Unit = {},
     onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
-    onImportCsvText: (String, String) -> Unit = { _, _ -> }
+    onImportCsvText: (String, String) -> Unit = { _, _ -> },
+    onSaveActiveMatchDateFilter: (String) -> Unit = {},
+    onPushToWebhook: () -> Unit = {},
+    onSaveNewMatchWithDate: ((String, String, String, String, String, String, Double, Double, String, String, String, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null,
+    onUpdateMatchDetailsWithDate: ((String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val standardMatches = remember(matches) {
         matches.filter { it.boardSource.isBlank() || it.boardSource == "standard" }
+    }
+    var adminSearchQuery by remember { mutableStateOf("") }
+    var adminDateFilter by remember(boardConfig.activeMatchDateFilter) {
+        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
+    }
+    val adminAvailableDates = remember(standardMatches) {
+        standardMatches.map { it.matchDate.trim() }
+            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            .distinct()
+            .sorted()
+    }
+    val filteredStandardMatches = remember(standardMatches, adminSearchQuery, adminDateFilter) {
+        val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
+        standardMatches.filter { m ->
+            val dateOk = adminDateFilter.isBlank() || m.matchDate == adminDateFilter
+            val qOk = q.isBlank() ||
+                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
+                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
+                m.league.lowercase(java.util.Locale.US).contains(q)
+            dateOk && qOk
+        }
     }
     var showAddMatch by remember { mutableStateOf(false) }
     var showSheetDialog by remember { mutableStateOf(false) }
@@ -1978,8 +2180,10 @@ private fun AdminBoardTab(
             adminNowMs = System.currentTimeMillis()
         }
     }
-    val groupedStandardMatches = remember(standardMatches) {
-        standardMatches.groupBy { it.league.ifBlank { "Football" } }
+    val groupedStandardMatches = remember(filteredStandardMatches) {
+        filteredStandardMatches
+            .groupBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .toSortedMap(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
     }
     var selectedLeagues by remember(boardConfig.allowedLeagues) {
         mutableStateOf(boardConfig.allowedLeagues.toSet())
@@ -2165,15 +2369,40 @@ private fun AdminBoardTab(
                         Text("2D / 3D ထီသစ်")
                     }
                 }
-                OutlinedButton(
-                    onClick = { showSheetDialog = true },
-                    enabled = !busy,
-                    border = BorderStroke(1.dp, ChampionshipGold),
-                    modifier = Modifier.fillMaxWidth().testTag("sheet_sync_button_standard")
-                ) {
-                    Icon(Icons.Default.TableChart, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Google Sheet / ကွန်ပျူတာ Excel ဖြင့် ပြင်ဆင်/Sync မည်", color = ChampionshipGold, fontWeight = FontWeight.Bold)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showSheetDialog = true },
+                        enabled = !busy,
+                        border = BorderStroke(1.dp, ChampionshipGold),
+                        modifier = Modifier.weight(1f).testTag("sheet_sync_button_standard")
+                    ) {
+                        Icon(Icons.Default.TableChart, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Sheet / Excel Sync", color = ChampionshipGold, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                    val directSheetUrl = boardConfig.googleSheetEditUrl.ifBlank {
+                        FootballFeedService.normalizeGoogleSheetEditUrl(boardConfig.googleSheetCsvUrl)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            if (directSheetUrl.isNotBlank()) {
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(directSheetUrl)))
+                                }.onFailure {
+                                    Toast.makeText(context, "Google Sheet ဖွင့်၍မရပါ", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                showSheetDialog = true
+                            }
+                        },
+                        enabled = !busy,
+                        border = BorderStroke(1.dp, Color(0xFF38BDF8)),
+                        modifier = Modifier.weight(1f).testTag("open_google_sheet_standard")
+                    ) {
+                        Icon(Icons.Default.Link, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Google Sheet ဖွင့်", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
                 }
             }
         }
@@ -2234,16 +2463,81 @@ private fun AdminBoardTab(
         }
 
         item {
-            HideBarSectionHeader(
-                title = "ဘောလုံးပွဲစဉ်များ (ပင်မဇယား)",
-                countBadge = "${standardMatches.size}",
-                isVisible = showMatchesSection,
-                onToggle = { showMatchesSection = !showMatchesSection },
-                testTag = "hide_bar_admin_matches"
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                HideBarSectionHeader(
+                    title = "ဘောလုံးပွဲစဉ်များ (ပင်မဇယား)",
+                    countBadge = "${filteredStandardMatches.size}",
+                    isVisible = showMatchesSection,
+                    onToggle = { showMatchesSection = !showMatchesSection },
+                    testTag = "hide_bar_admin_matches"
+                )
+                if (showMatchesSection) {
+                    OutlinedTextField(
+                        value = adminSearchQuery,
+                        onValueChange = { adminSearchQuery = it },
+                        placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (adminSearchQuery.isNotBlank()) {
+                                IconButton(onClick = { adminSearchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedTextColor = InkDark,
+                            unfocusedTextColor = InkDark
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_search_standard")
+                    )
+                    if (adminAvailableDates.isNotEmpty()) {
+                        val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+                        val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(adminNowMs + 86_400_000L) }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            item {
+                                FilterChip(
+                                    selected = adminDateFilter.isBlank(),
+                                    onClick = { adminDateFilter = "" },
+                                    label = { Text("အားလုံး") }
+                                )
+                            }
+                            items(adminAvailableDates) { d ->
+                                val label = when (d) {
+                                    todayIso -> "ယနေ့ ($d)"
+                                    tomorrowIso -> "မနက်ဖြန် ($d)"
+                                    else -> d
+                                }
+                                FilterChip(
+                                    selected = adminDateFilter == d,
+                                    onClick = { adminDateFilter = d },
+                                    label = { Text(label) }
+                                )
+                            }
+                            item {
+                                OutlinedButton(
+                                    onClick = { onSaveActiveMatchDateFilter(adminDateFilter) },
+                                    enabled = !busy,
+                                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
+                                    modifier = Modifier.testTag("pin_active_date_standard")
+                                ) {
+                                    Text(
+                                        text = if (adminDateFilter.isBlank()) "Customer အားလုံးပြ Pin" else "Pin ရက်",
+                                        color = ChampionshipGold,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         if (showMatchesSection) {
-            if (standardMatches.isNotEmpty()) {
+            if (filteredStandardMatches.isNotEmpty()) {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2355,10 +2649,19 @@ private fun AdminBoardTab(
     if (showAddMatch) {
         AddMatchDialog(
             boardMode = "standard",
+            initialMatchDate = adminDateFilter.ifBlank { MyanmarTimeUtil.todayIsoDate() },
             onDismiss = { showAddMatch = false },
             onSave = { l, h, a, k, hand, goal, bOdds, gOdds, oneExpKyay, fffKyay, xBetOdds ->
                 showAddMatch = false
                 onSaveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, "standard", oneExpKyay, fffKyay, xBetOdds)
+            },
+            onSaveWithDate = { l, h, a, k, hand, goal, bOdds, gOdds, oneExpKyay, fffKyay, xBetOdds, mDate ->
+                showAddMatch = false
+                if (onSaveNewMatchWithDate != null) {
+                    onSaveNewMatchWithDate(l, h, a, k, hand, goal, bOdds, gOdds, "standard", oneExpKyay, fffKyay, xBetOdds, mDate)
+                } else {
+                    onSaveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, "standard", oneExpKyay, fffKyay, xBetOdds)
+                }
             }
         )
     }
@@ -2370,6 +2673,14 @@ private fun AdminBoardTab(
             onUpdate = { l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds ->
                 editingMatch = null
                 onUpdateMatchDetails(m.id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds)
+            },
+            onUpdateWithDate = { l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds, mDate ->
+                editingMatch = null
+                if (onUpdateMatchDetailsWithDate != null) {
+                    onUpdateMatchDetailsWithDate(m.id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds, mDate)
+                } else {
+                    onUpdateMatchDetails(m.id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds)
+                }
             },
             onRequestDelete = {
                 editingMatch = null
@@ -2428,7 +2739,7 @@ private fun AdminBoardTab(
         MatchSheetSyncDialog(
             boardMode = "standard",
             boardConfig = boardConfig,
-            matchesToExport = standardMatches,
+            matchesToExport = filteredStandardMatches,
             busy = busy,
             onDismiss = { showSheetDialog = false },
             onSaveSheetUrl = onSaveSheetUrl,
@@ -2439,7 +2750,8 @@ private fun AdminBoardTab(
             onImportCsvText = { csvText ->
                 onImportCsvText("standard", csvText)
                 showSheetDialog = false
-            }
+            },
+            onPushToWebhook = onPushToWebhook
         )
     }
 }
@@ -2450,6 +2762,7 @@ private fun AdminCustomersTab(
     users: List<UserAccount>,
     orders: List<BetOrder>,
     busy: Boolean,
+    maskCustomerPii: Boolean = false,
     canAdjustBalance: Boolean,
     canLockUsers: Boolean,
     canChat: Boolean,
@@ -2472,12 +2785,12 @@ private fun AdminCustomersTab(
     val ordersByUser = remember(orders) { orders.groupBy { it.userId } }
     val hiddenCount = remember(users) { users.count { it.isHidden } }
 
-    val filteredUsers = remember(users, searchQuery, showHiddenUsers) {
+    val filteredUsers = remember(users, searchQuery, showHiddenUsers, maskCustomerPii) {
         val visibleList = if (showHiddenUsers) users else users.filter { !it.isHidden }
         val q = searchQuery.trim().lowercase()
         if (q.isBlank()) visibleList
         else visibleList.filter {
-            it.displayName.lowercase().contains(q) || it.email.lowercase().contains(q)
+            it.displayName.lowercase().contains(q) || (!maskCustomerPii && it.email.lowercase().contains(q))
         }
     }
 
@@ -2670,9 +2983,14 @@ private fun AdminCustomersTab(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Spacer(Modifier.width(4.dp))
+                                val shownEmail = if (maskCustomerPii && user.email.isNotBlank()) {
+                                    maskEmailForSubAdmin(user.email)
+                                } else {
+                                    user.email
+                                }
                                 Text(
-                                    text = user.email.ifBlank { "Gmail မသိမ်းဆည်းရသေးပါ" },
-                                    color = if (user.email.isNotBlank()) PitchEmeraldDark else InkMuted,
+                                    text = shownEmail.ifBlank { "Gmail မသိမ်းဆည်းရသေးပါ" },
+                                    color = if (shownEmail.isNotBlank()) PitchEmeraldDark else InkMuted,
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis

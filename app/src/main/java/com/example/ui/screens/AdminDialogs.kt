@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.ui.platform.LocalContext
 import com.example.data.betting.KyayFormatter
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.FullScreenReceiptDialog
 import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
@@ -112,6 +113,7 @@ import com.example.ui.theme.PitchEmeraldDark
 @Composable
 fun AddMatchDialog(
     boardMode: String = "standard",
+    initialMatchDate: String = MyanmarTimeUtil.todayIsoDate(),
     onDismiss: () -> Unit,
     onSave: (
         league: String,
@@ -125,8 +127,27 @@ fun AddMatchDialog(
         oneExpressKyay: String,
         fiveFiveFiveKyay: String,
         oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
-    ) -> Unit
+    ) -> Unit,
+    onSaveWithDate: ((
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
+        oneExpressKyay: String,
+        fiveFiveFiveKyay: String,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?,
+        matchDate: String
+    ) -> Unit)? = null
 ) {
+    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(MyanmarTimeUtil.nowMs() + 86_400_000L) }
+    var matchDate by remember(initialMatchDate) {
+        mutableStateOf(initialMatchDate.ifBlank { todayIso })
+    }
     var league by remember { mutableStateOf("Premier League") }
     var home by remember { mutableStateOf("") }
     var away by remember { mutableStateOf("") }
@@ -167,6 +188,24 @@ fun AddMatchDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = matchDate == todayIso,
+                        onClick = { matchDate = todayIso },
+                        label = { Text("ယနေ့") }
+                    )
+                    FilterChip(
+                        selected = matchDate == tomorrowIso,
+                        onClick = { matchDate = tomorrowIso },
+                        label = { Text("မနက်ဖြန်") }
+                    )
+                }
+                OutlinedTextField(
+                    value = matchDate,
+                    onValueChange = { matchDate = it.take(10) },
+                    label = { Text("ပွဲကန်မည့်ရက် (YYYY-MM-DD)") },
+                    singleLine = true
+                )
                 OutlinedTextField(value = league, onValueChange = { league = it }, label = { Text("လိဂ်") }, singleLine = true)
                 OutlinedTextField(value = home, onValueChange = { home = it }, label = { Text("အိမ်ရှင် အသင်း") }, singleLine = true)
                 OutlinedTextField(value = away, onValueChange = { away = it }, label = { Text("ဧည့်သည် အသင်း") }, singleLine = true)
@@ -265,19 +304,36 @@ fun AddMatchDialog(
                             underOdds = underOdds.toDoubleOrNull() ?: 1.90
                         )
                     } else null
-                    onSave(
-                        league,
-                        home,
-                        away,
-                        kickoff,
-                        handicap,
-                        goalLine,
-                        bodyOdds.toDoubleOrNull() ?: 1.90,
-                        goalOdds.toDoubleOrNull() ?: 1.90,
-                        oneExpKyay,
-                        fffKyay,
-                        xBetSpec
-                    )
+                    if (onSaveWithDate != null) {
+                        onSaveWithDate(
+                            league,
+                            home,
+                            away,
+                            kickoff,
+                            handicap,
+                            goalLine,
+                            bodyOdds.toDoubleOrNull() ?: 1.90,
+                            goalOdds.toDoubleOrNull() ?: 1.90,
+                            oneExpKyay,
+                            fffKyay,
+                            xBetSpec,
+                            matchDate.trim()
+                        )
+                    } else {
+                        onSave(
+                            league,
+                            home,
+                            away,
+                            kickoff,
+                            handicap,
+                            goalLine,
+                            bodyOdds.toDoubleOrNull() ?: 1.90,
+                            goalOdds.toDoubleOrNull() ?: 1.90,
+                            oneExpKyay,
+                            fffKyay,
+                            xBetSpec
+                        )
+                    }
                 },
                 enabled = league.isNotBlank() && home.isNotBlank() && away.isNotBlank()
             ) {
@@ -311,8 +367,28 @@ fun EditMatchResultDialog(
         fiveFiveFiveKyay: String?,
         oneXBetOdds: com.example.data.model.OneXBetOddsSpec?
     ) -> Unit,
-    onRequestDelete: () -> Unit
+    onRequestDelete: () -> Unit,
+    onUpdateWithDate: ((
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
+        status: String,
+        homeScore: Long,
+        awayScore: Long,
+        oneExpressKyay: String?,
+        fiveFiveFiveKyay: String?,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?,
+        matchDate: String
+    ) -> Unit)? = null
 ) {
+    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(MyanmarTimeUtil.nowMs() + 86_400_000L) }
+    var matchDate by remember(match.id) { mutableStateOf(match.matchDate.ifBlank { todayIso }) }
     var league by remember(match.id) { mutableStateOf(match.league) }
     var homeTeam by remember(match.id) { mutableStateOf(match.homeTeam) }
     var awayTeam by remember(match.id) { mutableStateOf(match.awayTeam) }
@@ -368,6 +444,24 @@ fun EditMatchResultDialog(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = matchDate == todayIso,
+                        onClick = { matchDate = todayIso },
+                        label = { Text("ယနေ့") }
+                    )
+                    FilterChip(
+                        selected = matchDate == tomorrowIso,
+                        onClick = { matchDate = tomorrowIso },
+                        label = { Text("မနက်ဖြန်") }
+                    )
+                }
+                OutlinedTextField(
+                    value = matchDate,
+                    onValueChange = { matchDate = it.take(10) },
+                    label = { Text("ပွဲကန်မည့်ရက် (YYYY-MM-DD)") },
+                    singleLine = true
+                )
                 OutlinedTextField(value = league, onValueChange = { league = it }, label = { Text("လိဂ်") }, singleLine = true)
                 OutlinedTextField(value = homeTeam, onValueChange = { homeTeam = it }, label = { Text("အိမ်ရှင် အသင်း") }, singleLine = true)
                 OutlinedTextField(value = awayTeam, onValueChange = { awayTeam = it }, label = { Text("ဧည့်သည် အသင်း") }, singleLine = true)
@@ -472,22 +566,42 @@ fun EditMatchResultDialog(
                             underOdds = underOdds.toDoubleOrNull() ?: match.underOdds
                         )
                     } else null
-                    onUpdate(
-                        league,
-                        homeTeam,
-                        awayTeam,
-                        kickoffLabel,
-                        handicapLine,
-                        goalLine,
-                        bodyOdds.toDoubleOrNull() ?: match.bodyOdds,
-                        goalOdds.toDoubleOrNull() ?: match.goalOdds,
-                        status,
-                        homeScore.toLongOrNull() ?: 0L,
-                        awayScore.toLongOrNull() ?: 0L,
-                        if (isOneExpress) oneExpKyay else null,
-                        if (boardMode == "five_five_five" || match.boardSource == "five_five_five") fffKyay else null,
-                        xBetSpec
-                    )
+                    if (onUpdateWithDate != null) {
+                        onUpdateWithDate(
+                            league,
+                            homeTeam,
+                            awayTeam,
+                            kickoffLabel,
+                            handicapLine,
+                            goalLine,
+                            bodyOdds.toDoubleOrNull() ?: match.bodyOdds,
+                            goalOdds.toDoubleOrNull() ?: match.goalOdds,
+                            status,
+                            homeScore.toLongOrNull() ?: 0L,
+                            awayScore.toLongOrNull() ?: 0L,
+                            if (isOneExpress) oneExpKyay else null,
+                            if (boardMode == "five_five_five" || match.boardSource == "five_five_five") fffKyay else null,
+                            xBetSpec,
+                            matchDate.trim()
+                        )
+                    } else {
+                        onUpdate(
+                            league,
+                            homeTeam,
+                            awayTeam,
+                            kickoffLabel,
+                            handicapLine,
+                            goalLine,
+                            bodyOdds.toDoubleOrNull() ?: match.bodyOdds,
+                            goalOdds.toDoubleOrNull() ?: match.goalOdds,
+                            status,
+                            homeScore.toLongOrNull() ?: 0L,
+                            awayScore.toLongOrNull() ?: 0L,
+                            if (isOneExpress) oneExpKyay else null,
+                            if (boardMode == "five_five_five" || match.boardSource == "five_five_five") fffKyay else null,
+                            xBetSpec
+                        )
+                    }
                 },
                 enabled = league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank(),
                 modifier = Modifier.testTag("dialog_save_match_button")

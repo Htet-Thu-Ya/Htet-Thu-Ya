@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,13 +32,16 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TableChart
@@ -52,6 +59,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -90,6 +98,10 @@ import com.example.ui.components.BoardGreenAccent
 import com.example.ui.components.BoardMatchInfoDialog
 import com.example.ui.components.BoardTopBarBg
 import com.example.ui.components.EmptyStateCard
+import com.example.ui.components.FiveFiveFiveDarkCanvas
+import com.example.ui.components.FiveFiveFiveLeagueHeaderStrip
+import com.example.ui.components.FiveFiveFiveScreenshotCard
+import com.example.ui.components.FiveFiveFiveTopBarBg
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.LeagueHideBarHeader
 import com.example.ui.components.MatchPick
@@ -158,7 +170,12 @@ fun ExpressOddsOrderScreen(
     var isParlay by remember(boardMode, initialIsParlay) { mutableStateOf(initialIsParlay) }
     val selectedPicks = remember(boardMode) { mutableStateMapOf<String, MatchPick>() }
     var stakeInput by remember(boardMode) { mutableStateOf("1000") }
-    var selectedLeagueFilter by remember(boardMode) { mutableStateOf<String?>(null) }
+    var selectedLeaguesFilter by remember(boardMode) { mutableStateOf<Set<String>>(emptySet()) }
+    var searchQuery by remember(boardMode) { mutableStateOf("") }
+    var showSearchBar by remember(boardMode) { mutableStateOf(false) }
+    var selectedDateFilter by remember(boardMode, boardConfig.activeMatchDateFilter) {
+        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
+    }
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showBoardTable by remember { mutableStateOf(true) }
@@ -176,10 +193,10 @@ fun ExpressOddsOrderScreen(
             }
             else -> emptyList()
         }
-        val allowed = boardConfig.allowedLeagues.map { it.trim() }.filter { it.isNotBlank() }
+        val allowed = boardConfig.allowedLeagues.map { it.trim().lowercase(java.util.Locale.US) }.filter { it.isNotBlank() }.toSet()
         if (allowed.isEmpty()) allOpen
         else allOpen.filter { m ->
-            allowed.any { lg -> m.league.equals(lg, ignoreCase = true) || m.league.contains(lg, ignoreCase = true) }
+            FootballFeedService.matchesAllowedLeague(m.league, allowed)
         }
     }
 
@@ -190,16 +207,37 @@ fun ExpressOddsOrderScreen(
     }
 
     val availableLeagues = remember(openMatches) {
-        openMatches.map { it.league.ifBlank { "Other" } }.distinct()
+        openMatches.map { FootballFeedService.canonicalLeagueName(it.league) }
+            .distinct()
+            .sortedWith(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
     }
 
-    val filteredMatches = remember(openMatches, selectedLeagueFilter) {
-        if (selectedLeagueFilter == null) openMatches
-        else openMatches.filter { it.league == selectedLeagueFilter }
+    val availableDates = remember(openMatches) {
+        openMatches.map { it.matchDate.trim() }
+            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            .distinct()
+            .sorted()
+    }
+
+    val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {
+        val q = searchQuery.trim().lowercase(java.util.Locale.US)
+        val filterLower = selectedLeaguesFilter.map { it.trim().lowercase(java.util.Locale.US) }.toSet()
+        openMatches.filter { m ->
+            val leagueOk = filterLower.isEmpty() ||
+                FootballFeedService.matchesAllowedLeague(m.league, filterLower)
+            val dateOk = selectedDateFilter.isBlank() || m.matchDate == selectedDateFilter
+            val searchOk = q.isBlank() ||
+                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
+                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
+                m.league.lowercase(java.util.Locale.US).contains(q)
+            leagueOk && dateOk && searchOk
+        }
     }
 
     val groupedByLeague = remember(filteredMatches) {
-        filteredMatches.groupBy { it.league.ifBlank { "Football" } }
+        filteredMatches
+            .groupBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .toSortedMap(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
     }
 
     val combinedMultiplier = remember(selectedPicks.values.toList()) {
@@ -232,10 +270,10 @@ fun ExpressOddsOrderScreen(
         parsedStake in minAllowedStake..maxAllowedStake &&
         parsedStake <= balanceKs
 
-    val accentColor = if (isOneExpress) OneXBetRoyalBlue else ChampionshipGold
-    val topBarBg = if (isOneExpress) OneXBetHeaderBlue else BoardTopBarBg
-    val stripBg = if (isOneExpress) OneXBetStripBlue else BoardTopBarBg
-    val screenBg = if (isOneExpress) OneXBetCanvasBg else Color(0xFFEBEFED)
+    val accentColor = if (isOneExpress) OneXBetRoyalBlue else BoardGreenAccent
+    val topBarBg = if (isOneExpress) OneXBetHeaderBlue else FiveFiveFiveTopBarBg
+    val stripBg = if (isOneExpress) OneXBetStripBlue else FiveFiveFiveTopBarBg
+    val screenBg = if (isOneExpress) OneXBetCanvasBg else FiveFiveFiveDarkCanvas
 
     Scaffold(
         containerColor = screenBg,
@@ -243,14 +281,58 @@ fun ExpressOddsOrderScreen(
             Column {
                 TopAppBar(
                     title = {
-                        Text(
-                            text = if (isParlay) "$boardName • မောင်း" else "$boardName • ဘောလုံး",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (!isOneExpress) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier
+                                    .clickable {
+                                        val nextParlay = !isParlay
+                                        isParlay = nextParlay
+                                        if (!nextParlay && selectedPicks.size > 1) {
+                                            val keepEntry = selectedPicks.entries.lastOrNull()
+                                            selectedPicks.clear()
+                                            if (keepEntry != null) {
+                                                selectedPicks[keepEntry.key] = keepEntry.value
+                                            }
+                                        }
+                                    }
+                                    .testTag("express_five_five_five_mode_toggle")
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "555",
+                                        color = BoardGreenAccent,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(
+                                        text = "Mix",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Text(
+                                    text = if (isParlay) "မောင်း" else "ဘော်ဒီ/ဂိုးပေါင်း",
+                                    color = Color(0xFFE5E7EB),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = if (isParlay) "$boardName • မောင်း" else "$boardName • ဘောလုံး",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(
@@ -265,16 +347,16 @@ fun ExpressOddsOrderScreen(
                         }
                     },
                     actions = {
-                        if (selectedLeagueFilter != null) {
+                        if (selectedLeaguesFilter.isNotEmpty()) {
                             Surface(
                                 color = BoardGreenAccent.copy(alpha = 0.25f),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .padding(end = 4.dp)
-                                    .clickable { selectedLeagueFilter = null }
+                                    .clickable { selectedLeaguesFilter = emptySet() }
                             ) {
                                 Text(
-                                    text = selectedLeagueFilter ?: "",
+                                    text = "${selectedLeaguesFilter.size} လိဂ် ×",
                                     color = Color.White,
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -283,13 +365,23 @@ fun ExpressOddsOrderScreen(
                             }
                         }
                         IconButton(
+                            onClick = { showSearchBar = !showSearchBar },
+                            modifier = Modifier.testTag("express_${boardMode}_search_button")
+                        ) {
+                            Icon(
+                                imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = "Search teams",
+                                tint = if (searchQuery.isNotBlank()) ChampionshipGold else Color.White
+                            )
+                        }
+                        IconButton(
                             onClick = { showLeagueFilterDialog = true },
                             modifier = Modifier.testTag("express_${boardMode}_filter_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.FilterList,
                                 contentDescription = "League Filter",
-                                tint = if (selectedLeagueFilter != null) ChampionshipGold else Color.White
+                                tint = if (selectedLeaguesFilter.isNotEmpty()) ChampionshipGold else Color.White
                             )
                         }
                     },
@@ -381,6 +473,66 @@ fun ExpressOddsOrderScreen(
                         modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        if (showSearchBar || availableDates.size > 1) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 620.dp)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (showSearchBar) {
+                                    OutlinedTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
+                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        trailingIcon = {
+                                            if (searchQuery.isNotBlank()) {
+                                                IconButton(onClick = { searchQuery = "" }) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                                                }
+                                            }
+                                        },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = Color.White,
+                                            unfocusedContainerColor = Color.White,
+                                            focusedTextColor = InkDark,
+                                            unfocusedTextColor = InkDark
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("express_${boardMode}_search_input")
+                                    )
+                                }
+                                if (availableDates.isNotEmpty()) {
+                                    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+                                    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(nowMs + 86_400_000L) }
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        item {
+                                            FilterChip(
+                                                selected = selectedDateFilter.isBlank(),
+                                                onClick = { selectedDateFilter = "" },
+                                                label = { Text("အားလုံး") }
+                                            )
+                                        }
+                                        items(availableDates) { dateIso ->
+                                            val label = when (dateIso) {
+                                                todayIso -> "ယနေ့ ($dateIso)"
+                                                tomorrowIso -> "မနက်ဖြန် ($dateIso)"
+                                                else -> dateIso
+                                            }
+                                            FilterChip(
+                                                selected = selectedDateFilter == dateIso,
+                                                onClick = { selectedDateFilter = dateIso },
+                                                label = { Text(label) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (isFootballPaused) {
                             Box(
                                 modifier = Modifier
@@ -407,18 +559,23 @@ fun ExpressOddsOrderScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
-                                Icon(Icons.Default.SportsSoccer, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(56.dp))
+                                Icon(
+                                    Icons.Default.SportsSoccer,
+                                    contentDescription = null,
+                                    tint = if (isOneExpress) PitchEmeraldDark else BoardGreenAccent,
+                                    modifier = Modifier.size(56.dp)
+                                )
                                 Spacer(Modifier.height(12.dp))
                                 Text(
                                     text = "လက်ရှိ $boardName ပွဲစဉ် မရှိသေးပါ",
-                                    color = InkDark,
+                                    color = if (isOneExpress) InkDark else Color.White,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
                                     text = "Admin မှ $boardName ပွဲစဉ်များ ထည့်သွင်း/Auto-Sync လုပ်ပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
-                                    color = InkMuted,
+                                    color = if (isOneExpress) InkMuted else Color(0xFFD1D5DB),
                                     style = MaterialTheme.typography.bodyMedium,
                                     textAlign = TextAlign.Center
                                 )
@@ -440,54 +597,40 @@ fun ExpressOddsOrderScreen(
                                         testTag = "hide_bar_express_${boardMode}_list"
                                     )
                                 } else {
-                                    Column(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(FiveFiveFiveTopBarBg)
+                                            .clickable { showBoardTable = !showBoardTable }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            .testTag("hide_bar_express_${boardMode}_list"),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        HideBarSectionHeader(
-                                            title = if (isParlay) "$boardName မောင်း ပွဲစဉ်ဇယား" else "$boardName ပွဲစဉ်ဇယား",
-                                            countBadge = "${filteredMatches.size} ပွဲ",
-                                            isVisible = showBoardTable,
-                                            onToggle = { showBoardTable = !showBoardTable },
-                                            testTag = "hide_bar_express_${boardMode}_list"
+                                        Text(
+                                            text = "ပွဲစဉ် (${filteredMatches.size}) • MMT",
+                                            color = Color(0xFFD1D5DB),
+                                            style = MaterialTheme.typography.labelMedium
                                         )
-                                        if (showBoardTable) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            TextButton(
+                                                onClick = { groupedByLeague.keys.forEach { expandedLeagues[it] = true } },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                             ) {
-                                                Text(
-                                                    text = "မြန်မာစံတော်ချိန် (MMT) • အာရှကြေး",
-                                                    color = InkMuted,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                    TextButton(
-                                                        onClick = {
-                                                            groupedByLeague.keys.forEach { expandedLeagues[it] = true }
-                                                        },
-                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                                    ) {
-                                                        Text("အားလုံးဖွင့်", color = PitchEmeraldDark, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                                    }
-                                                    TextButton(
-                                                        onClick = {
-                                                            groupedByLeague.keys.forEach { expandedLeagues[it] = false }
-                                                        },
-                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                                    ) {
-                                                        Text("အားလုံးဝှက်", color = InkMuted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                                    }
-                                                }
+                                                Text("အားလုံးဖွင့်", color = BoardGreenAccent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                            }
+                                            TextButton(
+                                                onClick = { groupedByLeague.keys.forEach { expandedLeagues[it] = false } },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("အားလုံးဝှက်", color = Color(0xFF9CA3AF), style = MaterialTheme.typography.labelSmall)
                                             }
                                         }
                                     }
                                 }
                             }
                             if (showBoardTable) {
-                                val singleLeagueMode = groupedByLeague.size == 1 || selectedLeagueFilter != null
+                                val singleLeagueMode = !isOneExpress || groupedByLeague.size == 1 || selectedLeaguesFilter.isNotEmpty() || searchQuery.isNotBlank()
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
                                     val isExpanded = expandedLeagues[leagueName] ?: singleLeagueMode
                                     item(key = "express_league_hdr_$leagueName") {
@@ -499,12 +642,13 @@ fun ExpressOddsOrderScreen(
                                                 onToggle = { expandedLeagues[leagueName] = !isExpanded }
                                             )
                                         } else {
-                                            LeagueHideBarHeader(
-                                                leagueName = leagueName,
-                                                matchCount = leagueMatches.size,
-                                                isExpanded = isExpanded,
-                                                onToggle = { expandedLeagues[leagueName] = !isExpanded }
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { expandedLeagues[leagueName] = !isExpanded }
+                                            ) {
+                                                FiveFiveFiveLeagueHeaderStrip(leagueName = leagueName)
+                                            }
                                         }
                                     }
 
@@ -530,7 +674,7 @@ fun ExpressOddsOrderScreen(
                                                     onSelect = handleSelect
                                                 )
                                             } else {
-                                                ScreenshotMatchRowCard(
+                                                FiveFiveFiveScreenshotCard(
                                                     match = match,
                                                     selectedPickKey = currentPick?.pickKey,
                                                     onShowInfo = { infoMatch = match },
@@ -554,8 +698,12 @@ fun ExpressOddsOrderScreen(
         SportsLeagueFilterDialog(
             totalCount = openMatches.size,
             availableLeagues = availableLeagues,
-            selectedLeague = selectedLeagueFilter,
-            onSelectLeague = { selectedLeagueFilter = it },
+            selectedLeague = null,
+            onSelectLeague = { lg ->
+                selectedLeaguesFilter = if (lg == null) emptySet() else setOf(lg)
+            },
+            selectedLeagues = selectedLeaguesFilter,
+            onSelectLeagues = { selectedLeaguesFilter = it },
             onDismiss = { showLeagueFilterDialog = false }
         )
     }
@@ -618,14 +766,70 @@ fun AdminExpressBoardTab(
     onSaveSheetUrl: (String) -> Unit = {},
     onSyncMatchesFromSheet: (String, String) -> Unit = { _, _ -> },
     onImportCsvText: (String, String) -> Unit = { _, _ -> },
-    onOpenSheetTable: (() -> Unit)? = null
+    onOpenSheetTable: (() -> Unit)? = null,
+    onSaveActiveMatchDateFilter: (String) -> Unit = {},
+    onPushToWebhook: () -> Unit = {},
+    onSaveNewMatchWithDate: ((
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
+        boardSource: String,
+        oneExpressKyay: String,
+        fiveFiveFiveKyay: String,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?,
+        matchDate: String
+    ) -> Unit)? = null,
+    onUpdateMatchDetailsWithDate: ((
+        matchId: String,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
+        status: String,
+        homeScore: Long,
+        awayScore: Long,
+        oneExpressKyay: String?,
+        fiveFiveFiveKyay: String?,
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec?,
+        matchDate: String
+    ) -> Unit)? = null
 ) {
     val isOneExpress = boardMode == "one_express"
     val boardTitle = if (isOneExpress) "1xBET ဘောလုံးပွဲကြေး" else "555 Mix ဘောလုံးပွဲကြေး"
     val accent = if (isOneExpress) Color(0xFF38BDF8) else ChampionshipGold
     val autoEnabled = if (isOneExpress) boardConfig.autoSyncOneExpress else boardConfig.autoSyncFiveFiveFive
-    val filteredMatches = remember(matches, boardMode) {
+    var adminSearchQuery by remember(boardMode) { mutableStateOf("") }
+    var adminDateFilter by remember(boardMode, boardConfig.activeMatchDateFilter) {
+        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
+    }
+    val boardMatches = remember(matches, boardMode) {
         matches.filter { it.boardSource == boardMode }
+    }
+    val adminAvailableDates = remember(boardMatches) {
+        boardMatches.map { it.matchDate.trim() }
+            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            .distinct()
+            .sorted()
+    }
+    val filteredMatches = remember(boardMatches, adminSearchQuery, adminDateFilter) {
+        val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
+        boardMatches.filter { m ->
+            val dateOk = adminDateFilter.isBlank() || m.matchDate == adminDateFilter
+            val qOk = q.isBlank() ||
+                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
+                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
+                m.league.lowercase(java.util.Locale.US).contains(q)
+            dateOk && qOk
+        }
     }
 
     var showAutoSyncCard by remember(boardMode) { mutableStateOf(true) }
@@ -640,7 +844,9 @@ fun AdminExpressBoardTab(
         }
     }
     val groupedAdminMatches = remember(filteredMatches) {
-        filteredMatches.groupBy { it.league.ifBlank { "Football" } }
+        filteredMatches
+            .groupBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .toSortedMap(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
     }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
@@ -958,16 +1164,83 @@ fun AdminExpressBoardTab(
             }
         }
 
-        // Matches List Hide Bar
+        // Matches List Hide Bar + Search + Date Filter
         item {
-            HideBarSectionHeader(
-                title = if (isOneExpress) "1xBET ပွဲစဉ်များ ဇယား" else "555 Mix ပွဲစဉ်များ ဇယား",
-                countBadge = "${filteredMatches.size} ပွဲ",
-                isVisible = showMatchesTable,
-                onToggle = { showMatchesTable = !showMatchesTable },
-                testTag = "hide_bar_admin_${boardMode}_table",
-                accentColor = accent
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                HideBarSectionHeader(
+                    title = if (isOneExpress) "1xBET ပွဲစဉ်များ ဇယား" else "555 Mix ပွဲစဉ်များ ဇယား",
+                    countBadge = "${filteredMatches.size} ပွဲ",
+                    isVisible = showMatchesTable,
+                    onToggle = { showMatchesTable = !showMatchesTable },
+                    testTag = "hide_bar_admin_${boardMode}_table",
+                    accentColor = accent
+                )
+                if (showMatchesTable) {
+                    OutlinedTextField(
+                        value = adminSearchQuery,
+                        onValueChange = { adminSearchQuery = it },
+                        placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (adminSearchQuery.isNotBlank()) {
+                                IconButton(onClick = { adminSearchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedTextColor = InkDark,
+                            unfocusedTextColor = InkDark
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_search_$boardMode")
+                    )
+                    if (adminAvailableDates.isNotEmpty()) {
+                        val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+                        val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(adminNowMs + 86_400_000L) }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            item {
+                                FilterChip(
+                                    selected = adminDateFilter.isBlank(),
+                                    onClick = { adminDateFilter = "" },
+                                    label = { Text("အားလုံး") }
+                                )
+                            }
+                            items(adminAvailableDates) { d ->
+                                val label = when (d) {
+                                    todayIso -> "ယနေ့ ($d)"
+                                    tomorrowIso -> "မနက်ဖြန် ($d)"
+                                    else -> d
+                                }
+                                FilterChip(
+                                    selected = adminDateFilter == d,
+                                    onClick = { adminDateFilter = d },
+                                    label = { Text(label) }
+                                )
+                            }
+                            item {
+                                OutlinedButton(
+                                    onClick = { onSaveActiveMatchDateFilter(adminDateFilter) },
+                                    enabled = !busy,
+                                    border = BorderStroke(1.dp, accent.copy(alpha = 0.7f)),
+                                    modifier = Modifier.testTag("pin_active_date_$boardMode")
+                                ) {
+                                    Text(
+                                        text = if (adminDateFilter.isBlank()) "Customer အားလုံးပြ Pin" else "Pin ရက်",
+                                        color = accent,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (showMatchesTable) {
@@ -1130,12 +1403,27 @@ fun AdminExpressBoardTab(
     if (showAddDialog) {
         AddMatchDialog(
             boardMode = boardMode,
+            initialMatchDate = adminDateFilter.ifBlank { MyanmarTimeUtil.todayIsoDate() },
             onDismiss = { showAddDialog = false },
             onSave = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, oneExpKyay, fffKyay, xBetOdds ->
                 onSaveNewMatch(
                     league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
                     boardMode, oneExpKyay, fffKyay, xBetOdds
                 )
+                showAddDialog = false
+            },
+            onSaveWithDate = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, oneExpKyay, fffKyay, xBetOdds, mDate ->
+                if (onSaveNewMatchWithDate != null) {
+                    onSaveNewMatchWithDate(
+                        league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
+                        boardMode, oneExpKyay, fffKyay, xBetOdds, mDate
+                    )
+                } else {
+                    onSaveNewMatch(
+                        league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
+                        boardMode, oneExpKyay, fffKyay, xBetOdds
+                    )
+                }
                 showAddDialog = false
             }
         )
@@ -1151,6 +1439,20 @@ fun AdminExpressBoardTab(
                     match.id, league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
                     status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds
                 )
+                editingMatch = null
+            },
+            onUpdateWithDate = { league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds, status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds, mDate ->
+                if (onUpdateMatchDetailsWithDate != null) {
+                    onUpdateMatchDetailsWithDate(
+                        match.id, league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
+                        status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds, mDate
+                    )
+                } else {
+                    onUpdateMatchDetails(
+                        match.id, league, home, away, kickoff, handicap, goalLine, bodyOdds, goalOdds,
+                        status, hScore, aScore, oneExpKyay, fffKyay, xBetOdds
+                    )
+                }
                 editingMatch = null
             },
             onRequestDelete = {
@@ -1197,7 +1499,8 @@ fun AdminExpressBoardTab(
             onImportCsvText = { csvText ->
                 onImportCsvText(boardMode, csvText)
                 showSheetDialog = false
-            }
+            },
+            onPushToWebhook = onPushToWebhook
         )
     }
 }
@@ -1211,7 +1514,8 @@ fun MatchSheetSyncDialog(
     onDismiss: () -> Unit,
     onSaveSheetUrl: (String) -> Unit,
     onSyncFromSheetUrl: (String) -> Unit,
-    onImportCsvText: (String) -> Unit
+    onImportCsvText: (String) -> Unit,
+    onPushToWebhook: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -1292,6 +1596,40 @@ fun MatchSheetSyncDialog(
                         modifier = Modifier.weight(1f).testTag("sheet_pull_url_$boardMode")
                     ) {
                         Text("Sheet မှ ဆွဲယူ", maxLines = 1)
+                    }
+                }
+                val directSheetUrl = boardConfig.googleSheetEditUrl.ifBlank {
+                    FootballFeedService.normalizeGoogleSheetEditUrl(sheetUrlInput)
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            if (directSheetUrl.isNotBlank()) {
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(directSheetUrl)))
+                                }.onFailure {
+                                    Toast.makeText(context, "Google Sheet ဖွင့်၍မရပါ", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "Google Sheet Link အရင်ထည့်ပါ", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !busy && directSheetUrl.isNotBlank(),
+                        modifier = Modifier.weight(1f).testTag("sheet_dialog_open_google_$boardMode")
+                    ) {
+                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Google Sheet ဖွင့်", maxLines = 1)
+                    }
+                    if (onPushToWebhook != null && boardConfig.googleSheetWebhookUrl.isNotBlank()) {
+                        Button(
+                            onClick = onPushToWebhook,
+                            enabled = !busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
+                            modifier = Modifier.weight(1f).testTag("sheet_dialog_push_webhook_$boardMode")
+                        ) {
+                            Text("Sheet သို့ Push", maxLines = 1, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 

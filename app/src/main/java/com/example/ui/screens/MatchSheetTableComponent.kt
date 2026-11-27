@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,6 +24,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,8 +34,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.UploadFile
@@ -48,9 +54,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +82,8 @@ import com.example.data.betting.MatchSheetCsvCodec
 import com.example.data.model.BoardConfig
 import com.example.data.model.OneXBetOddsSpec
 import com.example.data.model.SportMatch
+import com.example.data.network.FootballFeedService
+import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.InkDark
@@ -105,6 +115,19 @@ private val SHEET_COLUMNS = listOf(
     SheetColumnDef("P", "Goal Odds", 82.dp)
 )
 
+private const val APPS_SCRIPT_TWO_WAY_TEMPLATE = """function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var payload = JSON.parse(e.postData.contents);
+  var headers = ["", "အိမ်ရှင်ဂိုး", "ဧည့်သည်ဂိုး", "လိဂ်", "အိမ်ရှင်အသင်း", "ဧည့်သည်အသင်း", "ကန်ချိန်", "ဘော်ဒီကြေး", "ဂိုးပေါင်း", "W1", "သရေ", "W2", "ဂိုးပေါ်", "ဂိုးအောက်", "Body Odds", "Goal Odds"];
+  var values = [headers].concat(payload.rows || []);
+  sheet.clearContents();
+  if (values.length > 0) {
+    sheet.getRange(1, 1, values.length, 16).setValues(values);
+  }
+  return ContentService.createTextOutput(JSON.stringify({ok: true, rows: values.length - 1}))
+    .setMimeType(ContentService.MimeType.JSON);
+}"""
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminMatchSheetTableTab(
@@ -113,7 +136,11 @@ fun AdminMatchSheetTableTab(
     busy: Boolean,
     initialSourceFilter: String = "all",
     onSaveSheetUrl: (String) -> Unit,
+    onSaveBoardSheetSettings: (sheetUrl: String, webhookUrl: String, autoTwoWaySync: Boolean) -> Unit = { s, _, _ -> onSaveSheetUrl(s) },
     onSyncMatchesFromSheet: (String, String) -> Unit,
+    onSyncMatchesFromSheetSilent: (String, String, Boolean) -> Unit = { src, url, _ -> onSyncMatchesFromSheet(src, url) },
+    onPushToWebhook: () -> Unit = {},
+    onSaveActiveMatchDateFilter: (String) -> Unit = {},
     onImportCsvText: (String, String) -> Unit,
     onUpdateMatchFromSheetRow: (
         match: SportMatch,
@@ -147,7 +174,22 @@ fun AdminMatchSheetTableTab(
         oneExpressKyay: String,
         fiveFiveFiveKyay: String,
         oneXBetOdds: OneXBetOddsSpec?
-    ) -> Unit
+    ) -> Unit,
+    onSaveNewMatchWithDate: ((
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffLabel: String,
+        handicapLine: String,
+        goalLine: String,
+        bodyOdds: Double,
+        goalOdds: Double,
+        boardSource: String,
+        oneExpressKyay: String,
+        fiveFiveFiveKyay: String,
+        oneXBetOdds: OneXBetOddsSpec?,
+        matchDate: String
+    ) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -155,26 +197,70 @@ fun AdminMatchSheetTableTab(
 
     var sourceFilter by remember(initialSourceFilter) { mutableStateOf(initialSourceFilter) }
     var searchQuery by remember { mutableStateOf("") }
+    var dateFilter by remember(boardConfig.activeMatchDateFilter) { mutableStateOf(boardConfig.activeMatchDateFilter.trim()) }
     var sheetUrlInput by remember(boardConfig.googleSheetCsvUrl) { mutableStateOf(boardConfig.googleSheetCsvUrl) }
+    var webhookUrlInput by remember(boardConfig.googleSheetWebhookUrl) { mutableStateOf(boardConfig.googleSheetWebhookUrl) }
+    var autoTwoWaySync by remember(boardConfig.autoTwoWaySheetSync) { mutableStateOf(boardConfig.autoTwoWaySheetSync) }
     var showSyncBar by remember { mutableStateOf(false) }
     var showPasteCsvDialog by remember { mutableStateOf(false) }
     var editingRowMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showAddRowDialog by remember { mutableStateOf(false) }
+    var didAutoPull by remember { mutableStateOf(false) }
 
-    val filteredMatches = remember(matches, sourceFilter, searchQuery) {
+    // Sheet -> APK live auto-pull on entering Sheet tab when Two-Way Sync is enabled
+    LaunchedEffect(boardConfig.googleSheetCsvUrl, boardConfig.autoTwoWaySheetSync) {
+        if (!didAutoPull && boardConfig.autoTwoWaySheetSync && boardConfig.googleSheetCsvUrl.isNotBlank()) {
+            didAutoPull = true
+            onSyncMatchesFromSheetSilent("all", boardConfig.googleSheetCsvUrl, true)
+        }
+    }
+
+    val availableDates = remember(matches) {
+        matches.map { it.matchDate.trim() }
+            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            .distinct()
+            .sorted()
+    }
+
+    val filteredMatches = remember(matches, sourceFilter, searchQuery, dateFilter) {
+        val q = searchQuery.trim()
         matches.filter { m ->
             val srcOk = sourceFilter == "all" || m.boardSource == sourceFilter
-            val q = searchQuery.trim()
+            val dateOk = dateFilter.isBlank() || m.matchDate == dateFilter
             val qOk = q.isBlank() ||
                 m.homeTeam.contains(q, ignoreCase = true) ||
                 m.awayTeam.contains(q, ignoreCase = true) ||
                 m.league.contains(q, ignoreCase = true)
-            srcOk && qOk
-        }
+            srcOk && dateOk && qOk
+        }.sortedWith(
+            compareBy<SportMatch>(
+                { FootballFeedService.leagueSortOrderIndex(FootballFeedService.canonicalLeagueName(it.league)) },
+                { it.league },
+                { it.matchDate },
+                { it.kickoffEpochMs }
+            )
+        )
     }
 
     val exported16ColCsv = remember(filteredMatches) {
         MatchSheetCsvCodec.exportToMyanmarSheetCsv(filteredMatches)
+    }
+
+    val openLiveGoogleSheet: () -> Unit = {
+        val rawCandidate = sheetUrlInput.ifBlank { boardConfig.googleSheetCsvUrl }
+        val editUrl = boardConfig.googleSheetEditUrl.ifBlank {
+            FootballFeedService.normalizeGoogleSheetEditUrl(rawCandidate)
+        }
+        if (editUrl.isBlank()) {
+            showSyncBar = true
+            Toast.makeText(context, "Google Sheet Link ဦးစွာ ထည့်သွင်းသိမ်းဆည်းပါ", Toast.LENGTH_SHORT).show()
+        } else {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(editUrl)))
+            } catch (_: Exception) {
+                Toast.makeText(context, "Google Sheet ဖွင့်မရပါ ($editUrl)", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     Column(
@@ -201,24 +287,36 @@ fun AdminMatchSheetTableTab(
                         Spacer(Modifier.width(6.dp))
                         Column {
                             Text(
-                                "Google Sheet ဇယား (A–P • 16 Columns)",
+                                "Google Sheet ဇယား (A–P • Two-Way Sync)",
                                 color = ChampionshipGold,
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                "Row တစ်ခုချင်းနှိပ်၍ တိုက်ရိုက်ပြင်နိုင်ပြီး Auto-Sync ပွဲများ အလိုအလျောက်ပေါ်ပါမည်",
+                                "Row နှိပ်၍ ပြင်နိုင်ပြီး Google Sheet ဖိုင်ကိုလည်း တိုက်ရိုက်ဖွင့်ပြင်နိုင်ပါသည်",
                                 color = Color(0xFFB4C8BE),
                                 style = MaterialTheme.typography.labelSmall
                             )
                         }
                     }
-                    OutlinedButton(
-                        onClick = { showSyncBar = !showSyncBar },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("sheet_table_toggle_sync_bar")
-                    ) {
-                        Text(if (showSyncBar) "Link ဝှက်" else "Sheet Sync", color = ChampionshipGold, style = MaterialTheme.typography.labelSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = openLiveGoogleSheet,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D), contentColor = Color.White),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("sheet_table_open_google_sheet_button")
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Google Sheet", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = { showSyncBar = !showSyncBar },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("sheet_table_toggle_sync_bar")
+                        ) {
+                            Text(if (showSyncBar) "ဝှက်" else "Sync", color = ChampionshipGold, style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
 
@@ -235,6 +333,53 @@ fun AdminMatchSheetTableTab(
                             label = { Text(lbl) },
                             modifier = Modifier.testTag("sheet_filter_$key")
                         )
+                    }
+                }
+
+                if (availableDates.isNotEmpty()) {
+                    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+                    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(MyanmarTimeUtil.nowMs() + 86_400_000L) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        LazyRow(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = dateFilter.isBlank(),
+                                    onClick = { dateFilter = "" },
+                                    label = { Text("ရက်စွဲအားလုံး") }
+                                )
+                            }
+                            items(availableDates) { d ->
+                                val lbl = when (d) {
+                                    todayIso -> "ယနေ့ ($d)"
+                                    tomorrowIso -> "မနက်ဖြန် ($d)"
+                                    else -> d
+                                }
+                                FilterChip(
+                                    selected = dateFilter == d,
+                                    onClick = { dateFilter = d },
+                                    label = { Text(lbl) }
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { onSaveActiveMatchDateFilter(dateFilter) },
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("sheet_table_pin_date_button")
+                        ) {
+                            Text(
+                                text = if (dateFilter.isBlank()) "All Pin" else "Pin ရက်",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                     }
                 }
 
@@ -289,7 +434,7 @@ fun AdminMatchSheetTableTab(
                     OutlinedTextField(
                         value = sheetUrlInput,
                         onValueChange = { sheetUrlInput = it },
-                        label = { Text("Published Google Sheet CSV URL") },
+                        label = { Text("Google Sheet URL (Share / Edit / Published CSV)") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -297,13 +442,39 @@ fun AdminMatchSheetTableTab(
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("sheet_table_url_input")
                     )
+                    OutlinedTextField(
+                        value = webhookUrlInput,
+                        onValueChange = { webhookUrlInput = it },
+                        label = { Text("Apps Script Webhook URL (APK -> Sheet Push)") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("sheet_table_webhook_input")
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text("APK ↔ Google Sheet Two-Way Auto-Sync", color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("APK ဖွင့်တိုင်း Sheet မှ ဆွဲယူပြီး Row ပြင်တိုင်း Sheet သို့ Push ပေးမည်", color = Color(0xFFB4C8BE), style = MaterialTheme.typography.labelSmall)
+                        }
+                        Switch(
+                            checked = autoTwoWaySync,
+                            onCheckedChange = { autoTwoWaySync = it },
+                            modifier = Modifier.testTag("sheet_table_auto_two_way_switch")
+                        )
+                    }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
-                            onClick = { onSaveSheetUrl(sheetUrlInput) },
-                            enabled = !busy && sheetUrlInput.isNotBlank(),
-                            modifier = Modifier.weight(1f).height(44.dp)
+                            onClick = { onSaveBoardSheetSettings(sheetUrlInput, webhookUrlInput, autoTwoWaySync) },
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f).height(44.dp).testTag("sheet_table_save_settings_button")
                         ) {
-                            Text("Link သိမ်း", color = ChampionshipGold)
+                            Text("Sync Link သိမ်း", color = ChampionshipGold, maxLines = 1)
                         }
                         Button(
                             onClick = {
@@ -317,6 +488,29 @@ fun AdminMatchSheetTableTab(
                             Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Sheet မှ ဆွဲယူ", maxLines = 1)
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onPushToWebhook,
+                            enabled = !busy && (webhookUrlInput.isNotBlank() || boardConfig.googleSheetWebhookUrl.isNotBlank()),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7), contentColor = Color.White),
+                            modifier = Modifier.weight(1f).height(44.dp).testTag("sheet_table_push_button")
+                        ) {
+                            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Sheet သို့ Push", maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(APPS_SCRIPT_TWO_WAY_TEMPLATE))
+                                Toast.makeText(context, "Apps Script doPost(e) Code Copy ကူးပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f).height(44.dp).testTag("sheet_table_copy_apps_script_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Apps Script Copy", color = ChampionshipGold, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                         }
                     }
                 }
@@ -451,10 +645,19 @@ fun AdminMatchSheetTableTab(
         Column {
             AddMatchDialog(
                 boardMode = newRowSource,
+                initialMatchDate = dateFilter.ifBlank { MyanmarTimeUtil.todayIsoDate() },
                 onDismiss = { showAddRowDialog = false },
                 onSave = { lg, ht, at, ko, hcp, gl, bo, go, oneExp, fff, xSpec ->
                     showAddRowDialog = false
                     onSaveNewMatch(lg, ht, at, ko, hcp, gl, bo, go, newRowSource, oneExp, fff, xSpec)
+                },
+                onSaveWithDate = { lg, ht, at, ko, hcp, gl, bo, go, oneExp, fff, xSpec, mDate ->
+                    showAddRowDialog = false
+                    if (onSaveNewMatchWithDate != null) {
+                        onSaveNewMatchWithDate(lg, ht, at, ko, hcp, gl, bo, go, newRowSource, oneExp, fff, xSpec, mDate)
+                    } else {
+                        onSaveNewMatch(lg, ht, at, ko, hcp, gl, bo, go, newRowSource, oneExp, fff, xSpec)
+                    }
                 }
             )
         }

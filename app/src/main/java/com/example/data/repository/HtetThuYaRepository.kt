@@ -23,6 +23,7 @@ import com.example.data.model.DirectChatMessage
 import com.example.data.model.GroupChatMessage
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LedgerTransaction
+import com.example.data.model.Live2DStatus
 import com.example.data.model.LiveFootballFixture
 import com.example.data.model.Lottery2D3DControlConfig
 import com.example.data.model.Lottery2DDayRecord
@@ -1523,6 +1524,8 @@ class HtetThuYaRepository(
                 walletConfig.computeNetWithdraw(req.amountKs)
             }
 
+            val adminRef = db.collection("admins").document(adminUid)
+
             db.runTransaction { tx ->
                 val reqSnap = tx.get(reqRef)
                 val curReqStatus = reqSnap.getString("status") ?: req.status
@@ -1535,12 +1538,47 @@ class HtetThuYaRepository(
 
                 val userSnap = tx.get(userRef)
                 val curBalance = userSnap.getLong("balanceKs") ?: 0L
+                val adminSnap = if (!isOwner && nextStatus == "approved") tx.get(adminRef) else null
 
                 val noteText = when {
                     needsDualApproval -> adminNote.trim().ifBlank { "ပမာဏကြီးသဖြင့် Main Admin အတည်ပြုချက် တင်ပြထားသည်" }
                     approve -> adminNote.trim().ifBlank { "အတည်ပြုပြီး" }
                     else -> adminNote.trim().ifBlank { "ပယ်ဖျက်ပြီး" }
                 }.take(200)
+
+                if (!isOwner && nextStatus == "approved") {
+                    val curAdminFloat = adminSnap?.getLong("walletBalanceKs") ?: 0L
+                    val curTopupsGiven = adminSnap?.getLong("totalTopupsGivenKs") ?: 0L
+                    val curWithdrawalsTaken = adminSnap?.getLong("totalWithdrawalsTakenKs") ?: 0L
+                    if (req.requestType == "topup") {
+                        val creditKs = authoritativeNetKs
+                        if (curAdminFloat < creditKs) {
+                            throw IllegalStateException(
+                                "Second Admin လက်ကျန်ငွေ ($curAdminFloat Ks) မလုံလောက်ပါ — ငွေဖြည့်ပေးရန် Main Admin ထံ တောင်းဆိုပါ"
+                            )
+                        }
+                        tx.update(
+                            adminRef,
+                            mapOf(
+                                "walletBalanceKs" to (curAdminFloat - creditKs).coerceAtLeast(0L),
+                                "totalTopupsGivenKs" to (curTopupsGiven + creditKs),
+                                "totalWithdrawalsTakenKs" to curWithdrawalsTaken,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    } else if (req.requestType == "withdraw") {
+                        val addFloatKs = req.amountKs.coerceAtLeast(0L)
+                        tx.update(
+                            adminRef,
+                            mapOf(
+                                "walletBalanceKs" to (curAdminFloat + addFloatKs).coerceAtMost(1_000_000_000L),
+                                "totalTopupsGivenKs" to curTopupsGiven,
+                                "totalWithdrawalsTakenKs" to (curWithdrawalsTaken + addFloatKs),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    }
+                }
 
                 tx.update(
                     reqRef,
@@ -1625,7 +1663,8 @@ class HtetThuYaRepository(
         boardSource: String = "standard",
         oneExpressKyay: String = "",
         fiveFiveFiveKyay: String = "",
-        oneXBetOdds: com.example.data.model.OneXBetOddsSpec? = null
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec? = null,
+        matchDate: String = ""
     ): Result<Unit> {
         val matchId = "m_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val path = "matches/$matchId"
@@ -1637,15 +1676,16 @@ class HtetThuYaRepository(
             val safeGoal = goalLine.trim().ifBlank { "2.5" }.take(20)
             val cleanKickoff = kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40)
             val nowMs = MyanmarTimeUtil.nowMs()
-            val todayIso = MyanmarTimeUtil.todayIsoDate(nowMs)
+            val explicitDate = matchDate.trim().takeIf { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            val baseDateIso = explicitDate ?: MyanmarTimeUtil.todayIsoDate(nowMs)
             val resolvedKickoffMs = MyanmarTimeUtil.resolveMatchKickoffEpochMs(
-                SportMatch(kickoffLabel = cleanKickoff, matchDate = todayIso, status = "open"),
+                SportMatch(kickoffLabel = cleanKickoff, matchDate = baseDateIso, status = "open"),
                 nowMs
             )
-            val computedMatchDate = if (resolvedKickoffMs > 0L) {
+            val computedMatchDate = explicitDate ?: if (resolvedKickoffMs > 0L) {
                 MyanmarTimeUtil.formatMatchDateIso(resolvedKickoffMs)
             } else {
-                todayIso
+                baseDateIso
             }
             val resolvedOneExp = oneExpressKyay.trim().ifBlank {
                 if (safeSource == "one_express") com.example.data.betting.KyayFormatter.formatOneExpressKyay(safeHandicap, safeGoal) else ""
@@ -1712,7 +1752,8 @@ class HtetThuYaRepository(
         awayScore: Long,
         oneExpressKyay: String? = null,
         fiveFiveFiveKyay: String? = null,
-        oneXBetOdds: com.example.data.model.OneXBetOddsSpec? = null
+        oneXBetOdds: com.example.data.model.OneXBetOddsSpec? = null,
+        matchDate: String? = null
     ): Result<Unit> {
         val path = "matches/$matchId"
         return try {
@@ -1721,10 +1762,11 @@ class HtetThuYaRepository(
             require(league.isNotBlank() && homeTeam.isNotBlank() && awayTeam.isNotBlank()) { "အသင်းနှင့် လိဂ်အမည် ဖြည့်စွက်ပါ" }
             require(status in listOf("open", "closed", "finished"))
             val cleanKickoff = kickoffLabel.trim().ifBlank { "Tonight 21:00" }.take(40)
+            val explicitDate = matchDate?.trim()?.takeIf { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
             val nowMs = MyanmarTimeUtil.nowMs()
             val resolvedKickoffMs = if (status == "open") {
                 MyanmarTimeUtil.resolveMatchKickoffEpochMs(
-                    SportMatch(kickoffLabel = cleanKickoff, status = status),
+                    SportMatch(kickoffLabel = cleanKickoff, matchDate = explicitDate.orEmpty(), status = status),
                     nowMs
                 )
             } else 0L
@@ -1745,7 +1787,9 @@ class HtetThuYaRepository(
             )
             if (resolvedKickoffMs > 0L) {
                 fields["kickoffEpochMs"] = resolvedKickoffMs
-                fields["matchDate"] = MyanmarTimeUtil.formatMatchDateIso(resolvedKickoffMs)
+                fields["matchDate"] = explicitDate ?: MyanmarTimeUtil.formatMatchDateIso(resolvedKickoffMs)
+            } else if (explicitDate != null) {
+                fields["matchDate"] = explicitDate
             }
             if (status == "finished") {
                 fields["liveClock"] = "FT"
@@ -2090,6 +2134,43 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun allocateAdminFloat(targetAdminUid: String, deltaKs: Long): Result<Long> {
+        val path = "admins/$targetAdminUid"
+        return try {
+            requireUserId()
+            require(targetAdminUid.isNotBlank() && ID_REGEX.matches(targetAdminUid)) { "Invalid admin UID" }
+            require(deltaKs != 0L) { "ငွေပမာဏ ထည့်သွင်းပါ" }
+            val ref = db.collection("admins").document(targetAdminUid)
+            val newBal = db.runTransaction { tx ->
+                val snap = tx.get(ref)
+                if (!snap.exists()) throw IllegalStateException("Admin အကောင့် မတွေ့ပါ")
+                val curBal = snap.getLong("walletBalanceKs") ?: 0L
+                val curAlloc = snap.getLong("totalAllocatedKs") ?: 0L
+                val nextBal = curBal + deltaKs
+                if (nextBal < 0L) {
+                    throw IllegalStateException("လက်ကျန်ငွေ ($curBal Ks) ထက် ပိုနှုတ်၍ မရပါ")
+                }
+                val safeBal = nextBal.coerceAtMost(1_000_000_000L)
+                val safeAlloc = (curAlloc + deltaKs).coerceIn(0L, 1_000_000_000L)
+                tx.update(
+                    ref,
+                    mapOf(
+                        "walletBalanceKs" to safeBal,
+                        "totalAllocatedKs" to safeAlloc,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                safeBal
+            }.await()
+            Result.success(newBal)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun savePaymentAccount(
         accountId: String?,
         providerName: String,
@@ -2211,6 +2292,9 @@ class HtetThuYaRepository(
                     "ipWhitelistEnabled" to config.ipWhitelistEnabled,
                     "allowedIps" to config.allowedIps.map { it.trim() }.filter { it.isNotBlank() }.take(50),
                     "globalForceLogoutAtMs" to config.globalForceLogoutAtMs.coerceAtLeast(0L),
+                    "hidePublicIpDisplay" to config.hidePublicIpDisplay,
+                    "maskCustomerPiiForSubAdmins" to config.maskCustomerPiiForSubAdmins,
+                    "screenshotProtectionEnabled" to config.screenshotProtectionEnabled,
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2252,16 +2336,56 @@ class HtetThuYaRepository(
         }
     }
 
-    suspend fun adjustUserBalance(targetUid: String, deltaKs: Long, note: String): Result<Unit> {
+    suspend fun adjustUserBalance(
+        targetUid: String,
+        deltaKs: Long,
+        note: String,
+        isOwner: Boolean = true
+    ): Result<Unit> {
         val path = "users/$targetUid"
         return try {
-            requireUserId()
+            val adminUid = requireUserId()
             val userRef = db.collection("users").document(targetUid)
+            val adminRef = db.collection("admins").document(adminUid)
             val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
             db.runTransaction { tx ->
                 val snap = tx.get(userRef)
+                val adminSnap = if (!isOwner) tx.get(adminRef) else null
                 val cur = snap.getLong("balanceKs") ?: 0L
                 val next = (cur + deltaKs).coerceAtLeast(0L)
+                val actualDelta = next - cur
+                if (!isOwner && actualDelta != 0L && adminSnap != null) {
+                    val curAdminFloat = adminSnap.getLong("walletBalanceKs") ?: 0L
+                    val curTopupsGiven = adminSnap.getLong("totalTopupsGivenKs") ?: 0L
+                    val curWithdrawalsTaken = adminSnap.getLong("totalWithdrawalsTakenKs") ?: 0L
+                    if (actualDelta > 0L) {
+                        if (curAdminFloat < actualDelta) {
+                            throw IllegalStateException(
+                                "Second Admin လက်ကျန်ငွေ ($curAdminFloat Ks) မလုံလောက်ပါ — Main Admin ထံ ငွေတောင်းခံပါ"
+                            )
+                        }
+                        tx.update(
+                            adminRef,
+                            mapOf(
+                                "walletBalanceKs" to (curAdminFloat - actualDelta).coerceAtLeast(0L),
+                                "totalTopupsGivenKs" to (curTopupsGiven + actualDelta),
+                                "totalWithdrawalsTakenKs" to curWithdrawalsTaken,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    } else {
+                        val absDeduct = kotlin.math.abs(actualDelta)
+                        tx.update(
+                            adminRef,
+                            mapOf(
+                                "walletBalanceKs" to (curAdminFloat + absDeduct).coerceAtMost(1_000_000_000L),
+                                "totalTopupsGivenKs" to curTopupsGiven,
+                                "totalWithdrawalsTakenKs" to (curWithdrawalsTaken + absDeduct),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    }
+                }
                 tx.update(
                     userRef,
                     mapOf(
@@ -2408,7 +2532,11 @@ class HtetThuYaRepository(
         allowedLeagues: List<String> = emptyList(),
         autoSyncOneExpress: Boolean = false,
         autoSyncFiveFiveFive: Boolean = false,
-        googleSheetCsvUrl: String = ""
+        googleSheetCsvUrl: String = "",
+        googleSheetEditUrl: String = "",
+        googleSheetWebhookUrl: String = "",
+        autoTwoWaySheetSync: Boolean = true,
+        activeMatchDateFilter: String = ""
     ): Result<Unit> {
         val path = "app_settings/board_config"
         return try {
@@ -2422,6 +2550,10 @@ class HtetThuYaRepository(
                     "autoSyncOneExpress" to autoSyncOneExpress,
                     "autoSyncFiveFiveFive" to autoSyncFiveFiveFive,
                     "googleSheetCsvUrl" to googleSheetCsvUrl.trim().take(500),
+                    "googleSheetEditUrl" to googleSheetEditUrl.trim().take(500),
+                    "googleSheetWebhookUrl" to googleSheetWebhookUrl.trim().take(500),
+                    "autoTwoWaySheetSync" to autoTwoWaySheetSync,
+                    "activeMatchDateFilter" to activeMatchDateFilter.trim().take(20),
                     "updatedBy" to adminUid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2469,13 +2601,14 @@ class HtetThuYaRepository(
         return try {
             val adminUid = requireUserId()
             val safeName = config.appName.trim().ifBlank { "လိုတရ" }.take(40)
-            val safeVariant = config.logoVariant.takeIf { it in listOf("crest", "gold_badge", "emerald_shield", "custom_url") } ?: "crest"
+            val safeVariant = config.logoVariant.takeIf { it in listOf("crest", "gold_badge", "emerald_shield", "custom_url", "custom_upload") } ?: "crest"
             val safeTheme = config.themePreset.takeIf { it in listOf("emerald_gold", "royal_blue", "crimson_gold", "obsidian_amber") } ?: "emerald_gold"
             db.collection("app_settings").document("branding_config").set(
                 mapOf(
                     "appName" to safeName,
                     "logoVariant" to safeVariant,
                     "customLogoUrl" to config.customLogoUrl.trim().take(300),
+                    "customLogoBase64" to config.customLogoBase64.trim().take(240_000),
                     "themePreset" to safeTheme,
                     "showRulesOnStartup" to config.showRulesOnStartup,
                     "rulesText" to config.rulesText.trim().take(3000),
@@ -2911,7 +3044,8 @@ class HtetThuYaRepository(
     suspend fun autoSettleFinishedOrders(
         bettingConfig: BettingConfig,
         targetUserId: String? = null,
-        feedService: FootballFeedService? = null
+        feedService: FootballFeedService? = null,
+        live2DStatus: Live2DStatus? = null
     ): Result<AutoSettleSummary> {
         val path = if (targetUserId != null) "orders/auto_settle_$targetUserId" else "orders/auto_settle"
         return try {
@@ -2951,13 +3085,32 @@ class HtetThuYaRepository(
                 }
             }
             val draws = db.collection("lottery_draws").get().await().toObjects(LotteryDraw::class.java)
+            val has2DOrders = pendingOrders.any { it.orderType == "two_d" }
+            val live2DConfig = if (has2DOrders) {
+                runCatching {
+                    db.collection("app_settings").document("lottery_2d3d_config").get().await()
+                        .toObject(Lottery2D3DControlConfig::class.java)
+                }.getOrNull()
+            } else null
+            val resolvedLive2D = if (has2DOrders && live2DStatus == null && feedService != null) {
+                runCatching { feedService.fetchLive2DResult() }.getOrNull()
+            } else live2DStatus
 
             var wonCount = 0
             var lostCount = 0
             var pushCount = 0
 
             for (order in pendingOrders) {
-                when (val decision = AutoSettleEngine.evaluate(order, matchesById, draws, bettingConfig)) {
+                when (
+                    val decision = AutoSettleEngine.evaluate(
+                        order = order,
+                        matchesById = matchesById,
+                        draws = draws,
+                        bettingConfig = bettingConfig,
+                        live2DConfig = live2DConfig,
+                        live2DStatus = resolvedLive2D
+                    )
+                ) {
                     is AutoSettleDecision.Win -> {
                         val res = settleOrderWon(
                             order = order,
@@ -3002,7 +3155,8 @@ class HtetThuYaRepository(
     suspend fun autoSettleSingleOrder(
         order: BetOrder,
         bettingConfig: BettingConfig,
-        feedService: FootballFeedService? = null
+        feedService: FootballFeedService? = null,
+        live2DStatus: Live2DStatus? = null
     ): Result<String> {
         val path = "orders/${order.id}"
         return try {
@@ -3029,8 +3183,26 @@ class HtetThuYaRepository(
                 }
             }
             val draws = db.collection("lottery_draws").get().await().toObjects(LotteryDraw::class.java)
+            val live2DConfig = if (order.orderType == "two_d") {
+                runCatching {
+                    db.collection("app_settings").document("lottery_2d3d_config").get().await()
+                        .toObject(Lottery2D3DControlConfig::class.java)
+                }.getOrNull()
+            } else null
+            val resolvedLive2D = if (order.orderType == "two_d" && live2DStatus == null && feedService != null) {
+                runCatching { feedService.fetchLive2DResult() }.getOrNull()
+            } else live2DStatus
 
-            when (val decision = AutoSettleEngine.evaluate(order, matchesById, draws, bettingConfig)) {
+            when (
+                val decision = AutoSettleEngine.evaluate(
+                    order = order,
+                    matchesById = matchesById,
+                    draws = draws,
+                    bettingConfig = bettingConfig,
+                    live2DConfig = live2DConfig,
+                    live2DStatus = resolvedLive2D
+                )
+            ) {
                 is AutoSettleDecision.Win -> {
                     val res = settleOrderWon(
                         order = order,
@@ -3175,6 +3347,10 @@ class HtetThuYaRepository(
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
                         "googleSheetCsvUrl" to currentConfig.googleSheetCsvUrl.trim().take(500),
+                        "googleSheetEditUrl" to currentConfig.googleSheetEditUrl.trim().take(500),
+                        "googleSheetWebhookUrl" to currentConfig.googleSheetWebhookUrl.trim().take(500),
+                        "autoTwoWaySheetSync" to currentConfig.autoTwoWaySheetSync,
+                        "activeMatchDateFilter" to currentConfig.activeMatchDateFilter.trim().take(20),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3347,6 +3523,10 @@ class HtetThuYaRepository(
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
                         "googleSheetCsvUrl" to currentConfig.googleSheetCsvUrl.trim().take(500),
+                        "googleSheetEditUrl" to currentConfig.googleSheetEditUrl.trim().take(500),
+                        "googleSheetWebhookUrl" to currentConfig.googleSheetWebhookUrl.trim().take(500),
+                        "autoTwoWaySheetSync" to currentConfig.autoTwoWaySheetSync,
+                        "activeMatchDateFilter" to currentConfig.activeMatchDateFilter.trim().take(20),
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )

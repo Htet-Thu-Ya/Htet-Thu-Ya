@@ -1,10 +1,12 @@
 package com.example
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import com.example.data.network.ApkDownloadHelper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -348,6 +350,21 @@ private fun AuthenticatedRoot(
         }
     }
 
+    val rootContext = LocalContext.current
+    DisposableEffect(securityConfig.screenshotProtectionEnabled, rootContext) {
+        val window = (rootContext as? Activity)?.window
+        if (window != null) {
+            if (securityConfig.screenshotProtectionEnabled) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
     val requestCallWithPermission = rememberCallPermissionLauncher { deniedMsg ->
         scope.launch {
             snackbarHostState.showSnackbar(deniedMsg)
@@ -449,6 +466,7 @@ private fun AuthenticatedRoot(
                             currentUserId = user.uid,
                             defaultDisplayName = vm.displayName,
                             isOwnerAdmin = isOwnerAdmin,
+                            adminMember = adminMember,
                             permissions = currentAdminPermissions,
                             allOrdersState = allOrdersState,
                             allWalletRequestsState = allWalletRequestsState,
@@ -537,7 +555,18 @@ private fun AuthenticatedRoot(
                             onToggleAuto555 = vm::toggleAutoSync555,
                             onSaveAllowedLeagues = vm::saveAllowedLeagues,
                             onSaveBoardSheetUrl = vm::saveBoardSheetUrl,
+                            onSaveBoardSheetSettings = vm::saveBoardSheetSettings,
                             onSyncMatchesFromSheet = vm::syncMatchesFromGoogleSheet,
+                            onSyncMatchesFromSheetSilent = vm::syncMatchesFromGoogleSheet,
+                            onPushToGoogleSheetWebhook = { vm.pushCurrentBoardToGoogleSheetWebhook(false) },
+                            onSaveActiveMatchDateFilter = vm::saveActiveMatchDateFilter,
+                            onAllocateAdminFloat = vm::allocateAdminFloat,
+                            onSaveNewMatchWithDate = { l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay, xBetOdds, matchDate ->
+                                vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay, xBetOdds, matchDate)
+                            },
+                            onUpdateMatchDetailsWithDate = { id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds, matchDate ->
+                                vm.updateMatchDetails(id, l, h, a, k, hand, goal, bOdds, gOdds, st, hs, ascore, oneExpKyay, fffKyay, xBetOdds, matchDate)
+                            },
                             onImportCsvText = vm::importMatchesFromCsvText,
                             onUpdateMatchFromSheetRow = vm::updateMatchFromSheetRow,
                             onSync2D3DFromApiNow = vm::sync2D3DFromApiNow,

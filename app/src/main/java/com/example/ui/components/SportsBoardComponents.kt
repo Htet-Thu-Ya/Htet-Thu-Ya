@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -41,6 +42,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -114,6 +117,42 @@ fun compactKyayText(normalizedLine: String): String {
         cleanSpec.startsWith("0-") -> "= -${cleanSpec.removePrefix("0-")}"
         cleanSpec.startsWith("0 ") -> "= ${cleanSpec.removePrefix("0 ").trim()}"
         else -> cleanSpec
+    }
+}
+
+fun formatFiveFiveFiveYellowKyay(rawLine: String): String {
+    val clean = rawLine
+        .replace("home", "", ignoreCase = true)
+        .replace("away", "", ignoreCase = true)
+        .replace("draw", "", ignoreCase = true)
+        .replace("even", "0", ignoreCase = true)
+        .trim()
+        .removePrefix("-")
+        .removePrefix("+")
+        .trim()
+        .ifBlank { "0.5" }
+
+    val kyayRegex = Regex("""^(\d+(?:\.\d+)?)\s*([+-])\s*(\d{1,3})$""")
+    val kyayMatch = kyayRegex.find(clean)
+    if (kyayMatch != null) {
+        val base = kyayMatch.groupValues[1]
+        val sign = kyayMatch.groupValues[2]
+        val pct = kyayMatch.groupValues[3]
+        val baseDisplay = if (base == "0" || base == "0.0") "=" else base
+        return "$baseDisplay $sign$pct"
+    }
+
+    return when (clean) {
+        "0", "0.0" -> "="
+        "0.25", "0/0.5" -> "= +50"
+        "0.75", "0.5/1" -> "1 -50"
+        "1.25", "1/1.5" -> "1 +50"
+        "1.75", "1.5/2" -> "2 -50"
+        "2.25", "2/2.5" -> "2 +50"
+        "2.75", "2.5/3" -> "3 -50"
+        "3.25", "3/3.5" -> "3 +50"
+        "3.75", "3.5/4" -> "4 -50"
+        else -> clean
     }
 }
 
@@ -1004,6 +1043,292 @@ fun OneXBetScreenshotMatchCard(
     }
 }
 
+val FiveFiveFiveDarkCanvas = Color(0xFF262626)
+val FiveFiveFiveTopBarBg = Color(0xFF2B2B2B)
+val FiveFiveFiveLeagueStripBg = Color(0xFF3A3A3A)
+val FiveFiveFiveCellBg = Color(0xFF666666)
+val FiveFiveFiveDividerBg = Color(0xFF2E2E2E)
+val FiveFiveFiveYellowKyay = Color(0xFFFACC15)
+
+@Composable
+fun FiveFiveFiveLeagueHeaderStrip(leagueName: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(FiveFiveFiveLeagueStripBg)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Star,
+            contentDescription = null,
+            tint = BoardGreenAccent,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = leagueName,
+            color = Color(0xFFE5E7EB),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun FiveFiveFiveScreenshotCard(
+    match: SportMatch,
+    selectedPickKey: String?,
+    onShowInfo: () -> Unit,
+    onSelect: (String, Double, String) -> Unit,
+    nowMs: Long = System.currentTimeMillis()
+) {
+    val bettable = remember(match.id, match.status, match.liveClock, match.kickoffLabel, match.kickoffEpochMs, nowMs / 10_000L) {
+        MyanmarTimeUtil.isMatchBettable(match, nowMs)
+    }
+    val handicapInfo = remember(match.id, match.handicapLine, match.homeTeam, match.awayTeam) {
+        KyayFormatter.formatHandicap(match)
+    }
+    val yellowHandicap = remember(handicapInfo.normalizedLine) {
+        formatFiveFiveFiveYellowKyay(handicapInfo.normalizedLine)
+    }
+    val yellowGoal = remember(match.goalLine) {
+        formatFiveFiveFiveYellowKyay(match.goalLine.ifBlank { "2.5" })
+    }
+
+    val homePick = "${match.homeTeam} (${handicapInfo.homeBadge}) vs ${match.awayTeam}"
+    val awayPick = "${match.awayTeam} (${handicapInfo.awayBadge}) vs ${match.homeTeam}"
+    val overPick = "${match.homeTeam}-${match.awayTeam} ဂိုးပေါ် (${match.goalLine})"
+    val underPick = "${match.homeTeam}-${match.awayTeam} ဂိုးအောက် (${match.goalLine})"
+
+    val homeSelected = selectedPickKey == "home"
+    val awaySelected = selectedPickKey == "away"
+    val overSelected = selectedPickKey == "over"
+    val underSelected = selectedPickKey == "under"
+
+    val formattedTime = remember(match.matchDate, match.kickoffLabel, match.liveClock, match.status, match.homeScore, match.awayScore, bettable) {
+        val datePrefix = if (match.matchDate.matches(Regex("""\d{4}-\d{2}-\d{2}"""))) {
+            val parts = match.matchDate.split("-")
+            "${parts[2]}-${parts[1]}-${parts[0]} "
+        } else ""
+        val baseTime = match.kickoffLabel.trim()
+        val timeText = if (datePrefix.isNotBlank() && !baseTime.contains(datePrefix.trim())) {
+            "$datePrefix$baseTime"
+        } else {
+            baseTime
+        }
+        when {
+            match.liveClock.isNotBlank() -> "ပွဲချိန် : $timeText • LIVE ${match.homeScore}-${match.awayScore} (${match.liveClock})"
+            match.status == "finished" -> "ပွဲချိန် : $timeText • ပြီးဆုံး FT ${match.homeScore}-${match.awayScore}"
+            !bettable -> "ပွဲချိန် : $timeText • ပိတ်ပြီး"
+            else -> "ပွဲချိန် : $timeText"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(FiveFiveFiveDarkCanvas)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onShowInfo)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = formattedTime,
+                color = if (bettable) Color(0xFFD1D5DB) else Color(0xFFFCA5A5),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (match.liveClock.isNotBlank() || match.status == "finished") {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (match.status == "finished") "FT" else "LIVE",
+                    color = if (match.status == "finished") Color(0xFF93C5FD) else BoardGreenAccent,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // Row 1: [ Home Team | Yellow Handicap | Away Team ]
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .heightIn(min = 50.dp)
+                    .background(
+                        when {
+                            homeSelected -> BoardCellSelectedBg
+                            !bettable -> Color(0xFF474747)
+                            else -> FiveFiveFiveCellBg
+                        }
+                    )
+                    .clickable(enabled = bettable) { onSelect(homePick, match.bodyOdds, "home") }
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .testTag("match_home_${match.id}"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = match.homeTeam,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (handicapInfo.favIsHome) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = yellowHandicap,
+                        color = FiveFiveFiveYellowKyay,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            VerticalDivider(thickness = 1.dp, color = FiveFiveFiveDividerBg)
+
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .heightIn(min = 50.dp)
+                    .background(
+                        when {
+                            awaySelected -> BoardCellSelectedBg
+                            !bettable -> Color(0xFF474747)
+                            else -> FiveFiveFiveCellBg
+                        }
+                    )
+                    .clickable(enabled = bettable) { onSelect(awayPick, match.bodyOdds, "away") }
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .testTag("match_away_${match.id}"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = match.awayTeam,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!handicapInfo.favIsHome) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = yellowHandicap,
+                        color = FiveFiveFiveYellowKyay,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(thickness = 1.dp, color = FiveFiveFiveDividerBg)
+
+        // Row 2: [ ဂိုးပေါ် | Yellow Goal | ဂိုးအောက် ]
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(
+                        when {
+                            overSelected -> BoardCellSelectedBg
+                            !bettable -> Color(0xFF474747)
+                            else -> FiveFiveFiveCellBg
+                        }
+                    )
+                    .clickable(enabled = bettable) { onSelect(overPick, match.goalOdds, "over") }
+                    .testTag("match_over_${match.id}"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "ဂိုးပေါ်",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Normal
+                )
+            }
+
+            VerticalDivider(thickness = 1.dp, color = FiveFiveFiveDividerBg)
+
+            Box(
+                modifier = Modifier
+                    .widthIn(min = 66.dp)
+                    .fillMaxHeight()
+                    .background(if (!bettable) Color(0xFF474747) else FiveFiveFiveCellBg)
+                    .clickable(onClick = onShowInfo)
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = yellowGoal,
+                    color = FiveFiveFiveYellowKyay,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+
+            VerticalDivider(thickness = 1.dp, color = FiveFiveFiveDividerBg)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(
+                        when {
+                            underSelected -> BoardCellSelectedBg
+                            !bettable -> Color(0xFF474747)
+                            else -> FiveFiveFiveCellBg
+                        }
+                    )
+                    .clickable(enabled = bettable) { onSelect(underPick, match.goalOdds, "under") }
+                    .testTag("match_under_${match.id}"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "ဂိုးအောက်",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun KyayPillBadge(
     text: String,
@@ -1199,43 +1524,179 @@ fun SportsBetBottomBar(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SportsLeagueFilterDialog(
     totalCount: Int,
     availableLeagues: List<String>,
     selectedLeague: String?,
     onSelectLeague: (String?) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    selectedLeagues: Set<String>? = null,
+    onSelectLeagues: ((Set<String>) -> Unit)? = null
 ) {
+    val orderedLeagues = remember(availableLeagues) {
+        val base = com.example.data.network.FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        val extras = availableLeagues
+            .filter { lg -> base.none { it.equals(lg, ignoreCase = true) } }
+            .distinct()
+        base + extras
+    }
+    val isMultiMode = onSelectLeagues != null
+    val activeSelected = remember(selectedLeagues, selectedLeague, isMultiMode) {
+        if (isMultiMode) {
+            selectedLeagues ?: emptySet()
+        } else {
+            if (selectedLeague == null) emptySet() else setOf(selectedLeague)
+        }
+    }
+    val allChecked = orderedLeagues.isNotEmpty() &&
+        orderedLeagues.all { lg -> activeSelected.any { it.equals(lg, ignoreCase = true) } }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("လိဂ် ရွေးချယ်ရန်") },
-        text = {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = selectedLeague == null,
-                    onClick = {
-                        onSelectLeague(null)
-                        onDismiss()
-                    },
-                    label = { Text("အားလုံး ($totalCount)") }
+        containerColor = Color.White,
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${orderedLeagues.size} လိဂ်",
+                    color = BoardGreenAccent,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
                 )
-                availableLeagues.forEach { lg ->
-                    FilterChip(
-                        selected = selectedLeague == lg,
-                        onClick = {
-                            onSelectLeague(lg)
-                            onDismiss()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            if (isMultiMode) {
+                                if (allChecked) onSelectLeagues?.invoke(emptySet())
+                                else onSelectLeagues?.invoke(orderedLeagues.toSet())
+                            } else {
+                                onSelectLeague(null)
+                                onDismiss()
+                            }
+                        }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                        .testTag("league_filter_select_all")
+                ) {
+                    Text(
+                        text = "အကုန်ရွေး",
+                        color = InkDark,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Checkbox(
+                        checked = if (isMultiMode) allChecked else selectedLeague == null,
+                        onCheckedChange = { checked ->
+                            if (isMultiMode) {
+                                if (checked) onSelectLeagues?.invoke(orderedLeagues.toSet())
+                                else onSelectLeagues?.invoke(emptySet())
+                            } else {
+                                onSelectLeague(null)
+                                onDismiss()
+                            }
                         },
-                        label = { Text(lg) }
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = BoardGreenAccent,
+                            uncheckedColor = InkDark,
+                            checkmarkColor = Color.White
+                        )
                     )
                 }
             }
         },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = if (isMultiMode) {
+                        if (activeSelected.isEmpty()) "စုစုပေါင်း $totalCount ပွဲ (လိဂ်အားလုံး ပြထားသည်)"
+                        else "ရွေးချယ်ထားသော လိဂ် ${activeSelected.size} ခု • စုစုပေါင်း $totalCount ပွဲ"
+                    } else {
+                        "စုစုပေါင်း $totalCount ပွဲ"
+                    },
+                    color = InkMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                ) {
+                    items(orderedLeagues, key = { it }) { lg ->
+                        val checked = activeSelected.any { it.equals(lg, ignoreCase = true) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .clickable {
+                                    if (isMultiMode) {
+                                        val next = activeSelected.toMutableSet()
+                                        val existing = next.firstOrNull { it.equals(lg, ignoreCase = true) }
+                                        if (existing != null) next.remove(existing) else next.add(lg)
+                                        onSelectLeagues?.invoke(next)
+                                    } else {
+                                        onSelectLeague(if (checked) null else lg)
+                                        onDismiss()
+                                    }
+                                }
+                                .padding(horizontal = 4.dp, vertical = 4.dp)
+                                .testTag("league_checkbox_${lg.take(24)}"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = lg,
+                                color = InkDark,
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { isChecked ->
+                                    if (isMultiMode) {
+                                        val next = activeSelected.toMutableSet()
+                                        val existing = next.firstOrNull { it.equals(lg, ignoreCase = true) }
+                                        if (isChecked) {
+                                            if (existing == null) next.add(lg)
+                                        } else {
+                                            if (existing != null) next.remove(existing)
+                                        }
+                                        onSelectLeagues?.invoke(next)
+                                    } else {
+                                        onSelectLeague(if (isChecked) lg else null)
+                                        onDismiss()
+                                    }
+                                },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = BoardGreenAccent,
+                                    uncheckedColor = InkDark,
+                                    checkmarkColor = Color.White
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("ပိတ်မည်")
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("league_filter_close")
+            ) {
+                Text(
+                    text = "ပိတ်မည်",
+                    color = Color(0xFF0284C7),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     )

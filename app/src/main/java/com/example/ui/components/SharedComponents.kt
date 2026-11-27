@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -58,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -153,7 +156,27 @@ fun BrandLogoAvatar(
     }
     val borderWidth = if (brandingConfig.logoVariant == "gold_badge") 2.5.dp else 1.5.dp
 
-    if (brandingConfig.logoVariant == "custom_url" && brandingConfig.customLogoUrl.isNotBlank()) {
+    val customBitmap = remember(brandingConfig.logoVariant, brandingConfig.customLogoBase64) {
+        if (brandingConfig.logoVariant == "custom_upload" && brandingConfig.customLogoBase64.isNotBlank()) {
+            runCatching {
+                val payload = brandingConfig.customLogoBase64.substringAfter("base64,", brandingConfig.customLogoBase64)
+                val bytes = Base64.decode(payload, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            }.getOrNull()
+        } else null
+    }
+
+    if (customBitmap != null) {
+        Image(
+            bitmap = customBitmap,
+            contentDescription = "${brandingConfig.appName} Custom Logo",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(shape)
+                .border(borderWidth, borderColor, shape)
+        )
+    } else if (brandingConfig.logoVariant == "custom_url" && brandingConfig.customLogoUrl.isNotBlank()) {
         SubcomposeAsyncImage(
             model = brandingConfig.customLogoUrl,
             contentDescription = "${brandingConfig.appName} Logo",
@@ -493,11 +516,28 @@ fun OrderSlipCard(
 
             Spacer(Modifier.height(8.dp))
             if (order.drawRound.isNotBlank()) {
-                Text(
-                    text = order.drawRound,
-                    color = InkMuted,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                val isMorning2D = order.orderType == "two_d" && (order.drawRound.contains("12:01") || order.drawRound.contains("နေ့လည်") || order.drawRound.contains("နေ့"))
+                val isEvening2D = order.orderType == "two_d" && (order.drawRound.contains("4:30") || order.drawRound.contains("ညနေ") || order.drawRound.contains("ည"))
+                if (isMorning2D || isEvening2D) {
+                    Surface(
+                        color = if (isMorning2D) AmberPendingSoft else SkyInfoSoft,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = order.drawRound,
+                            color = if (isMorning2D) AmberPending else SkyInfo,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = order.drawRound,
+                        color = InkMuted,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
             }
 

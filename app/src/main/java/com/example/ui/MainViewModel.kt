@@ -284,15 +284,38 @@ class MainViewModel(
         lottery2D3DConfig
     ) { api, cfg ->
         if (cfg.autoMode) {
-            if (api == null) null
-            else api.copy(
-                twod = api.twod.takeIf { it != "--" } ?: cfg.liveTwod,
-                morning1201 = api.morning1201.takeIf { it != "--" } ?: cfg.m1201Twod,
-                evening430 = api.evening430.takeIf { it != "--" } ?: cfg.e430Twod,
-                am930Modern = api.am930Modern.takeIf { it != "--" } ?: cfg.am930Modern,
-                am930Internet = api.am930Internet.takeIf { it != "--" } ?: cfg.am930Internet,
-                pm200Modern = api.pm200Modern.takeIf { it != "--" } ?: cfg.pm200Modern,
-                pm200Internet = api.pm200Internet.takeIf { it != "--" } ?: cfg.pm200Internet
+            val base = api ?: Live2DStatus()
+            val fallbackTwod = base.twod.takeIf { it != "--" && it.isNotBlank() }
+                ?: cfg.liveTwod.takeIf { it != "--" && it.isNotBlank() }
+                ?: cfg.e430Twod.takeIf { it != "--" && it.isNotBlank() }
+                ?: cfg.m1201Twod.takeIf { it != "--" && it.isNotBlank() }
+                ?: "--"
+            val resolvedMorning = base.morning1201.takeIf { it != "--" && it.isNotBlank() }
+                ?: cfg.m1201Twod.takeIf { it != "--" && it.isNotBlank() }
+                ?: "--"
+            val resolvedEvening = base.evening430.takeIf { it != "--" && it.isNotBlank() }
+                ?: cfg.e430Twod.takeIf { it != "--" && it.isNotBlank() }
+                ?: "--"
+            base.copy(
+                twod = fallbackTwod,
+                setText = base.setText.takeIf { it != "--" && it.isNotBlank() }
+                    ?: cfg.liveSet.takeIf { it != "--" && it.isNotBlank() }
+                    ?: "--",
+                valueText = base.valueText.takeIf { it != "--" && it.isNotBlank() }
+                    ?: cfg.liveVal.takeIf { it != "--" && it.isNotBlank() }
+                    ?: "--",
+                liveTime = base.liveTime.ifBlank { cfg.liveUpdatedText },
+                updatedAtText = base.updatedAtText.ifBlank { cfg.liveUpdatedText },
+                morning1201 = resolvedMorning,
+                evening430 = resolvedEvening,
+                m1201Set = base.m1201Set.takeIf { it != "--" && it.isNotBlank() } ?: cfg.m1201Set,
+                m1201Val = base.m1201Val.takeIf { it != "--" && it.isNotBlank() } ?: cfg.m1201Val,
+                e430Set = base.e430Set.takeIf { it != "--" && it.isNotBlank() } ?: cfg.e430Set,
+                e430Val = base.e430Val.takeIf { it != "--" && it.isNotBlank() } ?: cfg.e430Val,
+                am930Modern = base.am930Modern.takeIf { it != "--" && it.isNotBlank() } ?: cfg.am930Modern,
+                am930Internet = base.am930Internet.takeIf { it != "--" && it.isNotBlank() } ?: cfg.am930Internet,
+                pm200Modern = base.pm200Modern.takeIf { it != "--" && it.isNotBlank() } ?: cfg.pm200Modern,
+                pm200Internet = base.pm200Internet.takeIf { it != "--" && it.isNotBlank() } ?: cfg.pm200Internet
             )
         } else {
             val base = api ?: Live2DStatus()
@@ -617,15 +640,29 @@ class MainViewModel(
             }
         }
 
+        // Continuous 2D Live Feed polling loop for both Customer and Admin screens
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(25_000L)
+                runCatching { feedService.fetchLive2DResult() }.getOrNull()?.let { fresh ->
+                    _live2DStatus.value = fresh
+                }
+            }
+        }
+
         // Periodic Admin background live-result closing/update & auto-settle loop
         viewModelScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(180_000L)
                 if (isAdmin.value && currentAdminPermissions.value.canManageBoard && boardConfig.value.autoSyncLiveResults) {
                     repository.syncLiveMatchResults(feedService)
-                    if (bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
-                        repository.autoSettleFinishedOrders(bettingConfig.value)
-                    }
+                }
+                if (isAdmin.value && bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
+                    repository.autoSettleFinishedOrders(
+                        bettingConfig = bettingConfig.value,
+                        feedService = feedService,
+                        live2DStatus = effectiveLive2DStatus.value
+                    )
                 }
             }
         }
@@ -824,6 +861,11 @@ class MainViewModel(
     }
 
     fun refreshPublicIp() {
+        val sec = securityConfig.value
+        if (sec.hidePublicIpDisplay && !sec.ipWhitelistEnabled) {
+            _currentPublicIp.value = null
+            return
+        }
         viewModelScope.launch {
             _currentPublicIp.value = feedService.fetchPublicIpAddress()
         }
@@ -901,7 +943,12 @@ class MainViewModel(
                     _liveFeed.value = UiState.Success(fixtures)
                 }
                 _live2DStatus.value = feedService.fetchLive2DResult()
-                _currentPublicIp.value = feedService.fetchPublicIpAddress()
+                val sec = securityConfig.value
+                _currentPublicIp.value = if (sec.hidePublicIpDisplay && !sec.ipWhitelistEnabled) {
+                    null
+                } else {
+                    feedService.fetchPublicIpAddress()
+                }
                 _githubRelease.value = feedService.fetchLatestGitHubApkRelease()
                 var msg = "ဒေတာအသစ်များ Refresh လုပ်ပြီးပါပြီ"
                 if (isAdmin.value) {
@@ -910,8 +957,11 @@ class MainViewModel(
                         syncedMatches = repository.syncLiveMatchResults(feedService).getOrDefault(0)
                     }
                     if (bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
-                        val settled = repository.autoSettleFinishedOrders(bettingConfig.value)
-                            .getOrNull()?.settledCount ?: 0
+                        val settled = repository.autoSettleFinishedOrders(
+                            bettingConfig = bettingConfig.value,
+                            feedService = feedService,
+                            live2DStatus = effectiveLive2DStatus.value
+                        ).getOrNull()?.settledCount ?: 0
                         if (syncedMatches > 0 || settled > 0) {
                             msg = "Refresh ပြီးပါပြီ (ရလဒ် $syncedMatches ပွဲ၊ အလိုအလျောက်ရှင်း $settled ခု)"
                         }
@@ -1676,7 +1726,11 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.autoSettleFinishedOrders(bettingConfig.value, feedService = feedService)
+                val res = repository.autoSettleFinishedOrders(
+                    bettingConfig = bettingConfig.value,
+                    feedService = feedService,
+                    live2DStatus = effectiveLive2DStatus.value
+                )
                 res.onSuccess { summary ->
                     _events.emit(formatAutoSettleMessage(summary))
                     if (summary.settledCount > 0) {
@@ -1695,7 +1749,12 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.autoSettleFinishedOrders(bettingConfig.value, targetUserId, feedService = feedService)
+                val res = repository.autoSettleFinishedOrders(
+                    bettingConfig = bettingConfig.value,
+                    targetUserId = targetUserId,
+                    feedService = feedService,
+                    live2DStatus = effectiveLive2DStatus.value
+                )
                 res.onSuccess { summary ->
                     val prefix = if (customerName.isNotBlank()) "$customerName: " else ""
                     _events.emit(prefix + formatAutoSettleMessage(summary))
@@ -1715,7 +1774,12 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.autoSettleSingleOrder(order, bettingConfig.value, feedService = feedService)
+                val res = repository.autoSettleSingleOrder(
+                    order = order,
+                    bettingConfig = bettingConfig.value,
+                    feedService = feedService,
+                    live2DStatus = effectiveLive2DStatus.value
+                )
                 res.onSuccess { msg ->
                     _events.emit(msg)
                     logAuditAsync("Auto settled single order", "order", order.id, order.customerName, msg)
@@ -1748,7 +1812,11 @@ class MainViewModel(
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
             autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
-            googleSheetCsvUrl = cur.googleSheetCsvUrl
+            googleSheetCsvUrl = cur.googleSheetCsvUrl,
+            googleSheetEditUrl = cur.googleSheetEditUrl,
+            googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+            autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+            activeMatchDateFilter = cur.activeMatchDateFilter
         )
         if (res.isSuccess && enabled) {
             repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), cur.copy(autoSyncDailyMatches = true))
@@ -1768,7 +1836,11 @@ class MainViewModel(
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
             autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
-            googleSheetCsvUrl = cur.googleSheetCsvUrl
+            googleSheetCsvUrl = cur.googleSheetCsvUrl,
+            googleSheetEditUrl = cur.googleSheetEditUrl,
+            googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+            autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+            activeMatchDateFilter = cur.activeMatchDateFilter
         )
         if (res.isSuccess && enabled) {
             repository.syncLiveMatchResults(feedService)
@@ -1788,7 +1860,11 @@ class MainViewModel(
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = enabled,
             autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
-            googleSheetCsvUrl = cur.googleSheetCsvUrl
+            googleSheetCsvUrl = cur.googleSheetCsvUrl,
+            googleSheetEditUrl = cur.googleSheetEditUrl,
+            googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+            autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+            activeMatchDateFilter = cur.activeMatchDateFilter
         )
         if (res.isSuccess && enabled) {
             repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), cur.copy(autoSyncOneExpress = true))
@@ -1808,7 +1884,11 @@ class MainViewModel(
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
             autoSyncFiveFiveFive = enabled,
-            googleSheetCsvUrl = cur.googleSheetCsvUrl
+            googleSheetCsvUrl = cur.googleSheetCsvUrl,
+            googleSheetEditUrl = cur.googleSheetEditUrl,
+            googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+            autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+            activeMatchDateFilter = cur.activeMatchDateFilter
         )
         if (res.isSuccess && enabled) {
             repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), cur.copy(autoSyncFiveFiveFive = true))
@@ -1825,7 +1905,11 @@ class MainViewModel(
             allowedLeagues = leagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
             autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
-            googleSheetCsvUrl = cur.googleSheetCsvUrl
+            googleSheetCsvUrl = cur.googleSheetCsvUrl,
+            googleSheetEditUrl = cur.googleSheetEditUrl,
+            googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+            autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+            activeMatchDateFilter = cur.activeMatchDateFilter
         )
         if (res.isSuccess) {
             logAuditAsync("Updated allowed leagues", "board", "board_config", "", "${leagues.size} leagues")
@@ -1833,9 +1917,40 @@ class MainViewModel(
         res
     }
 
-    fun saveBoardSheetUrl(csvUrl: String) = runAction("Google Sheet Link သိမ်းဆည်းပြီးပါပြီ") {
+    fun saveActiveMatchDateFilter(dateIso: String) = runAction(
+        if (dateIso.isBlank()) "ရက်စွဲအားလုံး ပြသရန် ပြောင်းလဲပြီးပါပြီ"
+        else "$dateIso ရက်စွဲပွဲစဉ်များသာ ပြသရန် သတ်မှတ်ပြီးပါပြီ"
+    ) {
         val cur = boardConfig.value
-        val normalized = com.example.data.network.FootballFeedService.normalizeGoogleSheetCsvUrl(csvUrl)
+        repository.saveBoardConfig(
+            autoSyncDailyMatches = cur.autoSyncDailyMatches,
+            autoSyncLiveResults = cur.autoSyncLiveResults,
+            lastSyncedDate = cur.lastSyncedDate,
+            allowedLeagues = cur.allowedLeagues,
+            autoSyncOneExpress = cur.autoSyncOneExpress,
+            autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
+            googleSheetCsvUrl = cur.googleSheetCsvUrl,
+            googleSheetEditUrl = cur.googleSheetEditUrl,
+            googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+            autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+            activeMatchDateFilter = dateIso.trim()
+        )
+    }
+
+    fun saveBoardSheetUrl(csvUrl: String) = saveBoardSheetSettings(
+        sheetUrl = csvUrl,
+        webhookUrl = boardConfig.value.googleSheetWebhookUrl,
+        autoTwoWaySync = boardConfig.value.autoTwoWaySheetSync
+    )
+
+    fun saveBoardSheetSettings(
+        sheetUrl: String,
+        webhookUrl: String,
+        autoTwoWaySync: Boolean
+    ) = runAction("Google Sheet Link နှင့် Two-Way Sync ဆက်တင် သိမ်းဆည်းပြီးပါပြီ") {
+        val cur = boardConfig.value
+        val normalizedCsv = FootballFeedService.normalizeGoogleSheetCsvUrl(sheetUrl)
+        val normalizedEdit = FootballFeedService.normalizeGoogleSheetEditUrl(sheetUrl)
         val res = repository.saveBoardConfig(
             autoSyncDailyMatches = cur.autoSyncDailyMatches,
             autoSyncLiveResults = cur.autoSyncLiveResults,
@@ -1843,21 +1958,26 @@ class MainViewModel(
             allowedLeagues = cur.allowedLeagues,
             autoSyncOneExpress = cur.autoSyncOneExpress,
             autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
-            googleSheetCsvUrl = normalized
+            googleSheetCsvUrl = normalizedCsv,
+            googleSheetEditUrl = normalizedEdit,
+            googleSheetWebhookUrl = webhookUrl.trim(),
+            autoTwoWaySheetSync = autoTwoWaySync,
+            activeMatchDateFilter = cur.activeMatchDateFilter
         )
         if (res.isSuccess) {
-            logAuditAsync("Saved Google Sheet CSV URL", "board", "board_config")
+            logAuditAsync("Saved Google Sheet two-way sync URL", "board", "board_config")
         }
         res
     }
 
-    fun syncMatchesFromGoogleSheet(boardSource: String, csvUrl: String) {
+    fun syncMatchesFromGoogleSheet(boardSource: String, csvUrl: String, silent: Boolean = false) {
         viewModelScope.launch {
-            _busy.value = true
+            if (!silent) _busy.value = true
             try {
-                val normalizedUrl = com.example.data.network.FootballFeedService.normalizeGoogleSheetCsvUrl(csvUrl)
+                val normalizedUrl = FootballFeedService.normalizeGoogleSheetCsvUrl(csvUrl)
+                val normalizedEdit = FootballFeedService.normalizeGoogleSheetEditUrl(csvUrl)
                 val cur = boardConfig.value
-                if (normalizedUrl != cur.googleSheetCsvUrl && normalizedUrl.isNotBlank()) {
+                if (normalizedUrl.isNotBlank() && (normalizedUrl != cur.googleSheetCsvUrl || normalizedEdit != cur.googleSheetEditUrl)) {
                     repository.saveBoardConfig(
                         autoSyncDailyMatches = cur.autoSyncDailyMatches,
                         autoSyncLiveResults = cur.autoSyncLiveResults,
@@ -1865,29 +1985,89 @@ class MainViewModel(
                         allowedLeagues = cur.allowedLeagues,
                         autoSyncOneExpress = cur.autoSyncOneExpress,
                         autoSyncFiveFiveFive = cur.autoSyncFiveFiveFive,
-                        googleSheetCsvUrl = normalizedUrl
+                        googleSheetCsvUrl = normalizedUrl,
+                        googleSheetEditUrl = normalizedEdit,
+                        googleSheetWebhookUrl = cur.googleSheetWebhookUrl,
+                        autoTwoWaySheetSync = cur.autoTwoWaySheetSync,
+                        activeMatchDateFilter = cur.activeMatchDateFilter
                     )
                 }
                 val fetchRes = feedService.fetchGoogleSheetCsvMatches(normalizedUrl)
                 val csvText = fetchRes.getOrElse { err ->
-                    _events.emit(err.localizedMessage ?: "Google Sheet ဖတ်မရပါ")
+                    if (!silent) _events.emit(err.localizedMessage ?: "Google Sheet ဖတ်မရပါ")
                     return@launch
                 }
                 val rows = com.example.data.betting.MatchSheetCsvCodec.parseCsvOrTsv(csvText, boardSource)
                 if (rows.isEmpty()) {
-                    _events.emit("Google Sheet ထဲတွင် မှန်ကန်သော ပွဲစဉ်ဒေတာ မတွေ့ပါ")
+                    if (!silent) _events.emit("Google Sheet ထဲတွင် မှန်ကန်သော ပွဲစဉ်ဒေတာ မတွေ့ပါ")
                     return@launch
                 }
                 val upsertRes = repository.upsertMatchesFromSheet(rows, boardSource)
                 upsertRes.onSuccess { count ->
-                    _events.emit("Google Sheet မှ ပွဲစဉ် $count ပွဲ Update / ထည့်သွင်းပြီးပါပြီ")
+                    if (!silent) {
+                        _events.emit("Google Sheet မှ ပွဲစဉ် $count ပွဲ Update / ထည့်သွင်းပြီးပါပြီ")
+                    }
                     logAuditAsync("Synced matches from Google Sheet", "board", boardSource, "", "Count=$count")
                 }.onFailure { err ->
-                    _events.emit(err.localizedMessage ?: "Google Sheet ဒေတာ သိမ်းဆည်းမှု မအောင်မြင်ပါ")
+                    if (!silent) _events.emit(err.localizedMessage ?: "Google Sheet ဒေတာ သိမ်းဆည်းမှု မအောင်မြင်ပါ")
                 }
             } finally {
-                _busy.value = false
+                if (!silent) _busy.value = false
             }
+        }
+    }
+
+    fun pushCurrentBoardToGoogleSheetWebhook(silent: Boolean = false) {
+        val webhook = boardConfig.value.googleSheetWebhookUrl.trim()
+        if (webhook.isBlank()) {
+            if (!silent) emitMessage("Google Apps Script Webhook URL ထည့်သွင်းပါ")
+            return
+        }
+        val currentMatches = (matches.value as? UiState.Success)?.data.orEmpty()
+        viewModelScope.launch {
+            if (!silent) _busy.value = true
+            try {
+                val csv = com.example.data.betting.MatchSheetCsvCodec.exportToMyanmarSheetCsv(currentMatches)
+                val rowsJson = org.json.JSONArray()
+                currentMatches.forEach { m ->
+                    val rowArr = org.json.JSONArray().apply {
+                        put(com.example.data.betting.MatchSheetCsvCodec.formatBoardSourceDisplay(m.boardSource))
+                        put(m.homeScore)
+                        put(m.awayScore)
+                        put(m.league)
+                        put(m.homeTeam)
+                        put(m.awayTeam)
+                        put(m.kickoffLabel)
+                        put(m.handicapLine)
+                        put(m.goalLine)
+                        put(m.win1Odds)
+                        put(m.drawOdds)
+                        put(m.win2Odds)
+                        put(m.overOdds)
+                        put(m.underOdds)
+                        put(m.bodyOdds)
+                        put(m.goalOdds)
+                    }
+                    rowsJson.put(rowArr)
+                }
+                val res = feedService.pushMatchesToGoogleSheetWebhook(webhook, csv, rowsJson)
+                if (!silent) {
+                    res.onSuccess {
+                        _events.emit("APK ဇယား (${currentMatches.size} ပွဲ) ကို Google Sheet သို့ အလိုအလျောက် Push ပြီးပါပြီ")
+                    }.onFailure { err ->
+                        _events.emit(err.localizedMessage ?: "Google Sheet Push မအောင်မြင်ပါ")
+                    }
+                }
+            } finally {
+                if (!silent) _busy.value = false
+            }
+        }
+    }
+
+    private fun triggerAutoTwoWayPushIfEnabled() {
+        val cfg = boardConfig.value
+        if (cfg.autoTwoWaySheetSync && cfg.googleSheetWebhookUrl.isNotBlank()) {
+            pushCurrentBoardToGoogleSheetWebhook(silent = true)
         }
     }
 
@@ -1904,6 +2084,7 @@ class MainViewModel(
                 upsertRes.onSuccess { count ->
                     _events.emit("Sheet / Excel မှ ပွဲစဉ် $count ပွဲ ထည့်သွင်း/ပြင်ဆင်ပြီးပါပြီ")
                     logAuditAsync("Imported CSV/Excel matches", "board", boardSource, "", "Count=$count")
+                    triggerAutoTwoWayPushIfEnabled()
                 }.onFailure { err ->
                     _events.emit(err.localizedMessage ?: "Sheet CSV ထည့်သွင်းမှု မအောင်မြင်ပါ")
                 }
@@ -2000,7 +2181,11 @@ class MainViewModel(
                 val res = repository.syncLiveMatchResults(feedService)
                 res.onSuccess { updated ->
                     val settledCount = if (bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
-                        repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0
+                        repository.autoSettleFinishedOrders(
+                            bettingConfig = bettingConfig.value,
+                            feedService = feedService,
+                            live2DStatus = effectiveLive2DStatus.value
+                        ).getOrNull()?.settledCount ?: 0
                     } else 0
                     val msg = buildString {
                         if (updated > 0) append("တိုက်ရိုက်/ပွဲပြီး ရလဒ် $updated ပွဲ အပ်ဒိတ်လုပ်ပြီးပါပြီ")
@@ -2031,6 +2216,7 @@ class MainViewModel(
         oneExpressKyay: String = "",
         fiveFiveFiveKyay: String = "",
         oneXBetOdds: OneXBetOddsSpec? = null,
+        matchDate: String = "",
         onSuccess: () -> Unit = {}
     ) = runAction("ပွဲစဉ်အသစ် ထည့်သွင်းပြီးပါပြီ") {
         val res = repository.saveNewMatch(
@@ -2045,10 +2231,12 @@ class MainViewModel(
             boardSource = boardSource,
             oneExpressKyay = oneExpressKyay,
             fiveFiveFiveKyay = fiveFiveFiveKyay,
-            oneXBetOdds = oneXBetOdds
+            oneXBetOdds = oneXBetOdds,
+            matchDate = matchDate
         )
         if (res.isSuccess) {
             logAuditAsync("Added football match", "board", "", "$homeTeam vs $awayTeam", "$league ($boardSource)")
+            triggerAutoTwoWayPushIfEnabled()
             onSuccess()
         }
         res
@@ -2069,7 +2257,8 @@ class MainViewModel(
         awayScore: Long,
         oneExpressKyay: String? = null,
         fiveFiveFiveKyay: String? = null,
-        oneXBetOdds: OneXBetOddsSpec? = null
+        oneXBetOdds: OneXBetOddsSpec? = null,
+        matchDate: String? = null
     ) {
         viewModelScope.launch {
             _busy.value = true
@@ -2089,12 +2278,18 @@ class MainViewModel(
                     awayScore = awayScore,
                     oneExpressKyay = oneExpressKyay,
                     fiveFiveFiveKyay = fiveFiveFiveKyay,
-                    oneXBetOdds = oneXBetOdds
+                    oneXBetOdds = oneXBetOdds,
+                    matchDate = matchDate
                 )
                 res.onSuccess {
                     logAuditAsync("Updated match", "board", matchId, "$homeTeam vs $awayTeam", "$status ($homeScore-$awayScore)")
+                    triggerAutoTwoWayPushIfEnabled()
                     if (status == "finished" && bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
-                        val settled = repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0
+                        val settled = repository.autoSettleFinishedOrders(
+                            bettingConfig = bettingConfig.value,
+                            feedService = feedService,
+                            live2DStatus = effectiveLive2DStatus.value
+                        ).getOrNull()?.settledCount ?: 0
                         if (settled > 0) {
                             _events.emit("ပွဲစဉ်သိမ်းဆည်းပြီး အော်ဒါ $settled ခု အလိုအလျောက် ငွေရှင်းပြီးပါပြီ")
                             return@onSuccess
@@ -2146,7 +2341,11 @@ class MainViewModel(
                 res.onSuccess {
                     logAuditAsync("Updated lottery draw", "board", drawId, roundTitle, "$status ($winningNumber)")
                     if (status == "finished" && winningNumber.length in 2..3 && bettingConfig.value.autoSettleOrders && currentAdminPermissions.value.canManageOrders) {
-                        val settled = repository.autoSettleFinishedOrders(bettingConfig.value).getOrNull()?.settledCount ?: 0
+                        val settled = repository.autoSettleFinishedOrders(
+                            bettingConfig = bettingConfig.value,
+                            feedService = feedService,
+                            live2DStatus = effectiveLive2DStatus.value
+                        ).getOrNull()?.settledCount ?: 0
                         if (settled > 0) {
                             _events.emit("ထီသိမ်းဆည်းပြီး အော်ဒါ $settled ခု အလိုအလျောက် ငွေရှင်းပြီးပါပြီ")
                             return@onSuccess
@@ -2365,10 +2564,22 @@ class MainViewModel(
     }
 
     fun adjustUserBalance(targetUid: String, deltaKs: Long, note: String) = runAction("Customer လက်ကျန်ငွေ ပြင်ဆင်ပြီးပါပြီ") {
-        val res = repository.adjustUserBalance(targetUid, deltaKs, note)
+        val res = repository.adjustUserBalance(targetUid, deltaKs, note, isOwner = isOwnerAdmin.value)
         if (res.isSuccess) logAuditAsync("Adjusted balance", "wallet", targetUid, "", "$deltaKs Ks ($note)")
         res
     }
+
+    fun allocateAdminFloat(targetAdminUid: String, adminName: String, deltaKs: Long) =
+        runAction(
+            if (deltaKs >= 0L) "$adminName ထံ Float ငွေ (+$deltaKs Ks) ထည့်သွင်းပြီးပါပြီ"
+            else "$adminName ထံမှ Float ငွေ ($deltaKs Ks) ပြန်နှုတ်ပြီးပါပြီ"
+        ) {
+            val res = repository.allocateAdminFloat(targetAdminUid, deltaKs)
+            if (res.isSuccess) {
+                logAuditAsync("Allocated Second Admin float", "wallet", targetAdminUid, adminName, "$deltaKs Ks")
+            }
+            res.map { }
+        }
 
     fun giftRewardPoints(targetUid: String, targetName: String, deltaPoints: Long, note: String) =
         runAction(
@@ -2442,6 +2653,7 @@ class MainViewModel(
         )
         if (res.isSuccess) {
             logAuditAsync("Updated match via A-P sheet table", "board", match.id, "$homeTeam vs $awayTeam", boardSource)
+            triggerAutoTwoWayPushIfEnabled()
         }
         res
     }
