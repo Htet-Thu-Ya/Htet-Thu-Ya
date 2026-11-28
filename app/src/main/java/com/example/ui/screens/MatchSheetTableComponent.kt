@@ -90,6 +90,7 @@ import com.example.data.model.SportMatch
 import com.example.data.network.FootballFeedService
 import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.AdminCalendarDateBar
+import com.example.ui.components.LeagueQuickSearchSuggestionsRow
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.InkDark
@@ -227,15 +228,27 @@ fun AdminMatchSheetTableTab(
         }
     }
 
+    val sheetLeagueCounts = remember(matches, sourceFilter, dateFilter) {
+        matches
+            .filter { m ->
+                (sourceFilter == "all" || m.boardSource == sourceFilter) &&
+                    (dateFilter.isBlank() || m.matchDate == dateFilter)
+            }
+            .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .eachCount()
+    }
+
     val filteredMatches = remember(matches, sourceFilter, searchQuery, dateFilter) {
         val q = searchQuery.trim()
         matches.filter { m ->
             val srcOk = sourceFilter == "all" || m.boardSource == sourceFilter
             val dateOk = dateFilter.isBlank() || m.matchDate == dateFilter
+            val canonLeague = FootballFeedService.canonicalLeagueName(m.league)
             val qOk = q.isBlank() ||
                 m.homeTeam.contains(q, ignoreCase = true) ||
                 m.awayTeam.contains(q, ignoreCase = true) ||
-                m.league.contains(q, ignoreCase = true)
+                m.league.contains(q, ignoreCase = true) ||
+                canonLeague.contains(q, ignoreCase = true)
             srcOk && dateOk && qOk
         }.sortedWith(
             compareBy<SportMatch>(
@@ -365,6 +378,14 @@ fun AdminMatchSheetTableTab(
                         Spacer(Modifier.width(3.dp))
                         Text("+ Row", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
+                }
+                if (searchQuery.isNotBlank()) {
+                    LeagueQuickSearchSuggestionsRow(
+                        query = searchQuery,
+                        leagueMatchCounts = sheetLeagueCounts,
+                        accentColor = ChampionshipGold,
+                        onPickLeague = { picked -> searchQuery = picked }
+                    )
                 }
 
                 // Collapsible Filter / Calendar Date / CSV controls

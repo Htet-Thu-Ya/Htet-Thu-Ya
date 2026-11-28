@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
@@ -56,8 +58,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1543,6 +1548,53 @@ fun SportsBetBottomBar(
 }
 
 @Composable
+fun LeagueQuickSearchSuggestionsRow(
+    query: String,
+    leagueMatchCounts: Map<String, Int>,
+    onPickLeague: (String) -> Unit,
+    accentColor: Color = BoardGreenAccent
+) {
+    val cleanQuery = query.trim().lowercase(Locale.US)
+    if (cleanQuery.isBlank()) return
+    val matchedLeagues = remember(cleanQuery, leagueMatchCounts) {
+        val base = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        val extras = leagueMatchCounts.keys.filter { lg -> base.none { it.equals(lg, ignoreCase = true) } }
+        (base + extras).filter { it.lowercase(Locale.US).contains(cleanQuery) }
+    }
+    if (matchedLeagues.isEmpty()) return
+
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        items(matchedLeagues, key = { it }) { lg ->
+            val cnt = leagueMatchCounts.entries.firstOrNull { it.key.equals(lg, ignoreCase = true) }?.value ?: 0
+            Surface(
+                color = if (cnt > 0) accentColor.copy(alpha = 0.16f) else Color(0xFFF3F4F6),
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (cnt > 0) accentColor else Color(0xFFD1D5DB)
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable { onPickLeague(lg) }
+                    .testTag("search_suggest_league_${lg.take(20)}")
+            ) {
+                Text(
+                    text = if (cnt > 0) "$lg ($cnt)" else lg,
+                    color = if (cnt > 0) PitchEmeraldDark else InkMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (cnt > 0) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun SportsLeagueFilterDialog(
     totalCount: Int,
     availableLeagues: List<String>,
@@ -1554,28 +1606,31 @@ fun SportsLeagueFilterDialog(
     confirmSaveLabel: String? = null,
     onConfirmSave: (() -> Unit)? = null
 ) {
-    val orderedLeagues = remember(availableLeagues) {
-        val base = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
-        val extras = availableLeagues
-            .filter { lg -> base.none { it.equals(lg, ignoreCase = true) } }
-            .distinct()
-        base + extras
-    }
+    val orderedLeagues = remember { FootballFeedService.DEFAULT_LEAGUE_OPTIONS }
     val isMultiMode = onSelectLeagues != null
-    val activeSelected = remember(selectedLeagues, selectedLeague, isMultiMode) {
+    val activeSelected = remember(selectedLeagues, selectedLeague, isMultiMode, orderedLeagues) {
         if (isMultiMode) {
-            selectedLeagues ?: emptySet()
+            selectedLeagues ?: orderedLeagues.toSet()
         } else {
-            if (selectedLeague == null) emptySet() else setOf(selectedLeague)
+            if (selectedLeague == null) orderedLeagues.toSet() else setOf(selectedLeague)
         }
     }
     val allChecked = orderedLeagues.isNotEmpty() &&
         orderedLeagues.all { lg -> activeSelected.any { it.equals(lg, ignoreCase = true) } }
 
+    var modalSearch by remember { mutableStateOf("") }
+    val displayedLeagues = remember(orderedLeagues, modalSearch) {
+        val q = modalSearch.trim().lowercase(Locale.US)
+        if (q.isBlank()) orderedLeagues
+        else orderedLeagues.filter { it.lowercase(Locale.US).contains(q) }
+    }
+    val modalBlue = Color(0xFF1E88E5)
+    val isCustomerMode = confirmSaveLabel == null
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color.White,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(22.dp),
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1605,7 +1660,7 @@ fun SportsLeagueFilterDialog(
                         .testTag("league_filter_select_all")
                 ) {
                     Text(
-                        text = "အကုန်ရွေး:",
+                        text = if (allChecked) "အကုန်ဖျက်" else "အကုန်ရွေး",
                         color = InkDark,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
@@ -1622,8 +1677,8 @@ fun SportsLeagueFilterDialog(
                             }
                         },
                         colors = CheckboxDefaults.colors(
-                            checkedColor = BoardGreenAccent,
-                            uncheckedColor = InkDark,
+                            checkedColor = modalBlue,
+                            uncheckedColor = InkMuted,
                             checkmarkColor = Color.White
                         )
                     )
@@ -1631,53 +1686,108 @@ fun SportsLeagueFilterDialog(
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = if (isMultiMode) {
-                        if (activeSelected.isEmpty()) "စုစုပေါင်း $totalCount (လိဂ်အားလုံး ပြထားသည်)"
-                        else "ရွေးချယ်ထားသော လိဂ် ${activeSelected.size} ခု • စုစုပေါင်း $totalCount"
-                    } else {
-                        "စုစုပေါင်း $totalCount ပွဲ"
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = modalSearch,
+                    onValueChange = { modalSearch = it },
+                    placeholder = {
+                        Text(
+                            text = "လိဂ်နာမည် ရှာရန်...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = InkMuted
+                        )
                     },
-                    color = InkMuted,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = modalBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (modalSearch.isNotBlank()) {
+                            IconButton(onClick = { modalSearch = "" }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = InkMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFFF8FAFC),
+                        unfocusedContainerColor = Color(0xFFF8FAFC),
+                        focusedTextColor = InkDark,
+                        unfocusedTextColor = InkDark,
+                        focusedBorderColor = modalBlue,
+                        unfocusedBorderColor = Color(0xFFD5DCD8)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("league_modal_search_input")
                 )
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 420.dp)
                 ) {
-                    items(orderedLeagues, key = { it }) { lg ->
+                    items(displayedLeagues, key = { it }) { lg ->
                         val checked = activeSelected.any { it.equals(lg, ignoreCase = true) }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 48.dp)
-                                .clickable {
-                                    if (isMultiMode) {
-                                        val next = activeSelected.toMutableSet()
-                                        val existing = next.firstOrNull { it.equals(lg, ignoreCase = true) }
-                                        if (existing != null) next.remove(existing) else next.add(lg)
-                                        onSelectLeagues?.invoke(next)
-                                    } else {
-                                        onSelectLeague(if (checked) null else lg)
-                                        onDismiss()
-                                    }
-                                }
-                                .padding(horizontal = 4.dp, vertical = 4.dp)
-                                .testTag("league_checkbox_${lg.take(24)}"),
+                                .padding(horizontal = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = lg,
-                                color = InkDark,
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .clickable {
+                                        if (isMultiMode) {
+                                            if (isCustomerMode) {
+                                                if (activeSelected.isEmpty()) {
+                                                    // After "အကုန်ဖျက်", tapping checks this league so multi-check + "ပိတ်မည်" works like the video
+                                                    onSelectLeagues?.invoke(setOf(lg))
+                                                } else {
+                                                    // Tapping a league name directly isolates that league and opens its matches immediately
+                                                    onSelectLeagues?.invoke(setOf(lg))
+                                                    onDismiss()
+                                                }
+                                            } else {
+                                                val next = activeSelected.toMutableSet()
+                                                val existing = next.firstOrNull { it.equals(lg, ignoreCase = true) }
+                                                if (existing != null) next.remove(existing) else next.add(lg)
+                                                onSelectLeagues?.invoke(next)
+                                            }
+                                        } else {
+                                            onSelectLeague(if (checked && activeSelected.size == 1) null else lg)
+                                            onDismiss()
+                                        }
+                                    }
+                                    .padding(end = 8.dp)
+                                    .testTag("league_row_${lg.take(24)}"),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    text = lg,
+                                    color = InkDark,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                             Checkbox(
                                 checked = checked,
                                 onCheckedChange = { isChecked ->
@@ -1696,10 +1806,11 @@ fun SportsLeagueFilterDialog(
                                     }
                                 },
                                 colors = CheckboxDefaults.colors(
-                                    checkedColor = BoardGreenAccent,
-                                    uncheckedColor = InkDark,
+                                    checkedColor = modalBlue,
+                                    uncheckedColor = InkMuted,
                                     checkmarkColor = Color.White
-                                )
+                                ),
+                                modifier = Modifier.testTag("league_checkbox_${lg.take(24)}")
                             )
                         }
                     }
@@ -1713,7 +1824,7 @@ fun SportsLeagueFilterDialog(
             ) {
                 Text(
                     text = "ပိတ်မည်",
-                    color = Color(0xFF0284C7),
+                    color = Color(0xFF3B82F6),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1741,13 +1852,17 @@ fun AdminLeagueHideBarSection(
     testTagPrefix: String = "admin_leagues",
     onSaveAllowedLeagues: (List<String>) -> Unit
 ) {
-    val totalLeagues = FootballFeedService.DEFAULT_LEAGUE_OPTIONS.size
+    val allOptions = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+    val totalLeagues = allOptions.size
+    val validSaved = remember(selectedLeagues) {
+        selectedLeagues.filter { lg -> allOptions.any { it.equals(lg, ignoreCase = true) } }
+    }
     var expanded by remember { mutableStateOf(false) }
     var showPickerDialog by remember { mutableStateOf(false) }
-    var workingSet by remember(selectedLeagues) {
+    var workingSet by remember(validSaved) {
         mutableStateOf(
-            if (selectedLeagues.isEmpty()) FootballFeedService.DEFAULT_LEAGUE_OPTIONS.toSet()
-            else selectedLeagues.toSet()
+            if (validSaved.isEmpty()) allOptions.toSet()
+            else validSaved.toSet()
         )
     }
 
@@ -1777,8 +1892,8 @@ fun AdminLeagueHideBarSection(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (selectedLeagues.isEmpty()) "လက်ရှိ: အားလုံး ($totalLeagues လိဂ်)"
-                            else "လက်ရှိရွေးထား: ${selectedLeagues.size} လိဂ်",
+                            text = if (validSaved.isEmpty()) "လက်ရှိ: အားလုံး ($totalLeagues လိဂ်)"
+                            else "လက်ရှိရွေးထား: ${validSaved.size} လိဂ်",
                             color = Color(0xFFB4C8BE),
                             style = MaterialTheme.typography.labelSmall
                         )
@@ -1791,10 +1906,10 @@ fun AdminLeagueHideBarSection(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .clickable(enabled = !busy) {
-                                workingSet = if (selectedLeagues.isEmpty()) {
-                                    FootballFeedService.DEFAULT_LEAGUE_OPTIONS.toSet()
+                                workingSet = if (validSaved.isEmpty()) {
+                                    allOptions.toSet()
                                 } else {
-                                    selectedLeagues.toSet()
+                                    validSaved.toSet()
                                 }
                                 showPickerDialog = true
                             }
@@ -1818,20 +1933,20 @@ fun AdminLeagueHideBarSection(
 
             if (expanded) {
                 Text(
-                    text = if (selectedLeagues.isEmpty()) {
+                    text = if (validSaved.isEmpty()) {
                         "လိဂ်အားလုံး ($totalLeagues လိဂ်) ဖွင့်ထားပါသည်"
                     } else {
-                        selectedLeagues.joinToString(" • ")
+                        validSaved.joinToString(" • ")
                     },
                     color = Color(0xFFD1FAE5),
                     style = MaterialTheme.typography.bodySmall
                 )
                 Button(
                     onClick = {
-                        workingSet = if (selectedLeagues.isEmpty()) {
-                            FootballFeedService.DEFAULT_LEAGUE_OPTIONS.toSet()
+                        workingSet = if (validSaved.isEmpty()) {
+                            allOptions.toSet()
                         } else {
-                            selectedLeagues.toSet()
+                            validSaved.toSet()
                         }
                         showPickerDialog = true
                     },
@@ -1853,7 +1968,7 @@ fun AdminLeagueHideBarSection(
     if (showPickerDialog) {
         SportsLeagueFilterDialog(
             totalCount = totalLeagues,
-            availableLeagues = FootballFeedService.DEFAULT_LEAGUE_OPTIONS,
+            availableLeagues = allOptions,
             selectedLeague = null,
             onSelectLeague = {},
             onDismiss = { showPickerDialog = false },
@@ -1861,7 +1976,7 @@ fun AdminLeagueHideBarSection(
             onSelectLeagues = { workingSet = it },
             confirmSaveLabel = "သိမ်းဆည်းမည်",
             onConfirmSave = {
-                val allCount = FootballFeedService.DEFAULT_LEAGUE_OPTIONS.size
+                val allCount = allOptions.size
                 val toSave = if (workingSet.isEmpty() || workingSet.size >= allCount) {
                     emptyList()
                 } else {

@@ -136,6 +136,7 @@ import com.example.ui.components.ConfirmAutoSyncDialog
 import com.example.ui.components.FullScreenReceiptDialog
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.LeagueHideBarHeader
+import com.example.ui.components.LeagueQuickSearchSuggestionsRow
 import com.example.ui.components.LoTaYaBrandLogo
 import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
@@ -2073,14 +2074,22 @@ private fun AdminBoardTab(
         val raw = boardConfig.activeMatchDateFilter.trim()
         mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
+    val standardLeagueCounts = remember(standardMatches, adminDateFilter) {
+        standardMatches
+            .filter { adminDateFilter.isBlank() || it.matchDate == adminDateFilter }
+            .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .eachCount()
+    }
     val filteredStandardMatches = remember(standardMatches, adminSearchQuery, adminDateFilter) {
         val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
         standardMatches.filter { m ->
             val dateOk = adminDateFilter.isBlank() || m.matchDate == adminDateFilter
+            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
             val qOk = q.isBlank() ||
                 m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
                 m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q)
+                m.league.lowercase(java.util.Locale.US).contains(q) ||
+                canonLeague.contains(q)
             dateOk && qOk
         }
     }
@@ -2389,6 +2398,17 @@ private fun AdminBoardTab(
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("admin_search_standard")
                     )
+                    if (adminSearchQuery.isNotBlank()) {
+                        LeagueQuickSearchSuggestionsRow(
+                            query = adminSearchQuery,
+                            leagueMatchCounts = standardLeagueCounts,
+                            accentColor = ChampionshipGold,
+                            onPickLeague = { picked ->
+                                adminSearchQuery = picked
+                                adminExpandedLeagues[picked] = true
+                            }
+                        )
+                    }
                     AdminCalendarDateBar(
                         selectedDateIso = adminDateFilter,
                         pinnedDateIso = boardConfig.activeMatchDateFilter,
@@ -2431,7 +2451,7 @@ private fun AdminBoardTab(
             }
             val defaultExpand = groupedStandardMatches.size <= 3
             groupedStandardMatches.forEach { (leagueName, leagueMatches) ->
-                val isExpanded = adminExpandedLeagues[leagueName] ?: defaultExpand
+                val isExpanded = if (adminSearchQuery.isNotBlank()) true else (adminExpandedLeagues[leagueName] ?: defaultExpand)
                 item(key = "admin_std_league_$leagueName") {
                     LeagueHideBarHeader(
                         leagueName = leagueName,

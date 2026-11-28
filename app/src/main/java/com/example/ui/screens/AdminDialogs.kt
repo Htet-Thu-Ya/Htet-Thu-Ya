@@ -149,7 +149,7 @@ fun AddMatchDialog(
     var matchDate by remember(initialMatchDate) {
         mutableStateOf(initialMatchDate.ifBlank { todayIso })
     }
-    var league by remember { mutableStateOf("Premier League") }
+    var league by remember { mutableStateOf("English Premier League") }
     var home by remember { mutableStateOf("") }
     var away by remember { mutableStateOf("") }
     var kickoff by remember { mutableStateOf("Tonight 21:00") }

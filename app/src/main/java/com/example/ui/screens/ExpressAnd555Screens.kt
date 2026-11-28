@@ -86,6 +86,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import com.example.data.betting.KyayFormatter
 import com.example.data.betting.MatchSheetCsvCodec
 import com.example.data.model.BoardConfig
@@ -107,6 +109,7 @@ import com.example.ui.components.FiveFiveFiveScreenshotCard
 import com.example.ui.components.FiveFiveFiveTopBarBg
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.LeagueHideBarHeader
+import com.example.ui.components.LeagueQuickSearchSuggestionsRow
 import com.example.ui.components.MatchPick
 import com.example.ui.components.OneXBetCanvasBg
 import com.example.ui.components.OneXBetHeaderBlue
@@ -173,9 +176,15 @@ fun ExpressOddsOrderScreen(
     var isParlay by remember(boardMode, initialIsParlay) { mutableStateOf(initialIsParlay) }
     val selectedPicks = remember(boardMode) { mutableStateMapOf<String, MatchPick>() }
     var stakeInput by remember(boardMode) { mutableStateOf("1000") }
-    var selectedLeaguesFilter by remember(boardMode) { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedLeaguesFilter by remember(boardMode) { mutableStateOf<Set<String>?>(null) }
     var searchQuery by remember(boardMode) { mutableStateOf("") }
     var showSearchBar by remember(boardMode) { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(showSearchBar) {
+        if (showSearchBar) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
     val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var selectedDateFilter by remember(boardMode, boardConfig.activeMatchDateFilter) {
         val raw = boardConfig.activeMatchDateFilter.trim()
@@ -198,7 +207,11 @@ fun ExpressOddsOrderScreen(
             }
             else -> emptyList()
         }
-        val allowed = boardConfig.allowedLeagues.map { it.trim().lowercase(java.util.Locale.US) }.filter { it.isNotBlank() }.toSet()
+        val allowed = boardConfig.allowedLeagues
+            .filter { lg -> FootballFeedService.DEFAULT_LEAGUE_OPTIONS.any { it.equals(lg, ignoreCase = true) } }
+            .map { it.trim().lowercase(java.util.Locale.US) }
+            .filter { it.isNotBlank() }
+            .toSet()
         if (allowed.isEmpty()) allOpen
         else allOpen.filter { m ->
             FootballFeedService.matchesAllowedLeague(m.league, allowed)
@@ -217,6 +230,13 @@ fun ExpressOddsOrderScreen(
             .sortedWith(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
     }
 
+    val leagueMatchCounts = remember(openMatches, selectedDateFilter) {
+        openMatches
+            .filter { selectedDateFilter.isBlank() || it.matchDate == selectedDateFilter }
+            .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .eachCount()
+    }
+
     val availableDates = remember(openMatches) {
         openMatches.map { it.matchDate.trim() }
             .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
@@ -232,15 +252,19 @@ fun ExpressOddsOrderScreen(
 
     val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {
         val q = searchQuery.trim().lowercase(java.util.Locale.US)
-        val filterLower = selectedLeaguesFilter.map { it.trim().lowercase(java.util.Locale.US) }.toSet()
+        val filterSet = selectedLeaguesFilter
+        val filterLower = filterSet?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         openMatches.filter { m ->
-            val leagueOk = filterLower.isEmpty() ||
-                FootballFeedService.matchesAllowedLeague(m.league, filterLower)
+            val leagueOk = q.isNotBlank() ||
+                filterLower == null ||
+                (filterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, filterLower))
             val dateOk = selectedDateFilter.isBlank() || m.matchDate == selectedDateFilter
+            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
             val searchOk = q.isBlank() ||
                 m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
                 m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q)
+                m.league.lowercase(java.util.Locale.US).contains(q) ||
+                canonLeague.contains(q)
             leagueOk && dateOk && searchOk
         }
     }
@@ -358,16 +382,17 @@ fun ExpressOddsOrderScreen(
                         }
                     },
                     actions = {
-                        if (selectedLeaguesFilter.isNotEmpty()) {
+                        val activeFilter = selectedLeaguesFilter
+                        if (activeFilter != null) {
                             Surface(
                                 color = BoardGreenAccent.copy(alpha = 0.25f),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .padding(end = 4.dp)
-                                    .clickable { selectedLeaguesFilter = emptySet() }
+                                    .clickable { selectedLeaguesFilter = null }
                             ) {
                                 Text(
-                                    text = "${selectedLeaguesFilter.size} လိဂ် ×",
+                                    text = if (activeFilter.size == 1) "${activeFilter.first().take(14)} ×" else "${activeFilter.size} လိဂ် ×",
                                     color = Color.White,
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -381,7 +406,7 @@ fun ExpressOddsOrderScreen(
                         ) {
                             Icon(
                                 imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
-                                contentDescription = "Search teams",
+                                contentDescription = "Search teams or leagues",
                                 tint = if (searchQuery.isNotBlank()) ChampionshipGold else Color.White
                             )
                         }
@@ -392,7 +417,7 @@ fun ExpressOddsOrderScreen(
                             Icon(
                                 imageVector = Icons.Default.FilterList,
                                 contentDescription = "League Filter",
-                                tint = if (selectedLeaguesFilter.isNotEmpty()) ChampionshipGold else Color.White
+                                tint = if (selectedLeaguesFilter != null) ChampionshipGold else Color.White
                             )
                         }
                     },
@@ -514,8 +539,22 @@ fun ExpressOddsOrderScreen(
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .focusRequester(searchFocusRequester)
                                             .testTag("express_${boardMode}_search_input")
                                     )
+                                    if (searchQuery.isNotBlank()) {
+                                        LeagueQuickSearchSuggestionsRow(
+                                            query = searchQuery,
+                                            leagueMatchCounts = leagueMatchCounts,
+                                            accentColor = accentColor,
+                                            onPickLeague = { pickedLeague ->
+                                                selectedLeaguesFilter = setOf(pickedLeague)
+                                                expandedLeagues[pickedLeague] = true
+                                                searchQuery = ""
+                                                showSearchBar = false
+                                            }
+                                        )
+                                    }
                                 }
                                 if (availableDates.isNotEmpty()) {
                                     val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
@@ -578,18 +617,39 @@ fun ExpressOddsOrderScreen(
                                 )
                                 Spacer(Modifier.height(12.dp))
                                 Text(
-                                    text = "လက်ရှိ $boardName ပွဲစဉ် မရှိသေးပါ",
+                                    text = if (selectedLeaguesFilter != null || searchQuery.isNotBlank()) {
+                                        "ရွေးချယ်ထားသော လိဂ်/ရှာဖွေမှုတွင် ပွဲစဉ်မရှိပါ"
+                                    } else {
+                                        "လက်ရှိ $boardName ပွဲစဉ် မရှိသေးပါ"
+                                    },
                                     color = if (isOneExpress) InkDark else Color.White,
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "Admin မှ $boardName ပွဲစဉ်များ ထည့်သွင်း/Auto-Sync လုပ်ပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
+                                    text = if (selectedLeaguesFilter != null || searchQuery.isNotBlank()) {
+                                        "အခြားလိဂ် ရွေးချယ်ရန် သို့မဟုတ် လိဂ်အားလုံး ပြန်ပြရန် နှိပ်ပါ။"
+                                    } else {
+                                        "Admin မှ $boardName ပွဲစဉ်များ ထည့်သွင်း/Auto-Sync လုပ်ပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။"
+                                    },
                                     color = if (isOneExpress) InkMuted else Color(0xFFD1D5DB),
                                     style = MaterialTheme.typography.bodyMedium,
                                     textAlign = TextAlign.Center
                                 )
+                                if (selectedLeaguesFilter != null || searchQuery.isNotBlank()) {
+                                    Spacer(Modifier.height(12.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            selectedLeaguesFilter = null
+                                            searchQuery = ""
+                                        },
+                                        border = BorderStroke(1.dp, accentColor)
+                                    ) {
+                                        Text("လိဂ်အားလုံး ပြန်ပြမည်", color = accentColor, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         } else {
                             LazyColumn(
@@ -641,9 +701,9 @@ fun ExpressOddsOrderScreen(
                                 }
                             }
                             if (showBoardTable) {
-                                val singleLeagueMode = !isOneExpress || groupedByLeague.size == 1 || selectedLeaguesFilter.isNotEmpty() || searchQuery.isNotBlank()
+                                val singleLeagueMode = !isOneExpress || groupedByLeague.size == 1 || selectedLeaguesFilter != null || searchQuery.isNotBlank()
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
-                                    val isExpanded = expandedLeagues[leagueName] ?: singleLeagueMode
+                                    val isExpanded = if (searchQuery.isNotBlank()) true else (expandedLeagues[leagueName] ?: singleLeagueMode)
                                     item(key = "express_league_hdr_$leagueName") {
                                         if (isOneExpress) {
                                             OneXBetLeagueHideBarHeader(
@@ -706,15 +766,18 @@ fun ExpressOddsOrderScreen(
     }
 
     if (showLeagueFilterDialog) {
+        val allDefaults = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
         SportsLeagueFilterDialog(
             totalCount = openMatches.size,
             availableLeagues = availableLeagues,
             selectedLeague = null,
             onSelectLeague = { lg ->
-                selectedLeaguesFilter = if (lg == null) emptySet() else setOf(lg)
+                selectedLeaguesFilter = if (lg == null) null else setOf(lg)
             },
-            selectedLeagues = selectedLeaguesFilter,
-            onSelectLeagues = { selectedLeaguesFilter = it },
+            selectedLeagues = selectedLeaguesFilter ?: allDefaults.toSet(),
+            onSelectLeagues = { nextSet ->
+                selectedLeaguesFilter = if (nextSet.size >= allDefaults.size) null else nextSet
+            },
             onDismiss = { showLeagueFilterDialog = false }
         )
     }
@@ -827,14 +890,22 @@ fun AdminExpressBoardTab(
     val boardMatches = remember(matches, boardMode) {
         matches.filter { it.boardSource == boardMode }
     }
+    val adminLeagueCounts = remember(boardMatches, adminDateFilter) {
+        boardMatches
+            .filter { adminDateFilter.isBlank() || it.matchDate == adminDateFilter }
+            .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .eachCount()
+    }
     val filteredMatches = remember(boardMatches, adminSearchQuery, adminDateFilter) {
         val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
         boardMatches.filter { m ->
             val dateOk = adminDateFilter.isBlank() || m.matchDate == adminDateFilter
+            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
             val qOk = q.isBlank() ||
                 m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
                 m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q)
+                m.league.lowercase(java.util.Locale.US).contains(q) ||
+                canonLeague.contains(q)
             dateOk && qOk
         }
     }
@@ -1179,6 +1250,17 @@ fun AdminExpressBoardTab(
                             .fillMaxWidth()
                             .testTag("admin_search_$boardMode")
                     )
+                    if (adminSearchQuery.isNotBlank()) {
+                        LeagueQuickSearchSuggestionsRow(
+                            query = adminSearchQuery,
+                            leagueMatchCounts = adminLeagueCounts,
+                            accentColor = accent,
+                            onPickLeague = { picked ->
+                                adminSearchQuery = picked
+                                adminExpandedLeagues[picked] = true
+                            }
+                        )
+                    }
                     AdminCalendarDateBar(
                         selectedDateIso = adminDateFilter,
                         pinnedDateIso = boardConfig.activeMatchDateFilter,
@@ -1227,7 +1309,7 @@ fun AdminExpressBoardTab(
                 }
                 val defaultExpand = groupedAdminMatches.size <= 3
                 groupedAdminMatches.forEach { (leagueName, leagueMatches) ->
-                    val isExpanded = adminExpandedLeagues[leagueName] ?: defaultExpand
+                    val isExpanded = if (adminSearchQuery.isNotBlank()) true else (adminExpandedLeagues[leagueName] ?: defaultExpand)
                     item(key = "admin_exp_league_$leagueName") {
                         LeagueHideBarHeader(
                             leagueName = leagueName,

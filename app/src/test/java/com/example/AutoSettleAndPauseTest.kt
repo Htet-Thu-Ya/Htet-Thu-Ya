@@ -881,11 +881,11 @@ class AutoSettleAndPauseTest {
     }
 
     @Test
-    fun canonical36Leagues_andGoogleSheetEditUrlNormalization_workCorrectly() {
+    fun canonical42Leagues_andGoogleSheetEditUrlNormalization_workCorrectly() {
         val leagues = com.example.data.network.FootballFeedService.DEFAULT_LEAGUE_OPTIONS
-        assertEquals(36, leagues.size)
-        assertEquals("Thai League 1", leagues.first())
-        assertEquals("Brazil Serie B", leagues.last())
+        assertEquals(42, leagues.size)
+        assertEquals("Turkey 1. Lig", leagues.first())
+        assertEquals("Argentine Division 1", leagues.last())
 
         assertEquals(
             "English Premier League",
@@ -900,12 +900,21 @@ class AutoSettleAndPauseTest {
             com.example.data.network.FootballFeedService.canonicalLeagueName("EFL Championship")
         )
         assertTrue(
-            com.example.data.network.FootballFeedService.leagueSortOrderIndex("Thai League 1") <
+            com.example.data.network.FootballFeedService.leagueSortOrderIndex("Turkey 1. Lig") <
                 com.example.data.network.FootballFeedService.leagueSortOrderIndex("English Premier League")
         )
         assertTrue(
             com.example.data.network.FootballFeedService.leagueSortOrderIndex("English Premier League") <
                 com.example.data.network.FootballFeedService.leagueSortOrderIndex("Unknown Friendly Cup")
+        )
+        assertTrue(
+            com.example.data.network.FootballFeedService.matchesAllowedLeague("Spanish La Liga", setOf("spanish la liga"))
+        )
+        assertFalse(
+            com.example.data.network.FootballFeedService.matchesAllowedLeague("Spanish La Liga 2", setOf("spanish la liga"))
+        )
+        assertFalse(
+            com.example.data.network.FootballFeedService.matchesAllowedLeague("German Bundesliga 2", setOf("german bundesliga"))
         )
 
         val csvUrl = "https://docs.google.com/spreadsheets/d/abc123XYZ/export?format=csv&gid=42"

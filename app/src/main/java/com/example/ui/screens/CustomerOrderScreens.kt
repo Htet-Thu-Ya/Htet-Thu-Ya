@@ -42,6 +42,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -59,6 +60,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +81,7 @@ import com.example.ui.components.BoardMatchInfoDialog
 import com.example.ui.components.BoardTopBarBg
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.LeagueHideBarHeader
+import com.example.ui.components.LeagueQuickSearchSuggestionsRow
 import com.example.ui.components.MatchPick
 import com.example.ui.components.PauseStatusBannerCard
 import com.example.ui.components.ScreenshotMatchRowCard
@@ -135,9 +139,15 @@ fun SportsOrderScreen(
 
     val selectedPicks = remember { mutableStateMapOf<String, MatchPick>() }
     var stakeInput by remember { mutableStateOf("1000") }
-    var selectedLeaguesFilter by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedLeaguesFilter by remember { mutableStateOf<Set<String>?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearchBar by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(showSearchBar) {
+        if (showSearchBar) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
     val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var selectedDateFilter by remember(boardConfig.activeMatchDateFilter) {
         val raw = boardConfig.activeMatchDateFilter.trim()
@@ -157,7 +167,11 @@ fun SportsOrderScreen(
             }
             else -> emptyList()
         }
-        val allowed = boardConfig.allowedLeagues.map { it.trim().lowercase(java.util.Locale.US) }.filter { it.isNotBlank() }.toSet()
+        val allowed = boardConfig.allowedLeagues
+            .filter { lg -> FootballFeedService.DEFAULT_LEAGUE_OPTIONS.any { it.equals(lg, ignoreCase = true) } }
+            .map { it.trim().lowercase(java.util.Locale.US) }
+            .filter { it.isNotBlank() }
+            .toSet()
         if (allowed.isEmpty()) allOpen
         else allOpen.filter { m ->
             FootballFeedService.matchesAllowedLeague(m.league, allowed)
@@ -176,6 +190,13 @@ fun SportsOrderScreen(
             .sortedWith(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
     }
 
+    val leagueMatchCounts = remember(openMatches, selectedDateFilter) {
+        openMatches
+            .filter { selectedDateFilter.isBlank() || it.matchDate == selectedDateFilter }
+            .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
+            .eachCount()
+    }
+
     val availableDates = remember(openMatches) {
         openMatches.map { it.matchDate.trim() }
             .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
@@ -191,15 +212,19 @@ fun SportsOrderScreen(
 
     val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {
         val q = searchQuery.trim().lowercase(java.util.Locale.US)
-        val filterLower = selectedLeaguesFilter.map { it.trim().lowercase(java.util.Locale.US) }.toSet()
+        val filterSet = selectedLeaguesFilter
+        val filterLower = filterSet?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         openMatches.filter { m ->
-            val leagueOk = filterLower.isEmpty() ||
-                FootballFeedService.matchesAllowedLeague(m.league, filterLower)
+            val leagueOk = q.isNotBlank() ||
+                filterLower == null ||
+                (filterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, filterLower))
             val dateOk = selectedDateFilter.isBlank() || m.matchDate == selectedDateFilter
+            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
             val searchOk = q.isBlank() ||
                 m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
                 m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q)
+                m.league.lowercase(java.util.Locale.US).contains(q) ||
+                canonLeague.contains(q)
             leagueOk && dateOk && searchOk
         }
     }
@@ -267,16 +292,17 @@ fun SportsOrderScreen(
                     }
                 },
                 actions = {
-                    if (selectedLeaguesFilter.isNotEmpty()) {
+                    val activeFilter = selectedLeaguesFilter
+                    if (activeFilter != null) {
                         Surface(
                             color = BoardGreenAccent.copy(alpha = 0.25f),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .padding(end = 4.dp)
-                                .clickable { selectedLeaguesFilter = emptySet() }
+                                .clickable { selectedLeaguesFilter = null }
                         ) {
                             Text(
-                                text = "${selectedLeaguesFilter.size} လိဂ် ×",
+                                text = if (activeFilter.size == 1) "${activeFilter.first().take(14)} ×" else "${activeFilter.size} လိဂ် ×",
                                 color = Color.White,
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -290,7 +316,7 @@ fun SportsOrderScreen(
                     ) {
                         Icon(
                             imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Search teams",
+                            contentDescription = "Search teams or leagues",
                             tint = if (searchQuery.isNotBlank()) ChampionshipGold else Color.White
                         )
                     }
@@ -301,7 +327,7 @@ fun SportsOrderScreen(
                         Icon(
                             imageVector = Icons.Default.FilterList,
                             contentDescription = "League Filter",
-                            tint = if (selectedLeaguesFilter.isNotEmpty()) ChampionshipGold else Color.White
+                            tint = if (selectedLeaguesFilter != null) ChampionshipGold else Color.White
                         )
                     }
                 },
@@ -398,8 +424,22 @@ fun SportsOrderScreen(
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .focusRequester(searchFocusRequester)
                                             .testTag("sports_team_search_input")
                                     )
+                                    if (searchQuery.isNotBlank()) {
+                                        LeagueQuickSearchSuggestionsRow(
+                                            query = searchQuery,
+                                            leagueMatchCounts = leagueMatchCounts,
+                                            accentColor = PitchEmeraldDark,
+                                            onPickLeague = { pickedLeague ->
+                                                selectedLeaguesFilter = setOf(pickedLeague)
+                                                expandedLeagues[pickedLeague] = true
+                                                searchQuery = ""
+                                                showSearchBar = false
+                                            }
+                                        )
+                                    }
                                 }
                                 if (availableDates.isNotEmpty()) {
                                     val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
@@ -457,18 +497,39 @@ fun SportsOrderScreen(
                                 Icon(Icons.Default.SportsSoccer, contentDescription = null, tint = PitchEmeraldDark, modifier = Modifier.size(56.dp))
                                 Spacer(Modifier.height(12.dp))
                                 Text(
-                                    text = "လက်ရှိ ဖွင့်ထားသော ပွဲစဉ် မရှိသေးပါ",
+                                    text = if (selectedLeaguesFilter != null || searchQuery.isNotBlank()) {
+                                        "ရွေးချယ်ထားသော လိဂ်/ရှာဖွေမှုတွင် ပွဲစဉ်မရှိပါ"
+                                    } else {
+                                        "လက်ရှိ ဖွင့်ထားသော ပွဲစဉ် မရှိသေးပါ"
+                                    },
                                     color = InkDark,
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "Admin မှ ပွဲစဉ်အသစ်များ ထည့်သွင်းပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။",
+                                    text = if (selectedLeaguesFilter != null || searchQuery.isNotBlank()) {
+                                        "အခြားလိဂ် ရွေးချယ်ရန် သို့မဟုတ် လိဂ်အားလုံး ပြန်ပြရန် နှိပ်ပါ။"
+                                    } else {
+                                        "Admin မှ ပွဲစဉ်အသစ်များ ထည့်သွင်းပေးပါက ဤနေရာတွင် ချက်ချင်း ပေါ်လာပါမည်။"
+                                    },
                                     color = InkMuted,
                                     style = MaterialTheme.typography.bodyMedium,
                                     textAlign = TextAlign.Center
                                 )
+                                if (selectedLeaguesFilter != null || searchQuery.isNotBlank()) {
+                                    Spacer(Modifier.height(12.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            selectedLeaguesFilter = null
+                                            searchQuery = ""
+                                        },
+                                        border = BorderStroke(1.dp, PitchEmeraldDark)
+                                    ) {
+                                        Text("လိဂ်အားလုံး ပြန်ပြမည်", color = PitchEmeraldDark, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         } else {
                             LazyColumn(
@@ -525,9 +586,9 @@ fun SportsOrderScreen(
                                 }
                             }
                             if (showSportsTable) {
-                                val singleLeagueMode = groupedByLeague.size == 1 || selectedLeaguesFilter.isNotEmpty() || searchQuery.isNotBlank()
+                                val singleLeagueMode = groupedByLeague.size == 1 || selectedLeaguesFilter != null || searchQuery.isNotBlank()
                                 groupedByLeague.forEach { (leagueName, leagueMatches) ->
-                                    val isExpanded = expandedLeagues[leagueName] ?: singleLeagueMode
+                                    val isExpanded = if (searchQuery.isNotBlank()) true else (expandedLeagues[leagueName] ?: singleLeagueMode)
                                     item(key = "league_hdr_$leagueName") {
                                         LeagueHideBarHeader(
                                             leagueName = leagueName,
@@ -569,15 +630,18 @@ fun SportsOrderScreen(
     }
 
     if (showLeagueFilterDialog) {
+        val allDefaults = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
         SportsLeagueFilterDialog(
             totalCount = openMatches.size,
             availableLeagues = availableLeagues,
             selectedLeague = null,
             onSelectLeague = { lg ->
-                selectedLeaguesFilter = if (lg == null) emptySet() else setOf(lg)
+                selectedLeaguesFilter = if (lg == null) null else setOf(lg)
             },
-            selectedLeagues = selectedLeaguesFilter,
-            onSelectLeagues = { selectedLeaguesFilter = it },
+            selectedLeagues = selectedLeaguesFilter ?: allDefaults.toSet(),
+            onSelectLeagues = { nextSet ->
+                selectedLeaguesFilter = if (nextSet.size >= allDefaults.size) null else nextSet
+            },
             onDismiss = { showLeagueFilterDialog = false }
         )
     }

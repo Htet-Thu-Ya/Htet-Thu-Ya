@@ -39,63 +39,48 @@ class FootballFeedService(
         .build()
 ) {
     private val espnLeagues = listOf(
-        "uefa.champions" to "UEFA Champions League",
-        "uefa.europa" to "Europa League",
-        "uefa.europa.conf" to "UEFA Conference League",
-        "uefa.youth" to "UEFA Youth League",
-        "eng.1" to "English Premier League",
+        "tur.2" to "Turkey 1. Lig",
+        "ukr.1" to "Ukrainian Premier League",
+        "por.2" to "Liga Portugal 2",
+        "den.2" to "Danish 1st Division",
+        "ger.2" to "German Bundesliga 2",
+        "swe.2" to "Sweden Superettan",
+        "sau.1" to "Saudi Professional League",
+        "eng.3" to "England League 1",
         "eng.2" to "England Championship",
+        "rou.1" to "Romania Liga I",
+        "wal.1" to "Welsh Premier League",
         "eng.5" to "England National League",
-        "eng.fa" to "FA Cup",
-        "eng.league_cup" to "Carabao Cup",
+        "aze.1" to "Azerbaijan Premier League",
         "esp.1" to "Spanish La Liga",
         "esp.2" to "Spanish La Liga 2",
-        "esp.copa_del_rey" to "Copa del Rey",
-        "ger.1" to "German Bundesliga",
-        "ger.2" to "German Bundesliga 2",
         "ger.3" to "German 3.Liga",
-        "ita.1" to "Italy Serie A",
-        "ita.2" to "Serie B",
-        "ita.coppa_italia" to "Coppa Italia",
-        "fra.1" to "France Ligue 1",
-        "fra.2" to "Ligue 2",
-        "ned.1" to "Holland Eredivisie",
-        "ned.2" to "Holland Eerste Divisie",
-        "por.1" to "Liga Portugal 1",
-        "por.2" to "Liga Portugal 2",
-        "bel.1" to "Belgian Pro League",
         "tur.1" to "Turkey Super Lig",
-        "tur.2" to "Turkey 1. Lig",
-        "den.1" to "Denmark Superliga",
-        "den.2" to "Danish 1st Division",
-        "aut.1" to "Austrian Bundesliga",
-        "aut.2" to "Austria Erste Division",
-        "sui.2" to "Switzerland Challenge League",
         "pol.1" to "Poland Ekstraklasa",
-        "pol.2" to "Poland Liga 1",
-        "rou.1" to "Romania Liga I",
-        "bul.1" to "Bulgaria First League",
-        "cro.1" to "Croatia 1.Division",
+        "ita.1" to "Italy Serie A",
         "svn.1" to "Slovenia 1.Liga",
-        "cyp.1" to "Cyprus 1 Division",
-        "wal.1" to "Welsh Premier League",
-        "afc.champions" to "AFC Champions League Elite",
-        "afc.cup" to "AFC Champions League 2",
-        "tha.1" to "Thai League 1",
+        "ita.2" to "Italy Serie B",
         "ind.1" to "Indian Super League",
-        "jpn.1" to "J1 League (Japan)",
-        "kor.1" to "K League 1 (Korea)",
-        "sau.1" to "Saudi Professional League",
-        "chn.1" to "Chinese Super League",
-        "aus.1" to "A-League",
-        "rus.1" to "Russian Premier League",
-        "rus.cup" to "Russian Cup",
-        "egy.1" to "Egypt. Premier League",
-        "isr.1" to "Israel",
-        "bra.1" to "Brazil Serie A",
-        "bra.2" to "Brazil Serie B",
+        "svk.1" to "Slovak Super Liga",
+        "pol.2" to "Poland Liga 1",
+        "aut.2" to "Austria Erste Division",
+        "ger.1" to "German Bundesliga",
+        "sco.1" to "Scottish Premiership",
+        "bel.1" to "Belgian Pro League",
+        "eng.1" to "English Premier League",
+        "gre.1" to "Greece Super League A",
+        "ned.1" to "Holland Eredivisie",
+        "por.1" to "Liga Portugal 1",
+        "aut.1" to "Austrian Bundesliga",
+        "cyp.1" to "Cyprus 1 Division",
+        "fra.1" to "France Ligue 1",
+        "sui.1" to "Switzerland Super League",
+        "sui.2" to "Switzerland Challenge League",
+        "usa.1" to "USA Major League Soccer",
+        "chi.1" to "Chile Primera Division",
         "par.1" to "Primera Division de Paraguay",
-        "fifa.world" to "World Cup Qualifiers"
+        "bra.2" to "Brazil Serie B",
+        "arg.1" to "Argentine Division 1"
     )
 
     fun todayDateIso(): String = MyanmarTimeUtil.todayIsoDate()
@@ -123,13 +108,10 @@ class FootballFeedService(
         try {
             val nowMs = MyanmarTimeUtil.nowMs()
             val allowedSet = allowedLeagues.map { it.trim().lowercase(Locale.US) }.filter { it.isNotBlank() }.toSet()
-            val targetLeagues = if (allowedSet.isEmpty()) {
-                espnLeagues
-            } else {
-                espnLeagues.filter { (_, name) ->
-                    matchesAllowedLeague(name, allowedSet)
-                }.ifEmpty { espnLeagues }
-            }
+            val effectiveFeedSet = if (allowedSet.isEmpty()) DEFAULT_LEAGUE_LOWER_SET else allowedSet
+            val targetLeagues = espnLeagues.filter { (_, name) ->
+                matchesAllowedLeague(name, effectiveFeedSet)
+            }.ifEmpty { espnLeagues }
             val allFixtures = linkedMapOf<String, LiveFootballFixture>()
 
             // Include previous UTC day when fetching today (offset 0) so early Yangon morning kickoffs (00:00-06:29 MMT) are included
@@ -155,19 +137,19 @@ class FootballFeedService(
                 }.awaitAll().flatten()
             }
             espnJobs.forEach { fix ->
-                if (matchesAllowedLeague(fix.league, allowedSet)) {
+                if (matchesAllowedLeague(fix.league, effectiveFeedSet)) {
                     mergeFixture(allFixtures, fix)
                 }
             }
 
-            // Always pull TheSportsDB for broader cup/regional/Asian coverage & finished match completion
+            // Pull TheSportsDB for the 42 configured leagues & finished match completion
             val tsdbJobs = coroutineScope {
                 tsdbDateSet.map { isoDate ->
                     async { fetchTheSportsDbDay(isoDate, nowMs) }
                 }.awaitAll().flatten()
             }
             tsdbJobs.forEach { fix ->
-                if (matchesAllowedLeague(fix.league, allowedSet)) {
+                if (matchesAllowedLeague(fix.league, effectiveFeedSet)) {
                     mergeFixture(allFixtures, fix)
                 }
             }
@@ -197,13 +179,10 @@ class FootballFeedService(
             val nextIso = MyanmarTimeUtil.formatMatchDateIso(targetMidMs + 86_400_000L)
 
             val allowedSet = allowedLeagues.map { it.trim().lowercase(Locale.US) }.filter { it.isNotBlank() }.toSet()
-            val targetLeagues = if (allowedSet.isEmpty()) {
-                espnLeagues
-            } else {
-                espnLeagues.filter { (_, name) ->
-                    matchesAllowedLeague(name, allowedSet)
-                }.ifEmpty { espnLeagues }
-            }
+            val effectiveFeedSet = if (allowedSet.isEmpty()) DEFAULT_LEAGUE_LOWER_SET else allowedSet
+            val targetLeagues = espnLeagues.filter { (_, name) ->
+                matchesAllowedLeague(name, effectiveFeedSet)
+            }.ifEmpty { espnLeagues }
 
             val espnDateSet = linkedSetOf(
                 cleanIso.replace("-", ""),
@@ -220,7 +199,7 @@ class FootballFeedService(
                 }.awaitAll().flatten()
             }
             espnJobs.forEach { fix ->
-                if (fix.matchDate == cleanIso && matchesAllowedLeague(fix.league, allowedSet)) {
+                if (fix.matchDate == cleanIso && matchesAllowedLeague(fix.league, effectiveFeedSet)) {
                     mergeFixture(allFixtures, fix)
                 }
             }
@@ -231,7 +210,7 @@ class FootballFeedService(
                 }.awaitAll().flatten()
             }
             tsdbJobs.forEach { fix ->
-                if (fix.matchDate == cleanIso && matchesAllowedLeague(fix.league, allowedSet)) {
+                if (fix.matchDate == cleanIso && matchesAllowedLeague(fix.league, effectiveFeedSet)) {
                     mergeFixture(allFixtures, fix)
                 }
             }
@@ -289,16 +268,13 @@ class FootballFeedService(
                     .map { it.trim().lowercase(Locale.US) }
                     .filter { it.isNotBlank() }
                     .toSet()
+                val effectiveSet = if (allowedSet.isEmpty()) DEFAULT_LEAGUE_LOWER_SET else allowedSet
                 val rawList = merged.values.toList().let { list ->
                     if (cleanTargetIso != null) list.filter { it.matchDate == cleanTargetIso } else list
                 }
-                val filtered = if (allowedSet.isEmpty()) {
-                    rawList
-                } else {
-                    rawList.filter { fix ->
-                        matchesAllowedLeague(fix.league, allowedSet)
-                    }.ifEmpty { rawList }
-                }
+                val filtered = rawList.filter { fix ->
+                    matchesAllowedLeague(fix.league, effectiveSet)
+                }.ifEmpty { rawList }
                 if (filtered.isNotEmpty()) {
                     return@withContext Result.success(
                         OneXBetSyncResult(
@@ -1185,142 +1161,176 @@ class FootballFeedService(
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
         val DEFAULT_LEAGUE_OPTIONS = listOf(
-            "Thai League 1",
-            "Saudi Professional League",
-            "Indian Super League",
-            "Romania Liga I",
-            "Bulgaria First League",
-            "Croatia 1.Division",
-            "Poland Ekstraklasa",
-            "Poland Liga 1",
-            "Slovenia 1.Liga",
-            "Turkey Super Lig",
             "Turkey 1. Lig",
-            "Cyprus 1 Division",
-            "German Bundesliga 2",
-            "Danish 1st Division",
-            "Denmark Superliga",
+            "Ukrainian Premier League",
             "Liga Portugal 2",
-            "German 3.Liga",
-            "Switzerland Challenge League",
-            "Austrian Bundesliga",
-            "Holland Eredivisie",
-            "Holland Eerste Divisie",
-            "Spanish La Liga 2",
-            "Austria Erste Division",
-            "German Bundesliga",
-            "Italy Serie A",
-            "France Ligue 1",
-            "Belgian Pro League",
+            "Danish 1st Division",
+            "German Bundesliga 2",
+            "Sweden Superettan",
+            "Saudi Professional League",
+            "England League 1",
+            "England Championship",
+            "Romania Liga I",
             "Welsh Premier League",
             "England National League",
-            "English Premier League",
-            "England Championship",
+            "Azerbaijan Premier League",
             "Spanish La Liga",
+            "Spanish La Liga 2",
+            "German 3.Liga",
+            "Turkey Super Lig",
+            "Poland Ekstraklasa",
+            "Italy Serie A",
+            "Slovenia 1.Liga",
+            "Italy Serie B",
+            "Indian Super League",
+            "Slovak Super Liga",
+            "Poland Liga 1",
+            "Austria Erste Division",
+            "German Bundesliga",
+            "Scottish Premiership",
+            "Belgian Pro League",
+            "English Premier League",
+            "Greece Super League A",
+            "Holland Eredivisie",
             "Liga Portugal 1",
+            "Austrian Bundesliga",
+            "Cyprus 1 Division",
+            "France Ligue 1",
+            "Switzerland Super League",
+            "Switzerland Challenge League",
+            "USA Major League Soccer",
+            "Chile Primera Division",
             "Primera Division de Paraguay",
-            "Brazil Serie A",
-            "Brazil Serie B"
+            "Brazil Serie B",
+            "Argentine Division 1"
         )
 
+        private val DEFAULT_LEAGUE_LOWER_SET = DEFAULT_LEAGUE_OPTIONS
+            .map { it.lowercase(Locale.US) }
+            .toSet()
+
         private val LEAGUE_ALIAS_MAP = mapOf(
-            "premier league" to "English Premier League",
-            "english premier league" to "English Premier League",
-            "championship" to "England Championship",
-            "efl championship" to "England Championship",
-            "england championship" to "England Championship",
-            "english league championship" to "England Championship",
-            "national league" to "England National League",
-            "english national league" to "England National League",
-            "england national league" to "England National League",
-            "la liga" to "Spanish La Liga",
-            "spanish la liga" to "Spanish La Liga",
-            "spanish laliga" to "Spanish La Liga",
-            "la liga 2" to "Spanish La Liga 2",
-            "laliga 2" to "Spanish La Liga 2",
-            "spanish la liga 2" to "Spanish La Liga 2",
-            "segunda division" to "Spanish La Liga 2",
-            "bundesliga" to "German Bundesliga",
-            "german bundesliga" to "German Bundesliga",
-            "2. bundesliga" to "German Bundesliga 2",
-            "german bundesliga 2" to "German Bundesliga 2",
-            "3. liga" to "German 3.Liga",
-            "3.liga" to "German 3.Liga",
-            "german 3.liga" to "German 3.Liga",
-            "serie a" to "Italy Serie A",
-            "italian serie a" to "Italy Serie A",
-            "italy serie a" to "Italy Serie A",
-            "ligue 1" to "France Ligue 1",
-            "french ligue 1" to "France Ligue 1",
-            "france ligue 1" to "France Ligue 1",
-            "saudi pro league" to "Saudi Professional League",
-            "saudi professional league" to "Saudi Professional League",
-            "thai league 1" to "Thai League 1",
-            "indian super league" to "Indian Super League",
-            "romania liga i" to "Romania Liga I",
-            "romanian liga i" to "Romania Liga I",
-            "liga 1 romania" to "Romania Liga I",
-            "superliga" to "Romania Liga I",
-            "bulgaria first league" to "Bulgaria First League",
-            "first professional football league" to "Bulgaria First League",
-            "parva liga" to "Bulgaria First League",
-            "croatia 1.division" to "Croatia 1.Division",
-            "croatian first football league" to "Croatia 1.Division",
-            "hnl" to "Croatia 1.Division",
-            "1. hnl" to "Croatia 1.Division",
-            "poland ekstraklasa" to "Poland Ekstraklasa",
-            "ekstraklasa" to "Poland Ekstraklasa",
-            "poland liga 1" to "Poland Liga 1",
-            "i liga" to "Poland Liga 1",
-            "poland i liga" to "Poland Liga 1",
-            "slovenia 1.liga" to "Slovenia 1.Liga",
-            "prvaliga" to "Slovenia 1.Liga",
-            "1. snl" to "Slovenia 1.Liga",
-            "super lig" to "Turkey Super Lig",
-            "turkish super lig" to "Turkey Super Lig",
-            "turkey super lig" to "Turkey Super Lig",
             "turkey 1. lig" to "Turkey 1. Lig",
             "tff 1. lig" to "Turkey 1. Lig",
-            "cyprus 1 division" to "Cyprus 1 Division",
-            "cypriot first division" to "Cyprus 1 Division",
+            "turkish 1. lig" to "Turkey 1. Lig",
+            "ukrainian premier league" to "Ukrainian Premier League",
+            "ukraine premier league" to "Ukrainian Premier League",
+            "premier league ukraine" to "Ukrainian Premier League",
+            "liga portugal 2" to "Liga Portugal 2",
+            "liga portugal sabseg" to "Liga Portugal 2",
+            "portugal segunda liga" to "Liga Portugal 2",
             "danish 1st division" to "Danish 1st Division",
             "denmark 1st division" to "Danish 1st Division",
             "1st division" to "Danish 1st Division",
-            "danish superliga" to "Denmark Superliga",
-            "denmark superliga" to "Denmark Superliga",
-            "superligaen" to "Denmark Superliga",
-            "eredivisie" to "Holland Eredivisie",
-            "dutch eredivisie" to "Holland Eredivisie",
-            "holland eredivisie" to "Holland Eredivisie",
-            "eerste divisie" to "Holland Eerste Divisie",
-            "dutch eerste divisie" to "Holland Eerste Divisie",
-            "holland eerste divisie" to "Holland Eerste Divisie",
-            "primeira liga" to "Liga Portugal 1",
-            "liga portugal" to "Liga Portugal 1",
-            "portuguese primeira liga" to "Liga Portugal 1",
-            "liga portugal 1" to "Liga Portugal 1",
-            "liga portugal 2" to "Liga Portugal 2",
-            "liga portugal sabseg" to "Liga Portugal 2",
+            "german bundesliga 2" to "German Bundesliga 2",
+            "2. bundesliga" to "German Bundesliga 2",
+            "sweden superettan" to "Sweden Superettan",
+            "swedish superettan" to "Sweden Superettan",
+            "superettan" to "Sweden Superettan",
+            "saudi professional league" to "Saudi Professional League",
+            "saudi pro league" to "Saudi Professional League",
+            "england league 1" to "England League 1",
+            "english league one" to "England League 1",
+            "efl league one" to "England League 1",
+            "league one" to "England League 1",
+            "england championship" to "England Championship",
+            "english league championship" to "England Championship",
+            "efl championship" to "England Championship",
+            "championship" to "England Championship",
+            "romania liga i" to "Romania Liga I",
+            "romanian liga i" to "Romania Liga I",
+            "liga 1 romania" to "Romania Liga I",
+            "superliga romania" to "Romania Liga I",
+            "welsh premier league" to "Welsh Premier League",
+            "cymru premier" to "Welsh Premier League",
+            "england national league" to "England National League",
+            "english national league" to "England National League",
+            "national league" to "England National League",
+            "azerbaijan premier league" to "Azerbaijan Premier League",
+            "azerbaijani premier league" to "Azerbaijan Premier League",
+            "spanish la liga" to "Spanish La Liga",
+            "spanish laliga" to "Spanish La Liga",
+            "spanish primera division" to "Spanish La Liga",
+            "la liga" to "Spanish La Liga",
+            "laliga" to "Spanish La Liga",
+            "spanish la liga 2" to "Spanish La Liga 2",
+            "la liga 2" to "Spanish La Liga 2",
+            "laliga 2" to "Spanish La Liga 2",
+            "segunda division" to "Spanish La Liga 2",
+            "german 3.liga" to "German 3.Liga",
+            "3. liga" to "German 3.Liga",
+            "3.liga" to "German 3.Liga",
+            "turkey super lig" to "Turkey Super Lig",
+            "turkish super lig" to "Turkey Super Lig",
+            "super lig" to "Turkey Super Lig",
+            "poland ekstraklasa" to "Poland Ekstraklasa",
+            "ekstraklasa" to "Poland Ekstraklasa",
+            "italy serie a" to "Italy Serie A",
+            "italian serie a" to "Italy Serie A",
+            "serie a" to "Italy Serie A",
+            "slovenia 1.liga" to "Slovenia 1.Liga",
+            "prvaliga" to "Slovenia 1.Liga",
+            "1. snl" to "Slovenia 1.Liga",
+            "italy serie b" to "Italy Serie B",
+            "italian serie b" to "Italy Serie B",
+            "serie b" to "Italy Serie B",
+            "indian super league" to "Indian Super League",
+            "slovak super liga" to "Slovak Super Liga",
+            "slovakia super liga" to "Slovak Super Liga",
+            "nike liga" to "Slovak Super Liga",
+            "fortuna liga" to "Slovak Super Liga",
+            "poland liga 1" to "Poland Liga 1",
+            "poland i liga" to "Poland Liga 1",
+            "i liga" to "Poland Liga 1",
+            "austria erste division" to "Austria Erste Division",
+            "austrian 2. liga" to "Austria Erste Division",
+            "2. liga" to "Austria Erste Division",
+            "german bundesliga" to "German Bundesliga",
+            "bundesliga" to "German Bundesliga",
+            "scottish premiership" to "Scottish Premiership",
+            "scotland premiership" to "Scottish Premiership",
             "belgian pro league" to "Belgian Pro League",
             "jupiler pro league" to "Belgian Pro League",
+            "english premier league" to "English Premier League",
+            "premier league" to "English Premier League",
+            "greece super league a" to "Greece Super League A",
+            "greek super league" to "Greece Super League A",
+            "super league greece" to "Greece Super League A",
+            "super league 1" to "Greece Super League A",
+            "holland eredivisie" to "Holland Eredivisie",
+            "dutch eredivisie" to "Holland Eredivisie",
+            "eredivisie" to "Holland Eredivisie",
+            "liga portugal 1" to "Liga Portugal 1",
+            "liga portugal" to "Liga Portugal 1",
+            "primeira liga" to "Liga Portugal 1",
+            "portuguese primeira liga" to "Liga Portugal 1",
             "austrian bundesliga" to "Austrian Bundesliga",
-            "austria erste division" to "Austria Erste Division",
-            "2. liga" to "Austria Erste Division",
-            "austrian 2. liga" to "Austria Erste Division",
+            "cyprus 1 division" to "Cyprus 1 Division",
+            "cypriot first division" to "Cyprus 1 Division",
+            "france ligue 1" to "France Ligue 1",
+            "french ligue 1" to "France Ligue 1",
+            "ligue 1" to "France Ligue 1",
+            "switzerland super league" to "Switzerland Super League",
+            "swiss super league" to "Switzerland Super League",
             "switzerland challenge league" to "Switzerland Challenge League",
             "swiss challenge league" to "Switzerland Challenge League",
             "challenge league" to "Switzerland Challenge League",
-            "brasileirao serie a" to "Brazil Serie A",
-            "brazilian serie a" to "Brazil Serie A",
-            "brazil serie a" to "Brazil Serie A",
-            "brasileirao serie b" to "Brazil Serie B",
-            "brazilian serie b" to "Brazil Serie B",
-            "brazil serie b" to "Brazil Serie B",
+            "usa major league soccer" to "USA Major League Soccer",
+            "major league soccer" to "USA Major League Soccer",
+            "mls" to "USA Major League Soccer",
+            "chile primera division" to "Chile Primera Division",
+            "chilean primera division" to "Chile Primera Division",
+            "primera division de chile" to "Chile Primera Division",
             "primera division de paraguay" to "Primera Division de Paraguay",
             "paraguayan primera division" to "Primera Division de Paraguay",
             "division profesional" to "Primera Division de Paraguay",
-            "cymru premier" to "Welsh Premier League",
-            "welsh premier league" to "Welsh Premier League"
+            "brazil serie b" to "Brazil Serie B",
+            "brazilian serie b" to "Brazil Serie B",
+            "brasileirao serie b" to "Brazil Serie B",
+            "argentine division 1" to "Argentine Division 1",
+            "argentine primera division" to "Argentine Division 1",
+            "argentina primera division" to "Argentine Division 1",
+            "liga profesional argentina" to "Argentine Division 1"
         )
 
         fun canonicalLeagueName(raw: String): String {
@@ -1344,9 +1354,8 @@ class FootballFeedService(
             val rawLow = rawLeague.trim().lowercase(Locale.US)
             val canonLow = canonicalLeagueName(rawLeague).lowercase(Locale.US)
             return allowedLowerSet.any { a ->
-                rawLow == a || canonLow == a ||
-                    rawLow.contains(a) || a.contains(rawLow) ||
-                    canonLow.contains(a) || a.contains(canonLow)
+                val aCanon = canonicalLeagueName(a).lowercase(Locale.US)
+                rawLow == a || canonLow == a || canonLow == aCanon
             }
         }
 
