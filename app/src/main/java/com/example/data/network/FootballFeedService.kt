@@ -1211,8 +1211,12 @@ class FootballFeedService(
 
         private val LEAGUE_ALIAS_MAP = mapOf(
             "turkey 1. lig" to "Turkey 1. Lig",
+            "turkey 1 lig" to "Turkey 1. Lig",
             "tff 1. lig" to "Turkey 1. Lig",
+            "tff 1st league" to "Turkey 1. Lig",
             "turkish 1. lig" to "Turkey 1. Lig",
+            "trendyol 1. lig" to "Turkey 1. Lig",
+            "turkey. tff 1. lig" to "Turkey 1. Lig",
             "ukrainian premier league" to "Ukrainian Premier League",
             "ukraine premier league" to "Ukrainian Premier League",
             "premier league ukraine" to "Ukrainian Premier League",
@@ -1356,6 +1360,31 @@ class FootballFeedService(
             return allowedLowerSet.any { a ->
                 val aCanon = canonicalLeagueName(a).lowercase(Locale.US)
                 rawLow == a || canonLow == a || canonLow == aCanon
+            }
+        }
+
+        fun matchesSearchQuery(
+            rawLeague: String,
+            homeTeam: String,
+            awayTeam: String,
+            rawQuery: String
+        ): Boolean {
+            val q = rawQuery.trim().lowercase(Locale.US)
+            if (q.isBlank()) return true
+            if (homeTeam.lowercase(Locale.US).contains(q) || awayTeam.lowercase(Locale.US).contains(q)) {
+                return true
+            }
+            val rawLow = rawLeague.trim().lowercase(Locale.US)
+            val canonLow = canonicalLeagueName(rawLeague).lowercase(Locale.US)
+            val exactCanonicalQuery = when {
+                DEFAULT_LEAGUE_LOWER_SET.contains(q) -> q
+                LEAGUE_ALIAS_MAP[q] != null -> LEAGUE_ALIAS_MAP[q]!!.lowercase(Locale.US)
+                else -> null
+            }
+            return if (exactCanonicalQuery != null) {
+                canonLow == exactCanonicalQuery
+            } else {
+                rawLow.contains(q) || canonLow.contains(q)
             }
         }
 

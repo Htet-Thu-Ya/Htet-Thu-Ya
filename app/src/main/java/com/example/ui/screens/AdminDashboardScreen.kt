@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Link
@@ -141,6 +142,7 @@ import com.example.ui.components.LoTaYaBrandLogo
 import com.example.ui.components.OnlineStatusDot
 import com.example.ui.components.OrderSlipCard
 import com.example.ui.components.ReceiptImageThumbnail
+import com.example.ui.components.SportsLeagueFilterDialog
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.TeamLogoAvatar
 import com.example.ui.components.formatKs
@@ -2065,14 +2067,30 @@ private fun AdminBoardTab(
     onUpdateMatchDetailsWithDate: ((String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val standardMatches = remember(matches) {
-        matches.filter { it.boardSource.isBlank() || it.boardSource == "standard" }
+    val validAllowedLeagues = remember(boardConfig.allowedLeagues) {
+        boardConfig.allowedLeagues
+            .filter { lg -> FootballFeedService.DEFAULT_LEAGUE_OPTIONS.any { it.equals(lg, ignoreCase = true) } }
+            .map { it.trim().lowercase(java.util.Locale.US) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+    val standardMatches = remember(matches, validAllowedLeagues) {
+        val raw = matches.filter { it.boardSource.isBlank() || it.boardSource == "standard" }
+        if (validAllowedLeagues.isEmpty()) raw
+        else raw.filter { m -> FootballFeedService.matchesAllowedLeague(m.league, validAllowedLeagues) }
     }
     var adminSearchQuery by remember { mutableStateOf("") }
+    var selectedAdminLeagues by remember { mutableStateOf<Set<String>?>(null) }
+    var showLeagueFilterDialog by remember { mutableStateOf(false) }
     val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var adminDateFilter by remember(boardConfig.activeMatchDateFilter) {
         val raw = boardConfig.activeMatchDateFilter.trim()
         mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
+    }
+    LaunchedEffect(boardConfig.activeMatchDateFilter) {
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        val currentToday = MyanmarTimeUtil.todayIsoDate()
+        adminDateFilter = if (raw.isNotBlank() && raw < currentToday) "" else raw
     }
     val standardLeagueCounts = remember(standardMatches, adminDateFilter) {
         standardMatches
@@ -2080,17 +2098,16 @@ private fun AdminBoardTab(
             .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
             .eachCount()
     }
-    val filteredStandardMatches = remember(standardMatches, adminSearchQuery, adminDateFilter) {
-        val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
+    val filteredStandardMatches = remember(standardMatches, adminSearchQuery, adminDateFilter, selectedAdminLeagues) {
+        val q = adminSearchQuery.trim()
+        val localFilterLower = selectedAdminLeagues?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         standardMatches.filter { m ->
+            val leagueOk = q.isNotBlank() ||
+                localFilterLower == null ||
+                (localFilterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, localFilterLower))
             val dateOk = adminDateFilter.isBlank() || m.matchDate == adminDateFilter
-            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
-            val qOk = q.isBlank() ||
-                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q) ||
-                canonLeague.contains(q)
-            dateOk && qOk
+            val qOk = q.isBlank() || FootballFeedService.matchesSearchQuery(m.league, m.homeTeam, m.awayTeam, q)
+            leagueOk && dateOk && qOk
         }
     }
     var showAddMatch by remember { mutableStateOf(false) }
@@ -2377,35 +2394,111 @@ private fun AdminBoardTab(
                     testTag = "hide_bar_admin_matches"
                 )
                 if (showMatchesSection) {
-                    OutlinedTextField(
-                        value = adminSearchQuery,
-                        onValueChange = { adminSearchQuery = it },
-                        placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        trailingIcon = {
-                            if (adminSearchQuery.isNotBlank()) {
-                                IconButton(onClick = { adminSearchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = adminSearchQuery,
+                            onValueChange = { adminSearchQuery = it },
+                            placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (adminSearchQuery.isNotBlank()) {
+                                    IconButton(onClick = { adminSearchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                                    }
                                 }
+                            },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White,
+                                focusedTextColor = InkDark,
+                                unfocusedTextColor = InkDark
+                            ),
+                            modifier = Modifier.weight(1f).testTag("admin_search_standard")
+                        )
+                        Surface(
+                            color = if (selectedAdminLeagues != null) ChampionshipGold else DeepPitchElevated,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (selectedAdminLeagues != null) ChampionshipGold else Color.White.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable { showLeagueFilterDialog = true }
+                                .testTag("admin_filter_standard")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = "42 လိဂ် ရွေးရန်",
+                                    tint = if (selectedAdminLeagues != null) InkDark else ChampionshipGold
+                                )
                             }
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            focusedTextColor = InkDark,
-                            unfocusedTextColor = InkDark
-                        ),
-                        modifier = Modifier.fillMaxWidth().testTag("admin_search_standard")
-                    )
+                        }
+                    }
+                    if (selectedAdminLeagues != null || validAllowedLeagues.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val activeNames = selectedAdminLeagues?.toList()
+                                ?: boardConfig.allowedLeagues.filter { lg ->
+                                    FootballFeedService.DEFAULT_LEAGUE_OPTIONS.any { it.equals(lg, ignoreCase = true) }
+                                }
+                            val labelText = when {
+                                activeNames.isEmpty() -> "လိဂ် 0 ခု"
+                                activeNames.size == 1 -> "ရွေးထားသောလိဂ်: ${activeNames.first()}"
+                                else -> "ရွေးထားသောလိဂ် (${activeNames.size})"
+                            }
+                            Text(
+                                text = labelText,
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = {
+                                    if (selectedAdminLeagues != null) {
+                                        selectedAdminLeagues = null
+                                    } else {
+                                        onSaveAllowedLeagues(emptyList())
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("အားလုံးပြန်ကြည့်", color = Color(0xFFFCA5A5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                     if (adminSearchQuery.isNotBlank()) {
                         LeagueQuickSearchSuggestionsRow(
                             query = adminSearchQuery,
                             leagueMatchCounts = standardLeagueCounts,
                             accentColor = ChampionshipGold,
                             onPickLeague = { picked ->
-                                adminSearchQuery = picked
+                                selectedAdminLeagues = setOf(picked)
                                 adminExpandedLeagues[picked] = true
+                                if (adminDateFilter.isNotBlank()) {
+                                    val hasOnDate = standardMatches.any {
+                                        it.matchDate == adminDateFilter &&
+                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                .equals(picked, ignoreCase = true)
+                                    }
+                                    if (!hasOnDate && standardMatches.any {
+                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                .equals(picked, ignoreCase = true)
+                                        }
+                                    ) {
+                                        adminDateFilter = ""
+                                    }
+                                }
+                                adminSearchQuery = ""
                             }
                         )
                     }
@@ -2448,10 +2541,40 @@ private fun AdminBoardTab(
                         }
                     }
                 }
+            } else {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "ရွေးချယ်ထားသော လိဂ်/ရက်စွဲတွင် ပွဲစဉ်မရှိသေးပါ",
+                                color = Color(0xFFB4C8BE),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (selectedAdminLeagues != null || adminSearchQuery.isNotBlank() || adminDateFilter.isNotBlank()) {
+                                TextButton(onClick = {
+                                    selectedAdminLeagues = null
+                                    adminSearchQuery = ""
+                                    adminDateFilter = ""
+                                }) {
+                                    Text("အားလုံးပြန်ကြည့်မည်", color = ChampionshipGold, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            val defaultExpand = groupedStandardMatches.size <= 3
+            val defaultExpand = groupedStandardMatches.size <= 3 || selectedAdminLeagues != null || validAllowedLeagues.isNotEmpty()
             groupedStandardMatches.forEach { (leagueName, leagueMatches) ->
-                val isExpanded = if (adminSearchQuery.isNotBlank()) true else (adminExpandedLeagues[leagueName] ?: defaultExpand)
+                val isExpanded = if (adminSearchQuery.isNotBlank() || selectedAdminLeagues != null) true else (adminExpandedLeagues[leagueName] ?: defaultExpand)
                 item(key = "admin_std_league_$leagueName") {
                     LeagueHideBarHeader(
                         leagueName = leagueName,
@@ -2649,6 +2772,22 @@ private fun AdminBoardTab(
                 showSheetDialog = false
             },
             onPushToWebhook = onPushToWebhook
+        )
+    }
+    if (showLeagueFilterDialog) {
+        val allDefaults = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        SportsLeagueFilterDialog(
+            totalCount = standardMatches.size,
+            availableLeagues = standardMatches.map { FootballFeedService.canonicalLeagueName(it.league) }.distinct(),
+            selectedLeague = null,
+            onSelectLeague = { lg ->
+                selectedAdminLeagues = if (lg == null) null else setOf(lg)
+            },
+            selectedLeagues = selectedAdminLeagues ?: allDefaults.toSet(),
+            onSelectLeagues = { nextSet ->
+                selectedAdminLeagues = if (nextSet.size >= allDefaults.size) null else nextSet
+            },
+            onDismiss = { showLeagueFilterDialog = false }
         )
     }
 }

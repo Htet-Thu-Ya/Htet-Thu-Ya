@@ -1349,6 +1349,10 @@ fun AdminSystemSettingsTab(
     onSaveSystemGameConfig: (SystemGameConfig) -> Unit
 ) {
     var enabledGames by remember { mutableStateOf(config.enabledGames) }
+    var disabledGames by remember { mutableStateOf(config.disabledGames) }
+    var perGameReopenAtMs by remember { mutableStateOf(config.perGameReopenAtMs) }
+    var expandedTimerGameKey by remember { mutableStateOf<String?>(null) }
+    var showIndividualGames by remember { mutableStateOf(true) }
     var dualThreshold by remember { mutableStateOf(config.dualApprovalThresholdKs.toString()) }
     var minStake by remember { mutableStateOf(config.minStakeKs.toString()) }
     var maxStake by remember { mutableStateOf(config.maxStakeKs.toString()) }
@@ -1383,6 +1387,8 @@ fun AdminSystemSettingsTab(
 
     LaunchedEffect(config) {
         enabledGames = config.enabledGames
+        disabledGames = config.disabledGames
+        perGameReopenAtMs = config.perGameReopenAtMs
         dualThreshold = config.dualApprovalThresholdKs.toString()
         minStake = config.minStakeKs.toString()
         maxStake = config.maxStakeKs.toString()
@@ -1401,11 +1407,23 @@ fun AdminSystemSettingsTab(
         gamesReopenAtMs = config.gamesReopenAtMs
     }
 
-    fun buildCurrentConfig(): SystemGameConfig {
-        val fbActive = footballPaused && (footballReopenAtMs <= 0L || footballReopenAtMs > System.currentTimeMillis())
-        val gmActive = gamesPaused && (gamesReopenAtMs <= 0L || gamesReopenAtMs > System.currentTimeMillis())
+    fun buildCurrentConfig(
+        nextEnabled: List<String> = enabledGames,
+        nextDisabled: List<String> = disabledGames,
+        nextReopenMap: Map<String, Long> = perGameReopenAtMs
+    ): SystemGameConfig {
+        val now = System.currentTimeMillis()
+        val fbActive = footballPaused && (footballReopenAtMs <= 0L || footballReopenAtMs > now)
+        val gmActive = gamesPaused && (gamesReopenAtMs <= 0L || gamesReopenAtMs > now)
+        val cleanedDisabled = nextDisabled.distinct().filter { k ->
+            val reopen = nextReopenMap[k] ?: 0L
+            reopen <= 0L || reopen > now
+        }
+        val cleanedReopen = nextReopenMap.filterKeys { it in cleanedDisabled }.filterValues { it > now }
         return config.copy(
-            enabledGames = enabledGames,
+            enabledGames = nextEnabled,
+            disabledGames = cleanedDisabled,
+            perGameReopenAtMs = cleanedReopen,
             dualApprovalThresholdKs = (dualThreshold.toLongOrNull() ?: 300_000L).coerceAtLeast(10_000L),
             minStakeKs = (minStake.toLongOrNull() ?: 500L).coerceAtLeast(100L),
             maxStakeKs = (maxStake.toLongOrNull() ?: 5_000_000L).coerceAtLeast(1_000L),
@@ -1425,11 +1443,210 @@ fun AdminSystemSettingsTab(
         )
     }
 
+    val allTenGames = remember {
+        listOf(
+            "one_express" to "1xBET",
+            "five_five_five" to "555 Mix",
+            "parlay" to "မောင်း (Parlay)",
+            "body_goal" to "ဘော်ဒီ / ဂိုးပေါင်း",
+            "two_d" to "၂လုံးထီ (2D)",
+            "three_d" to "၃လုံးထီ (3D)",
+            "dice" to "အံစာတုံး (Dice)",
+            "six_animals" to "၆ကောင်ဂျင် (6 Animals)",
+            "dragon_tiger" to "နဂါး vs ကျား (Dragon Tiger)",
+            "lucky_wheel" to "ကံစမ်းဘီး (Lucky Wheel)"
+        )
+    }
+    val draftConfigForDisplay = remember(config, enabledGames, disabledGames, perGameReopenAtMs, nowMs) {
+        config.copy(
+            enabledGames = enabledGames,
+            disabledGames = disabledGames,
+            perGameReopenAtMs = perGameReopenAtMs
+        )
+    }
+    val closedSingleGameCount = allTenGames.count { (k, _) -> !draftConfigForDisplay.isGameEnabled(k, nowMs) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().widthIn(max = 640.dp),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            HideBarSectionHeader(
+                title = "ဂိမ်းစနစ် တစ်ခုချင်းစီ ဖွင့်/ပိတ် ထိန်းချုပ်မှု (၁၀ မျိုး)",
+                countBadge = if (closedSingleGameCount == 0) "၁၀ မျိုးလုံး ဖွင့်" else "$closedSingleGameCount ခု ပိတ်ထား",
+                isVisible = showIndividualGames,
+                onToggle = { showIndividualGames = !showIndividualGames },
+                testTag = "hide_bar_admin_individual_games"
+            )
+        }
+
+        if (showIndividualGames) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DeepPitchElevated),
+                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.6f)),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "တစ်ခုချင်းစီ ဖွင့်/ပိတ် (နှိပ်လိုက်သည်နှင့် ချက်ချင်းသက်ရောက်)",
+                                color = ChampionshipGold,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        val nextEn = SystemGameConfig.ALL_GAME_KEYS
+                                        val nextDis = emptyList<String>()
+                                        val nextTimers = emptyMap<String, Long>()
+                                        enabledGames = nextEn
+                                        disabledGames = nextDis
+                                        perGameReopenAtMs = nextTimers
+                                        onSaveSystemGameConfig(buildCurrentConfig(nextEn, nextDis, nextTimers))
+                                    },
+                                    enabled = !busy,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("အားလုံးဖွင့်", color = Color(0xFF6EE7B7), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                }
+                                TextButton(
+                                    onClick = {
+                                        val nextEn = emptyList<String>()
+                                        val nextDis = SystemGameConfig.ALL_GAME_KEYS
+                                        val nextTimers = emptyMap<String, Long>()
+                                        enabledGames = nextEn
+                                        disabledGames = nextDis
+                                        perGameReopenAtMs = nextTimers
+                                        onSaveSystemGameConfig(buildCurrentConfig(nextEn, nextDis, nextTimers))
+                                    },
+                                    enabled = !busy,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("အားလုံးပိတ်", color = Color(0xFFFCA5A5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        allTenGames.forEach { (key, label) ->
+                            val isOpen = draftConfigForDisplay.isGameEnabled(key, nowMs)
+                            val gameReopen = perGameReopenAtMs[key] ?: 0L
+                            val showTimersForKey = expandedTimerGameKey == key
+                            Surface(
+                                color = Color(0xFF152921),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (isOpen) Color.White.copy(alpha = 0.12f) else AmberPending.copy(alpha = 0.65f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Text(
+                                                text = label,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = when {
+                                                    isOpen -> "ဖွင့်ထား"
+                                                    gameReopen > nowMs -> "ပိတ်ထား • ${formatRemainingReopenCountdown(gameReopen, nowMs)}"
+                                                    else -> "ပိတ်ထား (Manual ပြန်ဖွင့်ရန်)"
+                                                },
+                                                color = if (isOpen) Color(0xFF6EE7B7) else AmberPending,
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                expandedTimerGameKey = if (showTimersForKey) null else key
+                                            },
+                                            modifier = Modifier.testTag("game_timer_toggle_$key")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Schedule,
+                                                contentDescription = "Auto-Open Timer",
+                                                tint = if (!isOpen && gameReopen > nowMs) ChampionshipGold else Color(0xFFB4C8BE),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = isOpen,
+                                            enabled = !busy,
+                                            onCheckedChange = { shouldEnable ->
+                                                val nextDisabled = if (shouldEnable) {
+                                                    disabledGames.filterNot { it == key }
+                                                } else {
+                                                    (disabledGames + key).distinct()
+                                                }
+                                                val nextEnabled = SystemGameConfig.ALL_GAME_KEYS.filterNot { it in nextDisabled }
+                                                val nextTimers = if (shouldEnable) perGameReopenAtMs - key else perGameReopenAtMs
+                                                disabledGames = nextDisabled
+                                                enabledGames = nextEnabled
+                                                perGameReopenAtMs = nextTimers
+                                                onSaveSystemGameConfig(buildCurrentConfig(nextEnabled, nextDisabled, nextTimers))
+                                            },
+                                            modifier = Modifier.testTag("single_game_switch_$key")
+                                        )
+                                    }
+                                    if (showTimersForKey) {
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            modifier = Modifier.padding(top = 6.dp)
+                                        ) {
+                                            listOf(
+                                                0L to "Manual",
+                                                15L to "15m",
+                                                30L to "30m",
+                                                60L to "1h",
+                                                120L to "2h"
+                                            ).forEach { (mins, lbl) ->
+                                                FilterChip(
+                                                    selected = !isOpen && ((mins == 0L && gameReopen <= nowMs) || false),
+                                                    enabled = !busy,
+                                                    onClick = {
+                                                        val targetReopen = if (mins == 0L) 0L else System.currentTimeMillis() + mins * 60_000L
+                                                        val nextDisabled = (disabledGames + key).distinct()
+                                                        val nextEnabled = SystemGameConfig.ALL_GAME_KEYS.filterNot { it in nextDisabled }
+                                                        val nextTimers = if (targetReopen > 0L) {
+                                                            perGameReopenAtMs + (key to targetReopen)
+                                                        } else {
+                                                            perGameReopenAtMs - key
+                                                        }
+                                                        disabledGames = nextDisabled
+                                                        enabledGames = nextEnabled
+                                                        perGameReopenAtMs = nextTimers
+                                                        onSaveSystemGameConfig(buildCurrentConfig(nextEnabled, nextDisabled, nextTimers))
+                                                    },
+                                                    label = { Text(lbl) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             HideBarSectionHeader(
                 title = "ဘောလုံးပွဲ & ဂိမ်း ခေတ္တပိတ် / Auto-Open Timer",
@@ -1712,35 +1929,7 @@ fun AdminSystemSettingsTab(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Settings, contentDescription = null, tint = ChampionshipGold)
                         Spacer(Modifier.width(8.dp))
-                        Text("ဂိမ်းအမျိုးအစား & စနစ်ဆိုင်ရာ ဆက်တင်များ", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-
-                    val games = listOf(
-                        "parlay" to "မောင်း (Parlay)",
-                        "body_goal" to "ဘော်ဒီ / ဂိုးပေါင်း",
-                        "two_d" to "၂လုံးထီ (2D)",
-                        "three_d" to "၃လုံးထီ (3D)",
-                        "dice" to "အံစာတုံး (Dice)",
-                        "six_animals" to "၆ကောင်ဂျင် (6 Animals)",
-                        "dragon_tiger" to "နဂါး vs ကျား (Dragon Tiger)",
-                        "lucky_wheel" to "ကံစမ်းဘီး (Lucky Wheel)"
-                    )
-                    games.forEach { (key, label) ->
-                        val active = enabledGames.contains(key)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(label, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-                            Switch(
-                                checked = active,
-                                onCheckedChange = { checked ->
-                                    enabledGames = if (checked) (enabledGames + key).distinct()
-                                    else enabledGames.filterNot { it == key }
-                                }
-                            )
-                        }
+                        Text("စနစ်ဆိုင်ရာ ထိုးကြေး & အဆ သတ်မှတ်ချက်များ", color = ChampionshipGold, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
                     HorizontalDivider(color = Color.White.copy(alpha = 0.14f))

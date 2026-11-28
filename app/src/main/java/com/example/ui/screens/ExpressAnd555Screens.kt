@@ -190,12 +190,20 @@ fun ExpressOddsOrderScreen(
         val raw = boardConfig.activeMatchDateFilter.trim()
         mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
+    LaunchedEffect(boardConfig.activeMatchDateFilter) {
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        val currentToday = MyanmarTimeUtil.todayIsoDate()
+        selectedDateFilter = if (raw.isNotBlank() && raw < currentToday) "" else raw
+    }
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showBoardTable by remember { mutableStateOf(true) }
     val expandedLeagues = remember(boardMode) { mutableStateMapOf<String, Boolean>() }
 
-    val isFootballPaused = systemGameConfig.maintenanceMode || systemGameConfig.isFootballPausedNow(nowMs)
+    val isIndividuallyDisabled = !systemGameConfig.isGameEnabled(boardMode, nowMs)
+    val isFootballPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isFootballPausedNow(nowMs) ||
+        isIndividuallyDisabled
     val timeBucket = nowMs / 10_000L
 
     val openMatches = remember(matchesState, boardMode, boardConfig.allowedLeagues, timeBucket) {
@@ -251,7 +259,7 @@ fun ExpressOddsOrderScreen(
     }
 
     val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {
-        val q = searchQuery.trim().lowercase(java.util.Locale.US)
+        val q = searchQuery.trim()
         val filterSet = selectedLeaguesFilter
         val filterLower = filterSet?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         openMatches.filter { m ->
@@ -259,12 +267,8 @@ fun ExpressOddsOrderScreen(
                 filterLower == null ||
                 (filterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, filterLower))
             val dateOk = selectedDateFilter.isBlank() || m.matchDate == selectedDateFilter
-            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
             val searchOk = q.isBlank() ||
-                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q) ||
-                canonLeague.contains(q)
+                FootballFeedService.matchesSearchQuery(m.league, m.homeTeam, m.awayTeam, q)
             leagueOk && dateOk && searchOk
         }
     }
@@ -550,6 +554,20 @@ fun ExpressOddsOrderScreen(
                                             onPickLeague = { pickedLeague ->
                                                 selectedLeaguesFilter = setOf(pickedLeague)
                                                 expandedLeagues[pickedLeague] = true
+                                                if (selectedDateFilter.isNotBlank()) {
+                                                    val hasOnDate = openMatches.any {
+                                                        it.matchDate == selectedDateFilter &&
+                                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                                .equals(pickedLeague, ignoreCase = true)
+                                                    }
+                                                    if (!hasOnDate && openMatches.any {
+                                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                                .equals(pickedLeague, ignoreCase = true)
+                                                        }
+                                                    ) {
+                                                        selectedDateFilter = ""
+                                                    }
+                                                }
                                                 searchQuery = ""
                                                 showSearchBar = false
                                             }
@@ -557,8 +575,8 @@ fun ExpressOddsOrderScreen(
                                     }
                                 }
                                 if (availableDates.isNotEmpty()) {
-                                    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
-                                    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(nowMs + 86_400_000L) }
+                                    val todayIso = remember(timeBucket) { MyanmarTimeUtil.todayIsoDate() }
+                                    val tomorrowIso = remember(timeBucket) { MyanmarTimeUtil.formatMatchDateIso(nowMs + 86_400_000L) }
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         item {
                                             FilterChip(
@@ -589,13 +607,21 @@ fun ExpressOddsOrderScreen(
                                     .widthIn(max = 620.dp)
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
+                                val gameReopen = systemGameConfig.gameReopenAtMs(boardMode)
                                 PauseStatusBannerCard(
-                                    title = if (systemGameConfig.maintenanceMode) {
-                                        systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                                    } else {
-                                        "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
+                                    title = when {
+                                        systemGameConfig.maintenanceMode ->
+                                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                                        isIndividuallyDisabled ->
+                                            "$boardName စနစ် ခေတ္တပိတ်ထားပါသည်"
+                                        else ->
+                                            "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
                                     },
-                                    reopenAtMs = systemGameConfig.footballReopenAtMs,
+                                    reopenAtMs = when {
+                                        isIndividuallyDisabled && gameReopen > nowMs -> gameReopen
+                                        systemGameConfig.footballReopenAtMs > nowMs -> systemGameConfig.footballReopenAtMs
+                                        else -> gameReopen
+                                    },
                                     nowMs = nowMs
                                 )
                             }
@@ -882,13 +908,29 @@ fun AdminExpressBoardTab(
     val accent = if (isOneExpress) Color(0xFF38BDF8) else ChampionshipGold
     val autoEnabled = if (isOneExpress) boardConfig.autoSyncOneExpress else boardConfig.autoSyncFiveFiveFive
     var adminSearchQuery by remember(boardMode) { mutableStateOf("") }
+    var selectedAdminLeagues by remember(boardMode) { mutableStateOf<Set<String>?>(null) }
+    var showLeagueFilterDialog by remember(boardMode) { mutableStateOf(false) }
     val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var adminDateFilter by remember(boardMode, boardConfig.activeMatchDateFilter) {
         val raw = boardConfig.activeMatchDateFilter.trim()
         mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
-    val boardMatches = remember(matches, boardMode) {
-        matches.filter { it.boardSource == boardMode }
+    LaunchedEffect(boardConfig.activeMatchDateFilter) {
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        val currentToday = MyanmarTimeUtil.todayIsoDate()
+        adminDateFilter = if (raw.isNotBlank() && raw < currentToday) "" else raw
+    }
+    val validAllowedLeagues = remember(boardConfig.allowedLeagues) {
+        boardConfig.allowedLeagues
+            .filter { lg -> FootballFeedService.DEFAULT_LEAGUE_OPTIONS.any { it.equals(lg, ignoreCase = true) } }
+            .map { it.trim().lowercase(java.util.Locale.US) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+    val boardMatches = remember(matches, boardMode, validAllowedLeagues) {
+        val rawBoard = matches.filter { it.boardSource == boardMode }
+        if (validAllowedLeagues.isEmpty()) rawBoard
+        else rawBoard.filter { m -> FootballFeedService.matchesAllowedLeague(m.league, validAllowedLeagues) }
     }
     val adminLeagueCounts = remember(boardMatches, adminDateFilter) {
         boardMatches
@@ -896,17 +938,16 @@ fun AdminExpressBoardTab(
             .groupingBy { FootballFeedService.canonicalLeagueName(it.league) }
             .eachCount()
     }
-    val filteredMatches = remember(boardMatches, adminSearchQuery, adminDateFilter) {
-        val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
+    val filteredMatches = remember(boardMatches, adminSearchQuery, adminDateFilter, selectedAdminLeagues) {
+        val q = adminSearchQuery.trim()
+        val localFilterLower = selectedAdminLeagues?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         boardMatches.filter { m ->
+            val leagueOk = q.isNotBlank() ||
+                localFilterLower == null ||
+                (localFilterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, localFilterLower))
             val dateOk = adminDateFilter.isBlank() || m.matchDate == adminDateFilter
-            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
-            val qOk = q.isBlank() ||
-                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q) ||
-                canonLeague.contains(q)
-            dateOk && qOk
+            val qOk = q.isBlank() || FootballFeedService.matchesSearchQuery(m.league, m.homeTeam, m.awayTeam, q)
+            leagueOk && dateOk && qOk
         }
     }
 
@@ -1227,37 +1268,113 @@ fun AdminExpressBoardTab(
                     accentColor = accent
                 )
                 if (showMatchesTable) {
-                    OutlinedTextField(
-                        value = adminSearchQuery,
-                        onValueChange = { adminSearchQuery = it },
-                        placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        trailingIcon = {
-                            if (adminSearchQuery.isNotBlank()) {
-                                IconButton(onClick = { adminSearchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = adminSearchQuery,
+                            onValueChange = { adminSearchQuery = it },
+                            placeholder = { Text("အသင်း / လိဂ် ရှာရန်...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (adminSearchQuery.isNotBlank()) {
+                                    IconButton(onClick = { adminSearchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                                    }
                                 }
+                            },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White,
+                                focusedTextColor = InkDark,
+                                unfocusedTextColor = InkDark
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("admin_search_$boardMode")
+                        )
+                        Surface(
+                            color = if (selectedAdminLeagues != null) accent else DeepPitchElevated,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (selectedAdminLeagues != null) accent else Color.White.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable { showLeagueFilterDialog = true }
+                                .testTag("admin_filter_$boardMode")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = "42 လိဂ် ရွေးရန်",
+                                    tint = if (selectedAdminLeagues != null) InkDark else accent
+                                )
                             }
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            focusedTextColor = InkDark,
-                            unfocusedTextColor = InkDark
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("admin_search_$boardMode")
-                    )
+                        }
+                    }
+                    if (selectedAdminLeagues != null || validAllowedLeagues.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val activeNames = selectedAdminLeagues?.toList()
+                                ?: boardConfig.allowedLeagues.filter { lg ->
+                                    FootballFeedService.DEFAULT_LEAGUE_OPTIONS.any { it.equals(lg, ignoreCase = true) }
+                                }
+                            val labelText = when {
+                                activeNames.isEmpty() -> "လိဂ် 0 ခု"
+                                activeNames.size == 1 -> "ရွေးထားသောလိဂ်: ${activeNames.first()}"
+                                else -> "ရွေးထားသောလိဂ် (${activeNames.size})"
+                            }
+                            Text(
+                                text = labelText,
+                                color = accent,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = {
+                                    if (selectedAdminLeagues != null) {
+                                        selectedAdminLeagues = null
+                                    } else {
+                                        onSaveAllowedLeagues(emptyList())
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("အားလုံးပြန်ကြည့်", color = Color(0xFFFCA5A5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                     if (adminSearchQuery.isNotBlank()) {
                         LeagueQuickSearchSuggestionsRow(
                             query = adminSearchQuery,
                             leagueMatchCounts = adminLeagueCounts,
                             accentColor = accent,
                             onPickLeague = { picked ->
-                                adminSearchQuery = picked
+                                selectedAdminLeagues = setOf(picked)
                                 adminExpandedLeagues[picked] = true
+                                if (adminDateFilter.isNotBlank()) {
+                                    val hasOnDate = boardMatches.any {
+                                        it.matchDate == adminDateFilter &&
+                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                .equals(picked, ignoreCase = true)
+                                    }
+                                    if (!hasOnDate && boardMatches.any {
+                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                .equals(picked, ignoreCase = true)
+                                        }
+                                    ) {
+                                        adminDateFilter = ""
+                                    }
+                                }
+                                adminSearchQuery = ""
                             }
                         )
                     }
@@ -1307,9 +1424,9 @@ fun AdminExpressBoardTab(
                         }
                     }
                 }
-                val defaultExpand = groupedAdminMatches.size <= 3
+                val defaultExpand = groupedAdminMatches.size <= 3 || selectedAdminLeagues != null || validAllowedLeagues.isNotEmpty()
                 groupedAdminMatches.forEach { (leagueName, leagueMatches) ->
-                    val isExpanded = if (adminSearchQuery.isNotBlank()) true else (adminExpandedLeagues[leagueName] ?: defaultExpand)
+                    val isExpanded = if (adminSearchQuery.isNotBlank() || selectedAdminLeagues != null) true else (adminExpandedLeagues[leagueName] ?: defaultExpand)
                     item(key = "admin_exp_league_$leagueName") {
                         LeagueHideBarHeader(
                             leagueName = leagueName,
@@ -1544,6 +1661,22 @@ fun AdminExpressBoardTab(
                 showSheetDialog = false
             },
             onPushToWebhook = onPushToWebhook
+        )
+    }
+    if (showLeagueFilterDialog) {
+        val allDefaults = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        SportsLeagueFilterDialog(
+            totalCount = boardMatches.size,
+            availableLeagues = boardMatches.map { FootballFeedService.canonicalLeagueName(it.league) }.distinct(),
+            selectedLeague = null,
+            onSelectLeague = { lg ->
+                selectedAdminLeagues = if (lg == null) null else setOf(lg)
+            },
+            selectedLeagues = selectedAdminLeagues ?: allDefaults.toSet(),
+            onSelectLeagues = { nextSet ->
+                selectedAdminLeagues = if (nextSet.size >= allDefaults.size) null else nextSet
+            },
+            onDismiss = { showLeagueFilterDialog = false }
         )
     }
 }

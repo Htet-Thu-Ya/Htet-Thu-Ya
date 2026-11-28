@@ -135,7 +135,11 @@ fun SportsOrderScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isFootballPaused = systemGameConfig.maintenanceMode || systemGameConfig.isFootballPausedNow(nowMs)
+    val gameKey = if (isParlay) "parlay" else "body_goal"
+    val isIndividuallyDisabled = !systemGameConfig.isGameEnabled(gameKey, nowMs)
+    val isFootballPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isFootballPausedNow(nowMs) ||
+        isIndividuallyDisabled
 
     val selectedPicks = remember { mutableStateMapOf<String, MatchPick>() }
     var stakeInput by remember { mutableStateOf("1000") }
@@ -152,6 +156,11 @@ fun SportsOrderScreen(
     var selectedDateFilter by remember(boardConfig.activeMatchDateFilter) {
         val raw = boardConfig.activeMatchDateFilter.trim()
         mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
+    }
+    LaunchedEffect(boardConfig.activeMatchDateFilter) {
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        val currentToday = MyanmarTimeUtil.todayIsoDate()
+        selectedDateFilter = if (raw.isNotBlank() && raw < currentToday) "" else raw
     }
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
@@ -211,7 +220,7 @@ fun SportsOrderScreen(
     }
 
     val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {
-        val q = searchQuery.trim().lowercase(java.util.Locale.US)
+        val q = searchQuery.trim()
         val filterSet = selectedLeaguesFilter
         val filterLower = filterSet?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         openMatches.filter { m ->
@@ -219,12 +228,7 @@ fun SportsOrderScreen(
                 filterLower == null ||
                 (filterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, filterLower))
             val dateOk = selectedDateFilter.isBlank() || m.matchDate == selectedDateFilter
-            val canonLeague = FootballFeedService.canonicalLeagueName(m.league).lowercase(java.util.Locale.US)
-            val searchOk = q.isBlank() ||
-                m.homeTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.awayTeam.lowercase(java.util.Locale.US).contains(q) ||
-                m.league.lowercase(java.util.Locale.US).contains(q) ||
-                canonLeague.contains(q)
+            val searchOk = q.isBlank() || FootballFeedService.matchesSearchQuery(m.league, m.homeTeam, m.awayTeam, q)
             leagueOk && dateOk && searchOk
         }
     }
@@ -435,6 +439,20 @@ fun SportsOrderScreen(
                                             onPickLeague = { pickedLeague ->
                                                 selectedLeaguesFilter = setOf(pickedLeague)
                                                 expandedLeagues[pickedLeague] = true
+                                                if (selectedDateFilter.isNotBlank()) {
+                                                    val hasOnDate = openMatches.any {
+                                                        it.matchDate == selectedDateFilter &&
+                                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                                .equals(pickedLeague, ignoreCase = true)
+                                                    }
+                                                    if (!hasOnDate && openMatches.any {
+                                                            FootballFeedService.canonicalLeagueName(it.league)
+                                                                .equals(pickedLeague, ignoreCase = true)
+                                                        }
+                                                    ) {
+                                                        selectedDateFilter = ""
+                                                    }
+                                                }
                                                 searchQuery = ""
                                                 showSearchBar = false
                                             }
@@ -442,8 +460,8 @@ fun SportsOrderScreen(
                                     }
                                 }
                                 if (availableDates.isNotEmpty()) {
-                                    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
-                                    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(nowMs + 86_400_000L) }
+                                    val todayIso = remember(timeBucket) { MyanmarTimeUtil.todayIsoDate() }
+                                    val tomorrowIso = remember(timeBucket) { MyanmarTimeUtil.formatMatchDateIso(nowMs + 86_400_000L) }
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         item {
                                             FilterChip(
@@ -474,13 +492,22 @@ fun SportsOrderScreen(
                                     .widthIn(max = 620.dp)
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
+                                val gameReopen = systemGameConfig.gameReopenAtMs(gameKey)
                                 PauseStatusBannerCard(
-                                    title = if (systemGameConfig.maintenanceMode) {
-                                        systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                                    } else {
-                                        "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
+                                    title = when {
+                                        systemGameConfig.maintenanceMode ->
+                                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                                        isIndividuallyDisabled ->
+                                            if (isParlay) "မောင်း (Parlay) စနစ် ခေတ္တပိတ်ထားပါသည်"
+                                            else "ဘော်ဒီ/ဂိုးပေါင်း စနစ် ခေတ္တပိတ်ထားပါသည်"
+                                        else ->
+                                            "ဘောလုံးပွဲ လောင်းကြေးတင်ခွင့် ခေတ္တပိတ်ထားပါသည်"
                                     },
-                                    reopenAtMs = systemGameConfig.footballReopenAtMs,
+                                    reopenAtMs = when {
+                                        isIndividuallyDisabled && gameReopen > nowMs -> gameReopen
+                                        systemGameConfig.footballReopenAtMs > nowMs -> systemGameConfig.footballReopenAtMs
+                                        else -> gameReopen
+                                    },
                                     nowMs = nowMs
                                 )
                             }
@@ -677,7 +704,10 @@ fun ThreeDLotteryScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+    val isThreeDDisabled = !systemGameConfig.isGameEnabled("three_d", nowMs)
+    val isGamesPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isGamesPausedNow(nowMs) ||
+        isThreeDDisabled
 
     var digitsInput by remember { mutableStateOf("") }
     var includeReverse by remember { mutableStateOf(false) }
@@ -716,13 +746,21 @@ fun ThreeDLotteryScreen(
         ) {
             if (isGamesPaused) {
                 item {
+                    val gameReopen = systemGameConfig.gameReopenAtMs("three_d")
                     PauseStatusBannerCard(
-                        title = if (systemGameConfig.maintenanceMode) {
-                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                        } else {
-                            "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        title = when {
+                            systemGameConfig.maintenanceMode ->
+                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                            isThreeDDisabled ->
+                                "၃လုံးထီ (3D) ခေတ္တပိတ်ထားပါသည်"
+                            else ->
+                                "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = when {
+                            isThreeDDisabled && gameReopen > nowMs -> gameReopen
+                            systemGameConfig.gamesReopenAtMs > nowMs -> systemGameConfig.gamesReopenAtMs
+                            else -> gameReopen
+                        },
                         nowMs = nowMs
                     )
                 }

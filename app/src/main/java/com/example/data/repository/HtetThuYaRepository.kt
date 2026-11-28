@@ -2256,7 +2256,11 @@ class HtetThuYaRepository(
             val maxStake = config.maxStakeKs.coerceIn(minStake, 50_000_000L)
             db.collection("app_settings").document("system_config").set(
                 mapOf(
-                    "enabledGames" to config.enabledGames.take(12),
+                    "enabledGames" to config.enabledGames.take(20),
+                    "disabledGames" to config.disabledGames.take(20),
+                    "perGameReopenAtMs" to config.perGameReopenAtMs
+                        .filterKeys { it.isNotBlank() }
+                        .mapValues { it.value.coerceAtLeast(0L) },
                     "dualApprovalThresholdKs" to config.dualApprovalThresholdKs.coerceIn(0L, 100_000_000L),
                     "minStakeKs" to minStake,
                     "maxStakeKs" to maxStake,

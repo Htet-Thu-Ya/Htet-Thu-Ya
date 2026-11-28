@@ -1559,7 +1559,15 @@ fun LeagueQuickSearchSuggestionsRow(
     val matchedLeagues = remember(cleanQuery, leagueMatchCounts) {
         val base = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
         val extras = leagueMatchCounts.keys.filter { lg -> base.none { it.equals(lg, ignoreCase = true) } }
-        (base + extras).filter { it.lowercase(Locale.US).contains(cleanQuery) }
+        (base + extras)
+            .filter { it.lowercase(Locale.US).contains(cleanQuery) }
+            .sortedWith(
+                compareByDescending<String> { lg ->
+                    (leagueMatchCounts.entries.firstOrNull { it.key.equals(lg, ignoreCase = true) }?.value ?: 0) > 0
+                }.thenBy { lg ->
+                    FootballFeedService.leagueSortOrderIndex(lg)
+                }.thenBy { it }
+            )
     }
     if (matchedLeagues.isEmpty()) return
 
@@ -1582,7 +1590,7 @@ fun LeagueQuickSearchSuggestionsRow(
                     .testTag("search_suggest_league_${lg.take(20)}")
             ) {
                 Text(
-                    text = if (cnt > 0) "$lg ($cnt)" else lg,
+                    text = "$lg ($cnt)",
                     color = if (cnt > 0) PitchEmeraldDark else InkMuted,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = if (cnt > 0) FontWeight.Bold else FontWeight.Medium,

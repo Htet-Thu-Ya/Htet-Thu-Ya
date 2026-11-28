@@ -91,6 +91,7 @@ import com.example.data.network.FootballFeedService
 import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.components.AdminCalendarDateBar
 import com.example.ui.components.LeagueQuickSearchSuggestionsRow
+import com.example.ui.components.SportsLeagueFilterDialog
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.InkDark
@@ -205,10 +206,17 @@ fun AdminMatchSheetTableTab(
 
     var sourceFilter by remember(initialSourceFilter) { mutableStateOf(initialSourceFilter) }
     var searchQuery by remember { mutableStateOf("") }
+    var selectedSheetLeagues by remember { mutableStateOf<Set<String>?>(null) }
+    var showLeagueFilterDialog by remember { mutableStateOf(false) }
     val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var dateFilter by remember(boardConfig.activeMatchDateFilter) {
         val raw = boardConfig.activeMatchDateFilter.trim()
         mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
+    }
+    LaunchedEffect(boardConfig.activeMatchDateFilter) {
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        val currentToday = MyanmarTimeUtil.todayIsoDate()
+        dateFilter = if (raw.isNotBlank() && raw < currentToday) "" else raw
     }
     var sheetUrlInput by remember(boardConfig.googleSheetCsvUrl) { mutableStateOf(boardConfig.googleSheetCsvUrl) }
     var webhookUrlInput by remember(boardConfig.googleSheetWebhookUrl) { mutableStateOf(boardConfig.googleSheetWebhookUrl) }
@@ -238,18 +246,17 @@ fun AdminMatchSheetTableTab(
             .eachCount()
     }
 
-    val filteredMatches = remember(matches, sourceFilter, searchQuery, dateFilter) {
+    val filteredMatches = remember(matches, sourceFilter, searchQuery, dateFilter, selectedSheetLeagues) {
         val q = searchQuery.trim()
+        val localFilterLower = selectedSheetLeagues?.map { it.trim().lowercase(java.util.Locale.US) }?.toSet()
         matches.filter { m ->
             val srcOk = sourceFilter == "all" || m.boardSource == sourceFilter
+            val leagueOk = q.isNotBlank() ||
+                localFilterLower == null ||
+                (localFilterLower.isNotEmpty() && FootballFeedService.matchesAllowedLeague(m.league, localFilterLower))
             val dateOk = dateFilter.isBlank() || m.matchDate == dateFilter
-            val canonLeague = FootballFeedService.canonicalLeagueName(m.league)
-            val qOk = q.isBlank() ||
-                m.homeTeam.contains(q, ignoreCase = true) ||
-                m.awayTeam.contains(q, ignoreCase = true) ||
-                m.league.contains(q, ignoreCase = true) ||
-                canonLeague.contains(q, ignoreCase = true)
-            srcOk && dateOk && qOk
+            val qOk = q.isBlank() || FootballFeedService.matchesSearchQuery(m.league, m.homeTeam, m.awayTeam, q)
+            srcOk && leagueOk && dateOk && qOk
         }.sortedWith(
             compareBy<SportMatch>(
                 { FootballFeedService.leagueSortOrderIndex(FootballFeedService.canonicalLeagueName(it.league)) },
@@ -366,8 +373,25 @@ fun AdminMatchSheetTableTab(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White
                         ),
-                        modifier = Modifier.weight(1f).testTag("sheet_table_search_input")
+                    modifier = Modifier.weight(1f).testTag("sheet_table_search_input")
                     )
+                    Surface(
+                        color = if (selectedSheetLeagues != null) ChampionshipGold else DeepPitchElevated,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (selectedSheetLeagues != null) ChampionshipGold else Color.White.copy(alpha = 0.25f)),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clickable { showLeagueFilterDialog = true }
+                            .testTag("sheet_table_league_filter")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.FilterList,
+                                contentDescription = "42 လိဂ် ရွေးရန်",
+                                tint = if (selectedSheetLeagues != null) InkDark else ChampionshipGold
+                            )
+                        }
+                    }
                     Button(
                         onClick = { showAddRowDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
@@ -379,12 +403,58 @@ fun AdminMatchSheetTableTab(
                         Text("+ Row", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
+                selectedSheetLeagues?.let { activeLeagues ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val label = when {
+                            activeLeagues.isEmpty() -> "လိဂ် 0 ခု"
+                            activeLeagues.size == 1 -> "လိဂ်: ${activeLeagues.first()}"
+                            else -> "ရွေးထားသောလိဂ် (${activeLeagues.size})"
+                        }
+                        Text(
+                            text = label,
+                            color = ChampionshipGold,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = { selectedSheetLeagues = null },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text("အားလုံးပြန်ကြည့်", color = Color(0xFFFCA5A5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 if (searchQuery.isNotBlank()) {
                     LeagueQuickSearchSuggestionsRow(
                         query = searchQuery,
                         leagueMatchCounts = sheetLeagueCounts,
                         accentColor = ChampionshipGold,
-                        onPickLeague = { picked -> searchQuery = picked }
+                        onPickLeague = { picked ->
+                            selectedSheetLeagues = setOf(picked)
+                            if (dateFilter.isNotBlank()) {
+                                val srcMatches = matches.filter { sourceFilter == "all" || it.boardSource == sourceFilter }
+                                val hasOnDate = srcMatches.any {
+                                    it.matchDate == dateFilter &&
+                                        FootballFeedService.canonicalLeagueName(it.league)
+                                            .equals(picked, ignoreCase = true)
+                                }
+                                if (!hasOnDate && srcMatches.any {
+                                        FootballFeedService.canonicalLeagueName(it.league)
+                                            .equals(picked, ignoreCase = true)
+                                    }
+                                ) {
+                                    dateFilter = ""
+                                }
+                            }
+                            searchQuery = ""
+                        }
                     )
                 }
 
@@ -585,6 +655,24 @@ fun AdminMatchSheetTableTab(
                 }
             )
         }
+    }
+
+    if (showLeagueFilterDialog) {
+        val allDefaults = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        val srcMatches = matches.filter { sourceFilter == "all" || it.boardSource == sourceFilter }
+        SportsLeagueFilterDialog(
+            totalCount = srcMatches.size,
+            availableLeagues = srcMatches.map { FootballFeedService.canonicalLeagueName(it.league) }.distinct(),
+            selectedLeague = null,
+            onSelectLeague = { lg ->
+                selectedSheetLeagues = if (lg == null) null else setOf(lg)
+            },
+            selectedLeagues = selectedSheetLeagues ?: allDefaults.toSet(),
+            onSelectLeagues = { nextSet ->
+                selectedSheetLeagues = if (nextSet.size >= allDefaults.size) null else nextSet
+            },
+            onDismiss = { showLeagueFilterDialog = false }
+        )
     }
 
     if (showSyncDialog) {

@@ -1024,6 +1024,19 @@ class MainViewModel(
             emitMessage(formatAutoReopenNotice(sys.gamesReopenAtMs, "ဂိမ်းနှင့် ထီကစားခွင့်"))
             return
         }
+        if (!sys.isGameEnabled(orderType, nowMs)) {
+            val gameName = when (orderType) {
+                "one_express" -> "1xBET ဘောလုံး"
+                "five_five_five" -> "555 Mix ဘောလုံး"
+                "parlay" -> "မောင်း (Parlay)"
+                "body_goal" -> "ဘော်ဒီ/ဂိုးပေါင်း"
+                "two_d" -> "၂လုံးထီ (2D)"
+                "three_d" -> "၃လုံးထီ (3D)"
+                else -> "ယခုဂိမ်း"
+            }
+            emitMessage(formatAutoReopenNotice(sys.gameReopenAtMs(orderType), gameName))
+            return
+        }
         val acc = (userAccount.value as? UiState.Success)?.data
         if (acc?.isLocked == true) {
             emitMessage("သင့်အကောင့် ယာယီပိတ်ထားပါသဖြင့် လောင်းကြေးတင်၍ မရပါ")
@@ -1110,8 +1123,8 @@ class MainViewModel(
     ) {
         val sys = systemGameConfig.value
         val nowMs = System.currentTimeMillis()
-        if (sys.maintenanceMode || !sys.isGameEnabled("dice")) {
-            onResult(Result.failure(IllegalStateException("အံစာတုံးဂိမ်း ခေတ္တပိတ်ထားပါသည်")))
+        if (sys.maintenanceMode || !sys.isGameEnabled("dice", nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gameReopenAtMs("dice"), "အံစာတုံးဂိမ်း"))))
             return
         }
         if (sys.isGamesPausedNow(nowMs)) {
@@ -1226,8 +1239,8 @@ class MainViewModel(
     ) {
         val sys = systemGameConfig.value
         val nowMs = System.currentTimeMillis()
-        if (sys.maintenanceMode || !sys.isGameEnabled("six_animals")) {
-            onResult(Result.failure(IllegalStateException("၆ကောင်ဂျင် ခေတ္တပိတ်ထားပါသည်")))
+        if (sys.maintenanceMode || !sys.isGameEnabled("six_animals", nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gameReopenAtMs("six_animals"), "၆ကောင်ဂျင်"))))
             return
         }
         if (sys.isGamesPausedNow(nowMs)) {
@@ -1328,8 +1341,8 @@ class MainViewModel(
     ) {
         val sys = systemGameConfig.value
         val nowMs = System.currentTimeMillis()
-        if (sys.maintenanceMode || !sys.isGameEnabled("dragon_tiger")) {
-            onResult(Result.failure(IllegalStateException("နဂါး vs ကျား ဂိမ်း ခေတ္တပိတ်ထားပါသည်")))
+        if (sys.maintenanceMode || !sys.isGameEnabled("dragon_tiger", nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gameReopenAtMs("dragon_tiger"), "နဂါး vs ကျား ဂိမ်း"))))
             return
         }
         if (sys.isGamesPausedNow(nowMs)) {
@@ -1403,8 +1416,8 @@ class MainViewModel(
     ) {
         val sys = systemGameConfig.value
         val nowMs = System.currentTimeMillis()
-        if (sys.maintenanceMode || !sys.isGameEnabled("lucky_wheel")) {
-            onResult(Result.failure(IllegalStateException("ကံစမ်းဘီးလှည့် ဂိမ်း ခေတ္တပိတ်ထားပါသည်")))
+        if (sys.maintenanceMode || !sys.isGameEnabled("lucky_wheel", nowMs)) {
+            onResult(Result.failure(IllegalStateException(formatAutoReopenNotice(sys.gameReopenAtMs("lucky_wheel"), "ကံစမ်းဘီးလှည့် ဂိမ်း"))))
             return
         }
         if (sys.isGamesPausedNow(nowMs)) {
@@ -1898,6 +1911,7 @@ class MainViewModel(
 
     fun saveAllowedLeagues(leagues: List<String>) = runAction("ဖွင့်လှစ်မည့် ဘောလုံးဖလား/လိဂ် စာရင်း သိမ်းဆည်းပြီးပါပြီ") {
         val cur = boardConfig.value
+        val updatedConfig = cur.copy(allowedLeagues = leagues)
         val res = repository.saveBoardConfig(
             autoSyncDailyMatches = cur.autoSyncDailyMatches,
             autoSyncLiveResults = cur.autoSyncLiveResults,
@@ -1913,6 +1927,50 @@ class MainViewModel(
         )
         if (res.isSuccess) {
             logAuditAsync("Updated allowed leagues", "board", "board_config", "", "${leagues.size} leagues")
+            if (leagues.isNotEmpty()) {
+                val allowedLower = leagues.map { it.trim().lowercase(java.util.Locale.US) }.filter { it.isNotBlank() }.toSet()
+                val loaded = (matches.value as? UiState.Success)?.data.orEmpty()
+                val hasStandard = loaded.any {
+                    (it.boardSource.isBlank() || it.boardSource == "standard") &&
+                        FootballFeedService.matchesAllowedLeague(it.league, allowedLower)
+                }
+                val hasOneExp = loaded.any {
+                    it.boardSource == "one_express" &&
+                        FootballFeedService.matchesAllowedLeague(it.league, allowedLower)
+                }
+                val has555 = loaded.any {
+                    it.boardSource == "five_five_five" &&
+                        FootballFeedService.matchesAllowedLeague(it.league, allowedLower)
+                }
+                if (!hasStandard || !hasOneExp || !has555) {
+                    viewModelScope.launch {
+                        if (!hasStandard) {
+                            repository.syncDailyMatchesFromFeed(
+                                feedService = feedService,
+                                dayOffsets = listOf(0, 1),
+                                currentConfig = updatedConfig
+                            )
+                        }
+                        if (!hasOneExp) {
+                            repository.syncBoardMatchesFromFeed(
+                                boardSource = "one_express",
+                                feedService = feedService,
+                                dayOffsets = listOf(0, 1),
+                                currentConfig = updatedConfig
+                            )
+                        }
+                        if (!has555) {
+                            repository.syncBoardMatchesFromFeed(
+                                boardSource = "five_five_five",
+                                feedService = feedService,
+                                dayOffsets = listOf(0, 1),
+                                currentConfig = updatedConfig
+                            )
+                        }
+                        refreshLiveFootballFeed()
+                    }
+                }
+            }
         }
         res
     }

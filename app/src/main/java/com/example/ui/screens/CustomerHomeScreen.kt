@@ -636,7 +636,9 @@ fun CustomerHomeScreen(
             // White brand cards for 1xBET & 555 Mix positioned underneath the section bar
             if (showGamesGrid) {
                 item(span = { GridItemSpan(2) }) {
-                    val expressEnabled = !isLocked && !isMaintenance && !footballPausedNow
+                    val baseFootballOpen = !isLocked && !isMaintenance && !footballPausedNow
+                    val oneExpressOpen = baseFootballOpen && systemGameConfig.isGameEnabled("one_express", nowMs)
+                    val fiveFiveFiveOpen = baseFootballOpen && systemGameConfig.isGameEnabled("five_five_five", nowMs)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -645,8 +647,8 @@ fun CustomerHomeScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(86.dp)
-                                .alpha(if (expressEnabled) 1f else 0.45f)
-                                .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.ONE_EXPRESS) }
+                                .alpha(if (oneExpressOpen) 1f else 0.45f)
+                                .clickable(enabled = oneExpressOpen) { onNavigate(CustomerRoute.ONE_EXPRESS) }
                                 .testTag("menu_one_express"),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
                             border = BorderStroke(1.dp, WhiteCardBorder),
@@ -672,6 +674,21 @@ fun CustomerHomeScreen(
                                     maxLines = 1,
                                     textAlign = TextAlign.Center
                                 )
+                                if (!oneExpressOpen) {
+                                    Surface(
+                                        color = Color(0xFFB91C1C),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "ပိတ်ထား",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -679,8 +696,8 @@ fun CustomerHomeScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(86.dp)
-                                .alpha(if (expressEnabled) 1f else 0.45f)
-                                .clickable(enabled = expressEnabled) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
+                                .alpha(if (fiveFiveFiveOpen) 1f else 0.45f)
+                                .clickable(enabled = fiveFiveFiveOpen) { onNavigate(CustomerRoute.FIVE_FIVE_FIVE) }
                                 .testTag("menu_five_five_five"),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
                             border = BorderStroke(1.dp, WhiteCardBorder),
@@ -706,6 +723,21 @@ fun CustomerHomeScreen(
                                     maxLines = 1,
                                     textAlign = TextAlign.Center
                                 )
+                                if (!fiveFiveFiveOpen) {
+                                    Surface(
+                                        color = Color(0xFFB91C1C),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "ပိတ်ထား",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -718,7 +750,15 @@ fun CustomerHomeScreen(
                     val isGameTile = tile.gameKey != null
                     val isFootballTile = tile.gameKey == "parlay" || tile.gameKey == "body_goal"
                     val pausedByTimer = if (isFootballTile) footballPausedNow else if (isGameTile) gamesPausedNow else false
-                    val gameEnabled = tile.gameKey == null || (systemGameConfig.isGameEnabled(tile.gameKey) && !pausedByTimer)
+                    val singleGameOpen = when {
+                        tile.route == CustomerRoute.LOTTERY_HUB -> {
+                            (!systemGameConfig.hideTwoD && systemGameConfig.isGameEnabled("two_d", nowMs)) ||
+                                (!systemGameConfig.hideThreeD && systemGameConfig.isGameEnabled("three_d", nowMs))
+                        }
+                        tile.gameKey != null -> systemGameConfig.isGameEnabled(tile.gameKey, nowMs)
+                        else -> true
+                    }
+                    val gameEnabled = tile.gameKey == null || (singleGameOpen && !pausedByTimer)
                     val tileEnabled = (!isGameTile || (!isLocked && !isMaintenance && gameEnabled))
                     Card(
                         modifier = Modifier
@@ -756,7 +796,7 @@ fun CustomerHomeScreen(
                             Text(
                                 text = when {
                                     isGameTile && pausedByTimer -> "${tile.title} (ခေတ္တပိတ်)"
-                                    isGameTile && !gameEnabled -> "${tile.title} (ပိတ်)"
+                                    isGameTile && !singleGameOpen -> "${tile.title} (ပိတ်)"
                                     else -> tile.title
                                 },
                                 color = InkDark,

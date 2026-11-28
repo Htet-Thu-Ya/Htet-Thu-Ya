@@ -1013,4 +1013,77 @@ class AutoSettleAndPauseTest {
         assertTrue(eDecisionAfter430 is AutoSettleDecision.Win)
         assertEquals(80_000L, (eDecisionAfter430 as AutoSettleDecision.Win).grossPayoutKs)
     }
+
+    @Test
+    fun systemGameConfig_perGameDisableAndTimerAutoReopen_andExactSearchIsolation() {
+        val now = 1_700_000_000_000L
+        assertEquals(10, SystemGameConfig.ALL_GAME_KEYS.size)
+        assertTrue("one_express" in SystemGameConfig.ALL_GAME_KEYS)
+        assertTrue("five_five_five" in SystemGameConfig.ALL_GAME_KEYS)
+
+        val defaultCfg = SystemGameConfig()
+        SystemGameConfig.ALL_GAME_KEYS.forEach { key ->
+            assertTrue("Expected $key enabled by default", defaultCfg.isGameEnabled(key, now))
+        }
+
+        // Disabling ALL 10 games keeps every game disabled (fixes empty enabledGames bug)
+        val allDisabledCfg = SystemGameConfig(
+            enabledGames = emptyList(),
+            disabledGames = SystemGameConfig.ALL_GAME_KEYS
+        )
+        SystemGameConfig.ALL_GAME_KEYS.forEach { key ->
+            assertFalse("Expected $key disabled when all 10 disabled", allDisabledCfg.isGameEnabled(key, now))
+        }
+
+        // Timed disable on one_express and dice -> disabled before expiry, auto-reopens at expiry
+        val timedCfg = SystemGameConfig(
+            disabledGames = listOf("one_express", "dice"),
+            perGameReopenAtMs = mapOf(
+                "one_express" to now + 60_000L,
+                "dice" to now + 120_000L
+            )
+        )
+        assertFalse(timedCfg.isGameEnabled("one_express", now))
+        assertFalse(timedCfg.isGameEnabled("dice", now))
+        assertTrue(timedCfg.isGameEnabled("five_five_five", now))
+
+        assertTrue(timedCfg.isGameEnabled("one_express", now + 60_000L))
+        assertFalse(timedCfg.isGameEnabled("dice", now + 60_000L))
+        assertTrue(timedCfg.isGameEnabled("dice", now + 120_000L))
+
+        // Exact canonical league search must NOT bleed into Division 2 leagues
+        assertTrue(
+            com.example.data.network.FootballFeedService.matchesSearchQuery(
+                rawLeague = "Spanish La Liga",
+                homeTeam = "Real Madrid",
+                awayTeam = "Barcelona",
+                rawQuery = "Spanish La Liga"
+            )
+        )
+        assertFalse(
+            com.example.data.network.FootballFeedService.matchesSearchQuery(
+                rawLeague = "Spanish La Liga 2",
+                homeTeam = "Eibar",
+                awayTeam = "Levante",
+                rawQuery = "Spanish La Liga"
+            )
+        )
+        assertFalse(
+            com.example.data.network.FootballFeedService.matchesSearchQuery(
+                rawLeague = "German Bundesliga 2",
+                homeTeam = "HSV",
+                awayTeam = "Schalke",
+                rawQuery = "German Bundesliga"
+            )
+        )
+        // Partial query still works for quick search
+        assertTrue(
+            com.example.data.network.FootballFeedService.matchesSearchQuery(
+                rawLeague = "Turkey 1. Lig",
+                homeTeam = "Eyupspor",
+                awayTeam = "Kocaelispor",
+                rawQuery = "Turkey"
+            )
+        )
+    }
 }

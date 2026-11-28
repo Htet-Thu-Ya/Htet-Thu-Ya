@@ -456,7 +456,9 @@ data class BettingConfig(
 @Keep
 @IgnoreExtraProperties
 data class SystemGameConfig(
-    val enabledGames: List<String> = listOf("parlay", "body_goal", "two_d", "three_d", "dice", "six_animals", "dragon_tiger", "lucky_wheel"),
+    val enabledGames: List<String> = ALL_GAME_KEYS,
+    val disabledGames: List<String> = emptyList(),
+    val perGameReopenAtMs: Map<String, Long> = emptyMap(),
     val dualApprovalThresholdKs: Long = 300_000L,
     val minStakeKs: Long = 500L,
     val maxStakeKs: Long = 5_000_000L,
@@ -476,7 +478,18 @@ data class SystemGameConfig(
     val updatedBy: String = "",
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
-    fun isGameEnabled(gameKey: String): Boolean = enabledGames.isEmpty() || enabledGames.contains(gameKey)
+    fun gameReopenAtMs(gameKey: String): Long = perGameReopenAtMs[gameKey] ?: 0L
+
+    fun isGameEnabled(gameKey: String, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val reopenAt = perGameReopenAtMs[gameKey] ?: 0L
+        if (disabledGames.contains(gameKey)) {
+            return reopenAt > 0L && nowMs >= reopenAt
+        }
+        if (gameKey in LEGACY_DEFAULT_KEYS && enabledGames.isNotEmpty() && !enabledGames.contains(gameKey)) {
+            return false
+        }
+        return true
+    }
 
     fun isFootballPausedNow(nowMs: Long = System.currentTimeMillis()): Boolean {
         return footballPaused && (footballReopenAtMs <= 0L || nowMs < footballReopenAtMs)
@@ -484,6 +497,16 @@ data class SystemGameConfig(
 
     fun isGamesPausedNow(nowMs: Long = System.currentTimeMillis()): Boolean {
         return gamesPaused && (gamesReopenAtMs <= 0L || nowMs < gamesReopenAtMs)
+    }
+
+    companion object {
+        val LEGACY_DEFAULT_KEYS = listOf(
+            "parlay", "body_goal", "two_d", "three_d", "dice", "six_animals", "dragon_tiger", "lucky_wheel"
+        )
+        val ALL_GAME_KEYS = listOf(
+            "one_express", "five_five_five", "parlay", "body_goal",
+            "two_d", "three_d", "dice", "six_animals", "dragon_tiger", "lucky_wheel"
+        )
     }
 }
 

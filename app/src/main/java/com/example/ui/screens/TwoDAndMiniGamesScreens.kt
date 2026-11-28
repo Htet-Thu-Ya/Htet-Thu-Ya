@@ -143,7 +143,10 @@ fun TwoDLotteryScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+    val isTwoDDisabled = !systemGameConfig.isGameEnabled("two_d", nowMs)
+    val isGamesPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isGamesPausedNow(nowMs) ||
+        isTwoDDisabled
 
     val selectedNumbers = remember { mutableStateListOf<String>() }
     var manualInput by remember { mutableStateOf("") }
@@ -220,13 +223,21 @@ fun TwoDLotteryScreen(
         ) {
             if (isGamesPaused) {
                 item {
+                    val gameReopen = systemGameConfig.gameReopenAtMs("two_d")
                     PauseStatusBannerCard(
-                        title = if (systemGameConfig.maintenanceMode) {
-                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                        } else {
-                            "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        title = when {
+                            systemGameConfig.maintenanceMode ->
+                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                            isTwoDDisabled ->
+                                "၂လုံးထီ (2D) ခေတ္တပိတ်ထားပါသည်"
+                            else ->
+                                "ဂိမ်းနှင့် ထီကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = when {
+                            isTwoDDisabled && gameReopen > nowMs -> gameReopen
+                            systemGameConfig.gamesReopenAtMs > nowMs -> systemGameConfig.gamesReopenAtMs
+                            else -> gameReopen
+                        },
                         nowMs = nowMs
                     )
                 }
@@ -671,7 +682,10 @@ fun DiceGameScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+    val isDiceDisabled = !systemGameConfig.isGameEnabled("dice", nowMs)
+    val isGamesPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isGamesPausedNow(nowMs) ||
+        isDiceDisabled
 
     var selectedOption by remember { mutableStateOf("BIG") }
     var exactNumber by remember { mutableIntStateOf(11) }
@@ -737,13 +751,21 @@ fun DiceGameScreen(
         ) {
             if (isGamesPaused) {
                 item {
+                    val gameReopen = systemGameConfig.gameReopenAtMs("dice")
                     PauseStatusBannerCard(
-                        title = if (systemGameConfig.maintenanceMode) {
-                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                        } else {
-                            "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        title = when {
+                            systemGameConfig.maintenanceMode ->
+                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                            isDiceDisabled ->
+                                "အံစာတုံး (Dice) ခေတ္တပိတ်ထားပါသည်"
+                            else ->
+                                "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = when {
+                            isDiceDisabled && gameReopen > nowMs -> gameReopen
+                            systemGameConfig.gamesReopenAtMs > nowMs -> systemGameConfig.gamesReopenAtMs
+                            else -> gameReopen
+                        },
                         nowMs = nowMs
                     )
                 }
@@ -1082,7 +1104,10 @@ fun SixAnimalsGameScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+    val isAnimalsDisabled = !systemGameConfig.isGameEnabled("six_animals", nowMs)
+    val isGamesPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isGamesPausedNow(nowMs) ||
+        isAnimalsDisabled
 
     var selectedAnimals by remember { mutableStateOf(setOf(0)) }
     var stakeInput by remember { mutableStateOf("1000") }
@@ -1136,13 +1161,21 @@ fun SixAnimalsGameScreen(
         ) {
             if (isGamesPaused) {
                 item {
+                    val gameReopen = systemGameConfig.gameReopenAtMs("six_animals")
                     PauseStatusBannerCard(
-                        title = if (systemGameConfig.maintenanceMode) {
-                            systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                        } else {
-                            "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        title = when {
+                            systemGameConfig.maintenanceMode ->
+                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                            isAnimalsDisabled ->
+                                "၆ကောင်ဂျင် ခေတ္တပိတ်ထားပါသည်"
+                            else ->
+                                "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
                         },
-                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        reopenAtMs = when {
+                            isAnimalsDisabled && gameReopen > nowMs -> gameReopen
+                            systemGameConfig.gamesReopenAtMs > nowMs -> systemGameConfig.gamesReopenAtMs
+                            else -> gameReopen
+                        },
                         nowMs = nowMs
                     )
                 }
@@ -1424,7 +1457,10 @@ fun DragonTigerGameScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+    val isDtDisabled = !systemGameConfig.isGameEnabled("dragon_tiger", nowMs)
+    val isGamesPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isGamesPausedNow(nowMs) ||
+        isDtDisabled
 
     var selectedPick by remember { mutableStateOf("DRAGON") }
     var stakeInput by remember { mutableStateOf("1000") }
@@ -1467,10 +1503,21 @@ fun DragonTigerGameScreen(
         ) {
             if (isGamesPaused) {
                 item {
+                    val gameReopen = systemGameConfig.gameReopenAtMs("dragon_tiger")
                     PauseStatusBannerCard(
-                        title = if (systemGameConfig.maintenanceMode) systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                        else "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်",
-                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        title = when {
+                            systemGameConfig.maintenanceMode ->
+                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                            isDtDisabled ->
+                                "နဂါး vs ကျား (Dragon Tiger) ခေတ္တပိတ်ထားပါသည်"
+                            else ->
+                                "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        },
+                        reopenAtMs = when {
+                            isDtDisabled && gameReopen > nowMs -> gameReopen
+                            systemGameConfig.gamesReopenAtMs > nowMs -> systemGameConfig.gamesReopenAtMs
+                            else -> gameReopen
+                        },
                         nowMs = nowMs
                     )
                 }
@@ -1702,7 +1749,10 @@ fun LuckyWheelGameScreen(
             nowMs = System.currentTimeMillis()
         }
     }
-    val isGamesPaused = systemGameConfig.maintenanceMode || systemGameConfig.isGamesPausedNow(nowMs)
+    val isWheelDisabled = !systemGameConfig.isGameEnabled("lucky_wheel", nowMs)
+    val isGamesPaused = systemGameConfig.maintenanceMode ||
+        systemGameConfig.isGamesPausedNow(nowMs) ||
+        isWheelDisabled
 
     val segments = remember(miniGameControlConfig.luckyWheelMult) {
         MiniGameEngine.buildLuckyWheelSegments(miniGameControlConfig.luckyWheelMult)
@@ -1748,10 +1798,21 @@ fun LuckyWheelGameScreen(
         ) {
             if (isGamesPaused) {
                 item {
+                    val gameReopen = systemGameConfig.gameReopenAtMs("lucky_wheel")
                     PauseStatusBannerCard(
-                        title = if (systemGameConfig.maintenanceMode) systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
-                        else "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်",
-                        reopenAtMs = systemGameConfig.gamesReopenAtMs,
+                        title = when {
+                            systemGameConfig.maintenanceMode ->
+                                systemGameConfig.maintenanceMessage.ifBlank { "စနစ်ပြုပြင်နေပါသည်" }
+                            isWheelDisabled ->
+                                "ကံစမ်းဘီး (Lucky Wheel) ခေတ္တပိတ်ထားပါသည်"
+                            else ->
+                                "ဂိမ်းကစားခြင်း ခေတ္တရပ်နားထားပါသည်"
+                        },
+                        reopenAtMs = when {
+                            isWheelDisabled && gameReopen > nowMs -> gameReopen
+                            systemGameConfig.gamesReopenAtMs > nowMs -> systemGameConfig.gamesReopenAtMs
+                            else -> gameReopen
+                        },
                         nowMs = nowMs
                     )
                 }
