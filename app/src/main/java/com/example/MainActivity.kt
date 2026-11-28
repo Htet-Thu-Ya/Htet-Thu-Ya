@@ -545,12 +545,12 @@ private fun AuthenticatedRoot(
                             onDeleteLotteryDraw = vm::deleteLotteryDraw,
                             onSeedSampleBoard = vm::seedSampleBoard,
                             onSeedSampleExpressBoard = vm::seedSampleExpressBoard,
-                            onSyncDailyMatchesNow = vm::syncDailyMatchesNow,
+                            onSyncDailyMatchesNow = { d -> vm.syncDailyMatchesNow(d) },
                             onSyncLiveResultsNow = vm::syncLiveMatchResultsNow,
                             onToggleAutoDailyMatches = vm::toggleAutoSyncDailyMatches,
                             onToggleAutoLiveResults = vm::toggleAutoSyncLiveResults,
-                            onSyncOneExpressNow = vm::syncOneExpressMatchesNow,
-                            onSync555Now = vm::sync555MatchesNow,
+                            onSyncOneExpressNow = { d -> vm.syncOneExpressMatchesNow(d) },
+                            onSync555Now = { d -> vm.sync555MatchesNow(d) },
                             onToggleAutoOneExpress = vm::toggleAutoSyncOneExpress,
                             onToggleAuto555 = vm::toggleAutoSync555,
                             onSaveAllowedLeagues = vm::saveAllowedLeagues,
@@ -561,6 +561,7 @@ private fun AuthenticatedRoot(
                             onPushToGoogleSheetWebhook = { vm.pushCurrentBoardToGoogleSheetWebhook(false) },
                             onSaveActiveMatchDateFilter = vm::saveActiveMatchDateFilter,
                             onAllocateAdminFloat = vm::allocateAdminFloat,
+                            onTransferUserBalanceToAdminFloat = vm::transferUserBalanceToAdminFloat,
                             onSaveNewMatchWithDate = { l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay, xBetOdds, matchDate ->
                                 vm.saveNewMatch(l, h, a, k, hand, goal, bOdds, gOdds, boardSrc, oneExpKyay, fffKyay, xBetOdds, matchDate)
                             },

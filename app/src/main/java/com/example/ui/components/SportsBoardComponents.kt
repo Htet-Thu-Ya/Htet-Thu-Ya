@@ -30,7 +30,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -39,22 +43,31 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,13 +82,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.betting.KyayFormatter
 import com.example.data.model.SportMatch
+import com.example.data.network.FootballFeedService
 import com.example.data.util.MyanmarTimeUtil
 import com.example.ui.theme.ChampionshipGold
+import com.example.ui.theme.DeepPitchElevated
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMuted
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PitchEmeraldDark
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class MatchPick(
     val matchId: String,
@@ -1532,10 +1550,12 @@ fun SportsLeagueFilterDialog(
     onSelectLeague: (String?) -> Unit,
     onDismiss: () -> Unit,
     selectedLeagues: Set<String>? = null,
-    onSelectLeagues: ((Set<String>) -> Unit)? = null
+    onSelectLeagues: ((Set<String>) -> Unit)? = null,
+    confirmSaveLabel: String? = null,
+    onConfirmSave: (() -> Unit)? = null
 ) {
     val orderedLeagues = remember(availableLeagues) {
-        val base = com.example.data.network.FootballFeedService.DEFAULT_LEAGUE_OPTIONS
+        val base = FootballFeedService.DEFAULT_LEAGUE_OPTIONS
         val extras = availableLeagues
             .filter { lg -> base.none { it.equals(lg, ignoreCase = true) } }
             .distinct()
@@ -1585,7 +1605,7 @@ fun SportsLeagueFilterDialog(
                         .testTag("league_filter_select_all")
                 ) {
                     Text(
-                        text = "အကုန်ရွေး",
+                        text = "အကုန်ရွေး:",
                         color = InkDark,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
@@ -1614,8 +1634,8 @@ fun SportsLeagueFilterDialog(
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = if (isMultiMode) {
-                        if (activeSelected.isEmpty()) "စုစုပေါင်း $totalCount ပွဲ (လိဂ်အားလုံး ပြထားသည်)"
-                        else "ရွေးချယ်ထားသော လိဂ် ${activeSelected.size} ခု • စုစုပေါင်း $totalCount ပွဲ"
+                        if (activeSelected.isEmpty()) "စုစုပေါင်း $totalCount (လိဂ်အားလုံး ပြထားသည်)"
+                        else "ရွေးချယ်ထားသော လိဂ် ${activeSelected.size} ခု • စုစုပေါင်း $totalCount"
                     } else {
                         "စုစုပေါင်း $totalCount ပွဲ"
                     },
@@ -1686,7 +1706,7 @@ fun SportsLeagueFilterDialog(
                 }
             }
         },
-        confirmButton = {
+        dismissButton = {
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.testTag("league_filter_close")
@@ -1697,6 +1717,330 @@ fun SportsLeagueFilterDialog(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        },
+        confirmButton = {
+            if (confirmSaveLabel != null && onConfirmSave != null) {
+                Button(
+                    onClick = onConfirmSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = BoardGreenAccent, contentColor = Color.White),
+                    modifier = Modifier.testTag("league_filter_save")
+                ) {
+                    Text(confirmSaveLabel, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun AdminLeagueHideBarSection(
+    selectedLeagues: List<String>,
+    busy: Boolean,
+    accentColor: Color = ChampionshipGold,
+    testTagPrefix: String = "admin_leagues",
+    onSaveAllowedLeagues: (List<String>) -> Unit
+) {
+    val totalLeagues = FootballFeedService.DEFAULT_LEAGUE_OPTIONS.size
+    var expanded by remember { mutableStateOf(false) }
+    var showPickerDialog by remember { mutableStateOf(false) }
+    var workingSet by remember(selectedLeagues) {
+        mutableStateOf(
+            if (selectedLeagues.isEmpty()) FootballFeedService.DEFAULT_LEAGUE_OPTIONS.toSet()
+            else selectedLeagues.toSet()
+        )
+    }
+
+    Surface(
+        color = Color(0xFF14261E),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .testTag("${testTagPrefix}_hide_bar"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.FilterList, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "ဖလား / လိဂ် ရွေးချယ်မှု ($totalLeagues လိဂ်)",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (selectedLeagues.isEmpty()) "လက်ရှိ: အားလုံး ($totalLeagues လိဂ်)"
+                            else "လက်ရှိရွေးထား: ${selectedLeagues.size} လိဂ်",
+                            color = Color(0xFFB4C8BE),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(
+                        color = accentColor.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(enabled = !busy) {
+                                workingSet = if (selectedLeagues.isEmpty()) {
+                                    FootballFeedService.DEFAULT_LEAGUE_OPTIONS.toSet()
+                                } else {
+                                    selectedLeagues.toSet()
+                                }
+                                showPickerDialog = true
+                            }
+                            .testTag("${testTagPrefix}_open_modal")
+                    ) {
+                        Text(
+                            text = "ရွေးမည်",
+                            color = accentColor,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "Hide league summary" else "Show league summary",
+                        tint = accentColor
+                    )
+                }
+            }
+
+            if (expanded) {
+                Text(
+                    text = if (selectedLeagues.isEmpty()) {
+                        "လိဂ်အားလုံး ($totalLeagues လိဂ်) ဖွင့်ထားပါသည်"
+                    } else {
+                        selectedLeagues.joinToString(" • ")
+                    },
+                    color = Color(0xFFD1FAE5),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Button(
+                    onClick = {
+                        workingSet = if (selectedLeagues.isEmpty()) {
+                            FootballFeedService.DEFAULT_LEAGUE_OPTIONS.toSet()
+                        } else {
+                            selectedLeagues.toSet()
+                        }
+                        showPickerDialog = true
+                    },
+                    enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor, contentColor = InkDark),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("${testTagPrefix}_pick_button")
+                ) {
+                    Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("$totalLeagues လိဂ် စာရင်းဖွင့်၍ ရွေးချယ်မည်", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showPickerDialog) {
+        SportsLeagueFilterDialog(
+            totalCount = totalLeagues,
+            availableLeagues = FootballFeedService.DEFAULT_LEAGUE_OPTIONS,
+            selectedLeague = null,
+            onSelectLeague = {},
+            onDismiss = { showPickerDialog = false },
+            selectedLeagues = workingSet,
+            onSelectLeagues = { workingSet = it },
+            confirmSaveLabel = "သိမ်းဆည်းမည်",
+            onConfirmSave = {
+                val allCount = FootballFeedService.DEFAULT_LEAGUE_OPTIONS.size
+                val toSave = if (workingSet.isEmpty() || workingSet.size >= allCount) {
+                    emptyList()
+                } else {
+                    workingSet.toList()
+                }
+                showPickerDialog = false
+                onSaveAllowedLeagues(toSave)
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdminCalendarDateBar(
+    selectedDateIso: String,
+    pinnedDateIso: String,
+    busy: Boolean,
+    accentColor: Color = ChampionshipGold,
+    testTagPrefix: String = "admin_date",
+    onSelectDate: (String) -> Unit,
+    onPinDate: (String) -> Unit
+) {
+    var showCalendarDialog by remember { mutableStateOf(false) }
+    val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
+    val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(MyanmarTimeUtil.nowMs() + 86_400_000L) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = { showCalendarDialog = true },
+                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.85f)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .testTag("${testTagPrefix}_calendar_button")
+            ) {
+                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (selectedDateIso.isBlank()) "ပြက္ခဒိန် ရက်ရွေး (အားလုံး)"
+                    else "ရက်စွဲ: $selectedDateIso",
+                    color = accentColor,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            OutlinedButton(
+                onClick = { onPinDate(selectedDateIso) },
+                enabled = !busy,
+                border = BorderStroke(1.dp, if (pinnedDateIso == selectedDateIso) BoardGreenAccent else accentColor.copy(alpha = 0.6f)),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .height(44.dp)
+                    .testTag("${testTagPrefix}_pin_button")
+            ) {
+                Text(
+                    text = if (selectedDateIso.isBlank()) "All Pin" else "Pin ရက်",
+                    color = if (pinnedDateIso == selectedDateIso) BoardGreenAccent else accentColor,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+            }
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                FilterChip(
+                    selected = selectedDateIso.isBlank(),
+                    onClick = { onSelectDate("") },
+                    label = { Text("အားလုံး") }
+                )
+            }
+            item {
+                FilterChip(
+                    selected = selectedDateIso == todayIso,
+                    onClick = { onSelectDate(todayIso) },
+                    label = { Text("ယနေ့ ($todayIso)") }
+                )
+            }
+            item {
+                FilterChip(
+                    selected = selectedDateIso == tomorrowIso,
+                    onClick = { onSelectDate(tomorrowIso) },
+                    label = { Text("မနက်ဖြန် ($tomorrowIso)") }
+                )
+            }
+            if (selectedDateIso.isNotBlank() && selectedDateIso != todayIso && selectedDateIso != tomorrowIso) {
+                item {
+                    FilterChip(
+                        selected = true,
+                        onClick = { showCalendarDialog = true },
+                        label = { Text(selectedDateIso) }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showCalendarDialog) {
+        val initialUtcMs = remember(selectedDateIso) {
+            val baseIso = selectedDateIso.takeIf { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) } ?: todayIso
+            val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            runCatching { fmt.parse(baseIso)?.time }.getOrNull() ?: System.currentTimeMillis()
+        }
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialUtcMs)
+        DatePickerDialog(
+            onDismissRequest = { showCalendarDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val pickedMs = datePickerState.selectedDateMillis
+                        if (pickedMs != null) {
+                            val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                                timeZone = TimeZone.getTimeZone("UTC")
+                            }
+                            onSelectDate(fmt.format(Date(pickedMs)))
+                        }
+                        showCalendarDialog = false
+                    }
+                ) {
+                    Text("ရွေးချယ်မည်", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalendarDialog = false }) {
+                    Text("ပိတ်မည်")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+@Composable
+fun ConfirmAutoSyncDialog(
+    boardTitle: String,
+    targetDateIso: String?,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val dateLabel = targetDateIso?.takeIf { it.isNotBlank() } ?: "ယနေ့ & မနက်ဖြန်"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Sync, contentDescription = null, tint = PitchEmeraldDark) },
+        title = { Text("ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်လား?", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("ဇယား: $boardTitle")
+                Text("ဆွဲယူမည့်ရက်စွဲ: $dateLabel", fontWeight = FontWeight.SemiBold, color = PitchEmeraldDark)
+                Text(
+                    "ရှိပြီးသား ပွဲစဉ်များတွင် Admin ပြင်ဆင်ထားသော ကြေး/ဂိုးပေါင်း/Odds များကို မဖျက်ဘဲ ပွဲအသစ်နှင့် တိုက်ရိုက်ရလဒ်များကိုသာ ထည့်သွင်းအပ်ဒိတ်ပေးပါမည်။",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkMuted
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
+                modifier = Modifier.testTag("confirm_auto_sync_button")
+            ) {
+                Text("အတည်ပြု ထည့်မည်", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("မထည့်ပါ")
             }
         }
     )

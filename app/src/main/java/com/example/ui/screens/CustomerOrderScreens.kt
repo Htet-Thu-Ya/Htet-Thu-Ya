@@ -138,8 +138,10 @@ fun SportsOrderScreen(
     var selectedLeaguesFilter by remember { mutableStateOf<Set<String>>(emptySet()) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearchBar by remember { mutableStateOf(false) }
+    val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var selectedDateFilter by remember(boardConfig.activeMatchDateFilter) {
-        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
@@ -179,6 +181,12 @@ fun SportsOrderScreen(
             .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
             .distinct()
             .sorted()
+    }
+
+    LaunchedEffect(availableDates, boardConfig.activeMatchDateFilter) {
+        if (selectedDateFilter.isNotBlank() && availableDates.isNotEmpty() && selectedDateFilter !in availableDates) {
+            selectedDateFilter = ""
+        }
     }
 
     val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {

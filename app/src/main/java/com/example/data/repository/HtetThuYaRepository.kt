@@ -1185,6 +1185,10 @@ class HtetThuYaRepository(
                 "pinHash" to initialPinHash.take(128),
                 "forceLogoutAtMs" to 0L,
                 "permissions" to defaultPerms,
+                "walletBalanceKs" to 0L,
+                "totalAllocatedKs" to 0L,
+                "totalTopupsGivenKs" to 0L,
+                "totalWithdrawalsTakenKs" to 0L,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -2416,6 +2420,73 @@ class HtetThuYaRepository(
         }
     }
 
+    suspend fun transferUserBalanceToAdminFloat(
+        targetUid: String,
+        amountKs: Long
+    ): Result<Unit> {
+        val path = "admins/$targetUid"
+        return try {
+            requireUserId()
+            require(targetUid.isNotBlank() && ID_REGEX.matches(targetUid)) { "Invalid target user ID" }
+            require(amountKs > 0L) { "ပြောင်းရွှေ့မည့် ပမာဏ ထည့်သွင်းပါ" }
+            val userRef = db.collection("users").document(targetUid)
+            val adminRef = db.collection("admins").document(targetUid)
+            val txRef = db.collection("transactions").document("tx_${UUID.randomUUID().toString().replace("-", "").take(16)}")
+            db.runTransaction { tx ->
+                val userSnap = tx.get(userRef)
+                val adminSnap = tx.get(adminRef)
+                if (!userSnap.exists()) throw IllegalStateException("Customer အကောင့် မတွေ့ပါ")
+                if (!adminSnap.exists()) throw IllegalStateException("Second Admin အကောင့် မတွေ့ပါ")
+                if (adminSnap.getString("role") == "owner") {
+                    throw IllegalStateException("Owner Admin Float သို့ ပြောင်း၍မရပါ")
+                }
+                val curUserBal = userSnap.getLong("balanceKs") ?: 0L
+                if (curUserBal < amountKs) {
+                    throw IllegalStateException("Play Balance ($curUserBal Ks) မလုံလောက်ပါ")
+                }
+                val nextUserBal = (curUserBal - amountKs).coerceAtLeast(0L)
+                val curFloat = adminSnap.getLong("walletBalanceKs") ?: 0L
+                val curAllocated = adminSnap.getLong("totalAllocatedKs") ?: 0L
+                val nextFloat = (curFloat + amountKs).coerceAtMost(1_000_000_000L)
+                val nextAllocated = (curAllocated + amountKs).coerceAtMost(1_000_000_000L)
+                tx.update(
+                    userRef,
+                    mapOf(
+                        "balanceKs" to nextUserBal,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                tx.update(
+                    adminRef,
+                    mapOf(
+                        "walletBalanceKs" to nextFloat,
+                        "totalAllocatedKs" to nextAllocated,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                tx.set(
+                    txRef,
+                    mapOf(
+                        "userId" to targetUid,
+                        "txType" to "admin_adjust",
+                        "direction" to "debit",
+                        "amountKs" to amountKs,
+                        "title" to "Play Balance -> Second Admin Float ပြောင်းလဲမှု",
+                        "balanceAfterKs" to nextUserBal,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun giftRewardPoints(
         targetUid: String,
         displayName: String,
@@ -3260,13 +3331,19 @@ class HtetThuYaRepository(
     suspend fun syncDailyMatchesFromFeed(
         feedService: FootballFeedService,
         dayOffsets: List<Int> = listOf(0, 1),
-        currentConfig: BoardConfig? = null
+        currentConfig: BoardConfig? = null,
+        targetDateIso: String? = null
     ): Result<Int> {
         val path = "matches/daily_sync"
         return try {
             val adminUid = requireUserId()
             val allowedLeagues = currentConfig?.allowedLeagues.orEmpty()
-            val feedResult = feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
+            val cleanTargetDate = targetDateIso?.trim()?.takeIf { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            val feedResult = if (cleanTargetDate != null) {
+                feedService.fetchFixturesForDate(cleanTargetDate, allowedLeagues = allowedLeagues)
+            } else {
+                feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
+            }
             val fixtures = feedResult.getOrElse { throw it }
             if (fixtures.isEmpty()) {
                 return Result.success(0)
@@ -3338,11 +3415,17 @@ class HtetThuYaRepository(
             }
 
             if (currentConfig != null) {
+                val todayIso = feedService.todayDateIso()
+                val nextActiveFilter = when {
+                    cleanTargetDate != null -> cleanTargetDate
+                    currentConfig.activeMatchDateFilter.isNotBlank() && currentConfig.activeMatchDateFilter < todayIso -> ""
+                    else -> currentConfig.activeMatchDateFilter.trim().take(20)
+                }
                 db.collection("app_settings").document("board_config").set(
                     mapOf(
                         "autoSyncDailyMatches" to currentConfig.autoSyncDailyMatches,
                         "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
-                        "lastSyncedDate" to feedService.todayDateIso(),
+                        "lastSyncedDate" to todayIso,
                         "allowedLeagues" to currentConfig.allowedLeagues.take(80),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
@@ -3350,7 +3433,7 @@ class HtetThuYaRepository(
                         "googleSheetEditUrl" to currentConfig.googleSheetEditUrl.trim().take(500),
                         "googleSheetWebhookUrl" to currentConfig.googleSheetWebhookUrl.trim().take(500),
                         "autoTwoWaySheetSync" to currentConfig.autoTwoWaySheetSync,
-                        "activeMatchDateFilter" to currentConfig.activeMatchDateFilter.trim().take(20),
+                        "activeMatchDateFilter" to nextActiveFilter,
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -3373,21 +3456,27 @@ class HtetThuYaRepository(
         boardSource: String,
         feedService: FootballFeedService,
         dayOffsets: List<Int> = listOf(0, 1),
-        currentConfig: BoardConfig? = null
+        currentConfig: BoardConfig? = null,
+        targetDateIso: String? = null
     ): Result<BoardSyncOutcome> {
         val path = "matches/sync_$boardSource"
         return try {
             val adminUid = requireUserId()
             require(boardSource in listOf("one_express", "five_five_five")) { "Unsupported board source" }
             val allowedLeagues = currentConfig?.allowedLeagues.orEmpty()
+            val cleanTargetDate = targetDateIso?.trim()?.takeIf { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
             val fixtures = if (boardSource == "one_express") {
                 feedService.fetchOneXBetFixtures(
                     allowedLeagues = allowedLeagues,
-                    dayOffsets = dayOffsets
+                    dayOffsets = dayOffsets,
+                    targetDateIso = cleanTargetDate
                 ).getOrElse { throw it }.fixtures
             } else {
-                feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
-                    .getOrElse { throw it }
+                if (cleanTargetDate != null) {
+                    feedService.fetchFixturesForDate(cleanTargetDate, allowedLeagues = allowedLeagues)
+                } else {
+                    feedService.fetchFixturesForDays(dayOffsets, allowedLeagues = allowedLeagues)
+                }.getOrElse { throw it }
             }
             if (fixtures.isEmpty()) {
                 return Result.success(BoardSyncOutcome(0))
@@ -3469,6 +3558,7 @@ class HtetThuYaRepository(
                         )
                         syncedCount++
                     } else {
+                        // Preserve Admin's custom odds/handicap/goal lines; only fill missing blanks and update live timing/score/status
                         val updateFields = mutableMapOf<String, Any>(
                             "homeLogoUrl" to fix.homeLogoUrl,
                             "awayLogoUrl" to fix.awayLogoUrl,
@@ -3482,29 +3572,38 @@ class HtetThuYaRepository(
                             "autoUpdatedAtMs" to nowMs,
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
-                        if (fix.status == "open") {
+                        if (prev.getString("handicapLine").isNullOrBlank()) {
                             updateFields["handicapLine"] = fix.handicapLine
+                        }
+                        if (prev.getString("goalLine").isNullOrBlank()) {
                             updateFields["goalLine"] = fix.goalLine
+                        }
+                        if ((prev.getDouble("bodyOdds") ?: 0.0) <= 1.0) {
                             updateFields["bodyOdds"] = appliedBodyOdds
+                        }
+                        if ((prev.getDouble("goalOdds") ?: 0.0) <= 1.0) {
                             updateFields["goalOdds"] = appliedGoalOdds
+                        }
+                        if ((prev.getDouble("win1Odds") ?: 0.0) <= 1.0) {
                             updateFields["win1Odds"] = fix.win1Odds.coerceIn(1.01, 99.0)
+                        }
+                        if ((prev.getDouble("drawOdds") ?: 0.0) <= 1.0) {
                             updateFields["drawOdds"] = fix.drawOdds.coerceIn(1.01, 99.0)
+                        }
+                        if ((prev.getDouble("win2Odds") ?: 0.0) <= 1.0) {
                             updateFields["win2Odds"] = fix.win2Odds.coerceIn(1.01, 99.0)
+                        }
+                        if ((prev.getDouble("overOdds") ?: 0.0) <= 1.0) {
                             updateFields["overOdds"] = fix.overOdds.coerceIn(1.01, 99.0)
+                        }
+                        if ((prev.getDouble("underOdds") ?: 0.0) <= 1.0) {
                             updateFields["underOdds"] = fix.underOdds.coerceIn(1.01, 99.0)
-                            if (boardSource == "one_express") {
-                                updateFields["oneExpressKyay"] = oneExpKyay
-                            }
-                            if (boardSource == "five_five_five") {
-                                updateFields["fiveFiveFiveKyay"] = fffKyay
-                            }
-                        } else {
-                            if (boardSource == "one_express" && prev.getString("oneExpressKyay").isNullOrBlank()) {
-                                updateFields["oneExpressKyay"] = oneExpKyay
-                            }
-                            if (boardSource == "five_five_five" && prev.getString("fiveFiveFiveKyay").isNullOrBlank()) {
-                                updateFields["fiveFiveFiveKyay"] = fffKyay
-                            }
+                        }
+                        if (boardSource == "one_express" && prev.getString("oneExpressKyay").isNullOrBlank()) {
+                            updateFields["oneExpressKyay"] = oneExpKyay
+                        }
+                        if (boardSource == "five_five_five" && prev.getString("fiveFiveFiveKyay").isNullOrBlank()) {
+                            updateFields["fiveFiveFiveKyay"] = fffKyay
                         }
                         batch.update(docRef, updateFields)
                         syncedCount++
@@ -3514,11 +3613,17 @@ class HtetThuYaRepository(
             }
 
             if (currentConfig != null) {
+                val todayIso = feedService.todayDateIso()
+                val nextActiveFilter = when {
+                    cleanTargetDate != null -> cleanTargetDate
+                    currentConfig.activeMatchDateFilter.isNotBlank() && currentConfig.activeMatchDateFilter < todayIso -> ""
+                    else -> currentConfig.activeMatchDateFilter.trim().take(20)
+                }
                 db.collection("app_settings").document("board_config").set(
                     mapOf(
                         "autoSyncDailyMatches" to currentConfig.autoSyncDailyMatches,
                         "autoSyncLiveResults" to currentConfig.autoSyncLiveResults,
-                        "lastSyncedDate" to feedService.todayDateIso(),
+                        "lastSyncedDate" to todayIso,
                         "allowedLeagues" to currentConfig.allowedLeagues.take(80),
                         "autoSyncOneExpress" to currentConfig.autoSyncOneExpress,
                         "autoSyncFiveFiveFive" to currentConfig.autoSyncFiveFiveFive,
@@ -3526,7 +3631,7 @@ class HtetThuYaRepository(
                         "googleSheetEditUrl" to currentConfig.googleSheetEditUrl.trim().take(500),
                         "googleSheetWebhookUrl" to currentConfig.googleSheetWebhookUrl.trim().take(500),
                         "autoTwoWaySheetSync" to currentConfig.autoTwoWaySheetSync,
-                        "activeMatchDateFilter" to currentConfig.activeMatchDateFilter.trim().take(20),
+                        "activeMatchDateFilter" to nextActiveFilter,
                         "updatedBy" to adminUid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )

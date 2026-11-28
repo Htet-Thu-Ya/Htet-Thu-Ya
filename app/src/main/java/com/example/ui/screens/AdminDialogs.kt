@@ -74,6 +74,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Switch
 import com.example.data.betting.SettlementCalculator
 import com.example.data.model.AdminInvite
+import com.example.data.model.AdminMember
 import com.example.data.model.AdminPermissions
 import com.example.data.model.BetOrder
 import com.example.data.model.BettingConfig
@@ -781,51 +782,184 @@ fun ConfirmDeleteDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdjustUserBalanceDialog(
     user: UserAccount,
+    matchedAdminMember: AdminMember? = null,
+    isOwnerAdmin: Boolean = false,
     onDismiss: () -> Unit,
-    onAdjust: (deltaKs: Long, note: String) -> Unit
+    onAdjust: (deltaKs: Long, note: String) -> Unit,
+    onAdjustFloat: ((deltaKs: Long) -> Unit)? = null,
+    onTransferPlayBalanceToFloat: ((amountKs: Long) -> Unit)? = null
 ) {
-    var amountInput by remember { mutableStateOf("5000") }
+    val isSecondAdmin = isOwnerAdmin && matchedAdminMember != null && matchedAdminMember.role != "owner"
+    // mode: 0 = Second Admin Float (+/-), 1 = Transfer Play -> Float, 2 = Customer Play Balance (+/-)
+    var walletMode by remember(user.userId, isSecondAdmin) {
+        mutableIntStateOf(if (isSecondAdmin) 0 else 2)
+    }
+    var amountInput by remember(user.userId, isSecondAdmin) {
+        mutableStateOf(
+            if (isSecondAdmin && user.balanceKs > 0L) user.balanceKs.toString() else "5000"
+        )
+    }
     var isAdd by remember { mutableStateOf(true) }
     var note by remember { mutableStateOf("Admin ငွေစာရင်းပြင်ဆင်မှု") }
+    val parsedAmount = amountInput.toLongOrNull() ?: 0L
+    val transferTooHigh = walletMode == 1 && parsedAmount > user.balanceKs
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("${user.displayName} လက်ကျန်ငွေ ပြင်ရန်") },
+        title = {
+            Text(
+                if (isSecondAdmin) "${user.displayName} • ငွေစာရင်း / Second Admin Float"
+                else "${user.displayName} လက်ကျန်ငွေ ပြင်ရန်"
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 if (user.email.isNotBlank()) {
-                    Text(user.email, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                    Text(user.email, style = MaterialTheme.typography.bodyMedium)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = isAdd, onClick = { isAdd = true }, label = { Text("+ ထည့်မည်") })
-                    FilterChip(selected = !isAdd, onClick = { isAdd = false }, label = { Text("- နှုတ်မည်") })
+                if (isSecondAdmin && matchedAdminMember != null) {
+                    Surface(
+                        color = Color(0xFFECFDF5),
+                        border = BorderStroke(1.dp, PitchEmeraldDark.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Second Admin Wallet နှစ်မျိုး ခွဲခြားချက်:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = PitchEmeraldDark
+                            )
+                            Text(
+                                text = "• Customer Play Balance (ထိုးငွေ): ${formatKs(user.balanceKs)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = InkDark
+                            )
+                            Text(
+                                text = "• Second Admin Float (ငွေသွင်း/ထုတ်ရန်): ${formatKs(matchedAdminMember.walletBalanceKs)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0369A1)
+                            )
+                            Text(
+                                text = "Customer ငွေသွင်း/ထုတ် အတည်ပြုရာတွင် Second Admin Float မှသာ လျော့/တိုး ဖြစ်ပါသည်။",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = InkMuted
+                            )
+                        }
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        FilterChip(
+                            selected = walletMode == 0,
+                            onClick = { walletMode = 0 },
+                            label = { Text("Float (+/-)") },
+                            modifier = Modifier.testTag("adjust_mode_float")
+                        )
+                        if (onTransferPlayBalanceToFloat != null && user.balanceKs > 0L) {
+                            FilterChip(
+                                selected = walletMode == 1,
+                                onClick = {
+                                    walletMode = 1
+                                    amountInput = user.balanceKs.toString()
+                                },
+                                label = { Text("Play -> Float ပြောင်း") },
+                                modifier = Modifier.testTag("adjust_mode_transfer")
+                            )
+                        }
+                        FilterChip(
+                            selected = walletMode == 2,
+                            onClick = { walletMode = 2 },
+                            label = { Text("Play Balance (+/-)") },
+                            modifier = Modifier.testTag("adjust_mode_play")
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "လက်ရှိ Play Balance: ${formatKs(user.balanceKs)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (walletMode != 1) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = isAdd, onClick = { isAdd = true }, label = { Text("+ ထည့်မည်") })
+                        FilterChip(selected = !isAdd, onClick = { isAdd = false }, label = { Text("- နှုတ်မည်") })
+                    }
                 }
                 OutlinedTextField(
                     value = amountInput,
-                    onValueChange = { amountInput = it.filter { c -> c.isDigit() }.take(8) },
-                    label = { Text("ပမာဏ (Ks)") },
+                    onValueChange = { amountInput = it.filter { c -> c.isDigit() }.take(9) },
+                    label = {
+                        Text(
+                            when (walletMode) {
+                                0 -> "Second Admin Float ပမာဏ (Ks)"
+                                1 -> "Float သို့ ပြောင်းမည့်ပမာဏ (အများဆုံး ${formatKs(user.balanceKs)})"
+                                else -> "Play Balance ပမာဏ (Ks)"
+                            }
+                        )
+                    },
+                    isError = transferTooHigh,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("adjust_balance_amount_input")
                 )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("မှတ်ချက်") },
-                    singleLine = true
-                )
+                if (transferTooHigh) {
+                    Text(
+                        text = "Play Balance (${formatKs(user.balanceKs)}) ထက် မကျော်နိုင်ပါ",
+                        color = AdminCrimson,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (walletMode == 2) {
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text("မှတ်ချက်") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Spacer(Modifier.height(2.dp))
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val amt = amountInput.toLongOrNull() ?: 0L
-                    if (amt > 0L) onAdjust(if (isAdd) amt else -amt, note)
-                }
-            ) { Text("အတည်ပြုမည်") }
+                    val amt = parsedAmount
+                    if (amt <= 0L) return@Button
+                    when (walletMode) {
+                        0 -> onAdjustFloat?.invoke(if (isAdd) amt else -amt)
+                        1 -> if (amt <= user.balanceKs) onTransferPlayBalanceToFloat?.invoke(amt)
+                        else -> onAdjust(if (isAdd) amt else -amt, note)
+                    }
+                },
+                enabled = parsedAmount > 0L && !transferTooHigh,
+                modifier = Modifier.testTag("adjust_balance_confirm_button")
+            ) {
+                Text(
+                    when (walletMode) {
+                        0 -> "Float အတည်ပြုမည်"
+                        1 -> "Float သို့ ပြောင်းမည်"
+                        else -> "အတည်ပြုမည်"
+                    }
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("ပိတ်မည်") }

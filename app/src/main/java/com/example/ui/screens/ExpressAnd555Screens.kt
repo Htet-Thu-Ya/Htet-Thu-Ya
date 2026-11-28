@@ -94,9 +94,12 @@ import com.example.data.model.SystemGameConfig
 import com.example.data.model.UiState
 import com.example.data.network.FootballFeedService
 import com.example.data.util.MyanmarTimeUtil
+import com.example.ui.components.AdminCalendarDateBar
+import com.example.ui.components.AdminLeagueHideBarSection
 import com.example.ui.components.BoardGreenAccent
 import com.example.ui.components.BoardMatchInfoDialog
 import com.example.ui.components.BoardTopBarBg
+import com.example.ui.components.ConfirmAutoSyncDialog
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.FiveFiveFiveDarkCanvas
 import com.example.ui.components.FiveFiveFiveLeagueHeaderStrip
@@ -173,8 +176,10 @@ fun ExpressOddsOrderScreen(
     var selectedLeaguesFilter by remember(boardMode) { mutableStateOf<Set<String>>(emptySet()) }
     var searchQuery by remember(boardMode) { mutableStateOf("") }
     var showSearchBar by remember(boardMode) { mutableStateOf(false) }
+    val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var selectedDateFilter by remember(boardMode, boardConfig.activeMatchDateFilter) {
-        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
     var showLeagueFilterDialog by remember { mutableStateOf(false) }
     var infoMatch by remember { mutableStateOf<SportMatch?>(null) }
@@ -217,6 +222,12 @@ fun ExpressOddsOrderScreen(
             .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
             .distinct()
             .sorted()
+    }
+
+    LaunchedEffect(availableDates, boardConfig.activeMatchDateFilter) {
+        if (selectedDateFilter.isNotBlank() && availableDates.isNotEmpty() && selectedDateFilter !in availableDates) {
+            selectedDateFilter = ""
+        }
     }
 
     val filteredMatches = remember(openMatches, selectedLeaguesFilter, selectedDateFilter, searchQuery) {
@@ -724,7 +735,7 @@ fun AdminExpressBoardTab(
     matches: List<SportMatch>,
     boardConfig: BoardConfig,
     busy: Boolean,
-    onSyncNow: () -> Unit,
+    onSyncNow: (String?) -> Unit,
     onSyncLiveResultsNow: () -> Unit,
     onAutoSettleNow: () -> Unit,
     onToggleAutoSync: (Boolean) -> Unit,
@@ -808,17 +819,13 @@ fun AdminExpressBoardTab(
     val accent = if (isOneExpress) Color(0xFF38BDF8) else ChampionshipGold
     val autoEnabled = if (isOneExpress) boardConfig.autoSyncOneExpress else boardConfig.autoSyncFiveFiveFive
     var adminSearchQuery by remember(boardMode) { mutableStateOf("") }
+    val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var adminDateFilter by remember(boardMode, boardConfig.activeMatchDateFilter) {
-        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
     val boardMatches = remember(matches, boardMode) {
         matches.filter { it.boardSource == boardMode }
-    }
-    val adminAvailableDates = remember(boardMatches) {
-        boardMatches.map { it.matchDate.trim() }
-            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
-            .distinct()
-            .sorted()
     }
     val filteredMatches = remember(boardMatches, adminSearchQuery, adminDateFilter) {
         val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
@@ -833,6 +840,7 @@ fun AdminExpressBoardTab(
     }
 
     var showAutoSyncCard by remember(boardMode) { mutableStateOf(true) }
+    var showSyncConfirm by remember(boardMode) { mutableStateOf(false) }
     var showSheetDialog by remember(boardMode) { mutableStateOf(false) }
     var showMatchesTable by remember(boardMode) { mutableStateOf(true) }
     val adminExpandedLeagues = remember(boardMode) { mutableStateMapOf<String, Boolean>() }
@@ -851,9 +859,6 @@ fun AdminExpressBoardTab(
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var deleteConfirmMatch by remember { mutableStateOf<SportMatch?>(null) }
-    var selectedLeagues by remember(boardConfig.allowedLeagues) {
-        mutableStateOf(boardConfig.allowedLeagues.toSet())
-    }
 
     LazyColumn(
         modifier = Modifier
@@ -972,7 +977,7 @@ fun AdminExpressBoardTab(
 
                     if (showAutoSyncCard) {
                         Button(
-                            onClick = onSyncNow,
+                            onClick = { showSyncConfirm = true },
                             enabled = !busy,
                             colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark, contentColor = Color.White),
                             modifier = Modifier
@@ -982,9 +987,12 @@ fun AdminExpressBoardTab(
                         ) {
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
+                            val dateTag = if (adminDateFilter.isBlank()) "ယနေ့" else adminDateFilter
                             Text(
-                                text = if (isOneExpress) "ယနေ့ 1xBET ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်" else "ယနေ့ 555 Mix ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်",
-                                fontWeight = FontWeight.Bold
+                                text = if (isOneExpress) "$dateTag 1xBET ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်" else "$dateTag 555 Mix ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်",
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Button(
@@ -1058,41 +1066,13 @@ fun AdminExpressBoardTab(
 
                         HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
 
-                        Text(
-                            text = if (selectedLeagues.isEmpty()) "ဖွင့်လှစ်မည့် ဖလား/လိဂ်: အားလုံး (All)"
-                            else "ရွေးချယ်ထားသော လိဂ် (${selectedLeagues.size})",
-                            color = ChampionshipGold,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                        AdminLeagueHideBarSection(
+                            selectedLeagues = boardConfig.allowedLeagues,
+                            busy = busy,
+                            accentColor = accent,
+                            testTagPrefix = "admin_leagues_$boardMode",
+                            onSaveAllowedLeagues = onSaveAllowedLeagues
                         )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            FilterChip(
-                                selected = selectedLeagues.isEmpty(),
-                                onClick = { selectedLeagues = emptySet() },
-                                label = { Text("အားလုံး (All)") }
-                            )
-                            FootballFeedService.DEFAULT_LEAGUE_OPTIONS.forEach { leagueName ->
-                                val picked = selectedLeagues.contains(leagueName)
-                                FilterChip(
-                                    selected = picked,
-                                    onClick = {
-                                        selectedLeagues = if (picked) selectedLeagues - leagueName else selectedLeagues + leagueName
-                                    },
-                                    label = { Text(leagueName) }
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = { onSaveAllowedLeagues(selectedLeagues.toList()) },
-                            enabled = !busy,
-                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("save_allowed_leagues_$boardMode")
-                        ) {
-                            Text("ဖလား/လိဂ် ရွေးချယ်မှု သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
-                        }
                         OutlinedButton(
                             onClick = onSeedSampleBoard,
                             enabled = !busy,
@@ -1199,46 +1179,15 @@ fun AdminExpressBoardTab(
                             .fillMaxWidth()
                             .testTag("admin_search_$boardMode")
                     )
-                    if (adminAvailableDates.isNotEmpty()) {
-                        val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
-                        val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(adminNowMs + 86_400_000L) }
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            item {
-                                FilterChip(
-                                    selected = adminDateFilter.isBlank(),
-                                    onClick = { adminDateFilter = "" },
-                                    label = { Text("အားလုံး") }
-                                )
-                            }
-                            items(adminAvailableDates) { d ->
-                                val label = when (d) {
-                                    todayIso -> "ယနေ့ ($d)"
-                                    tomorrowIso -> "မနက်ဖြန် ($d)"
-                                    else -> d
-                                }
-                                FilterChip(
-                                    selected = adminDateFilter == d,
-                                    onClick = { adminDateFilter = d },
-                                    label = { Text(label) }
-                                )
-                            }
-                            item {
-                                OutlinedButton(
-                                    onClick = { onSaveActiveMatchDateFilter(adminDateFilter) },
-                                    enabled = !busy,
-                                    border = BorderStroke(1.dp, accent.copy(alpha = 0.7f)),
-                                    modifier = Modifier.testTag("pin_active_date_$boardMode")
-                                ) {
-                                    Text(
-                                        text = if (adminDateFilter.isBlank()) "Customer အားလုံးပြ Pin" else "Pin ရက်",
-                                        color = accent,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    AdminCalendarDateBar(
+                        selectedDateIso = adminDateFilter,
+                        pinnedDateIso = boardConfig.activeMatchDateFilter,
+                        busy = busy,
+                        accentColor = accent,
+                        testTagPrefix = "${boardMode}_date",
+                        onSelectDate = { adminDateFilter = it },
+                        onPinDate = onSaveActiveMatchDateFilter
+                    )
                 }
             }
         }
@@ -1480,6 +1429,18 @@ fun AdminExpressBoardTab(
             },
             dismissButton = {
                 TextButton(onClick = { deleteConfirmMatch = null }) { Text("မဖျက်တော့ပါ") }
+            }
+        )
+    }
+
+    if (showSyncConfirm) {
+        ConfirmAutoSyncDialog(
+            boardTitle = boardTitle,
+            targetDateIso = adminDateFilter.ifBlank { null },
+            onDismiss = { showSyncConfirm = false },
+            onConfirm = {
+                showSyncConfirm = false
+                onSyncNow(adminDateFilter.ifBlank { null })
             }
         )
     }

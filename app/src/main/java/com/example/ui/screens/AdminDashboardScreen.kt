@@ -14,12 +14,15 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -126,7 +129,10 @@ import com.example.data.model.WalletConfig
 import com.example.data.model.WalletRequest
 import com.example.data.network.FootballFeedService
 import com.example.data.util.MyanmarTimeUtil
+import com.example.ui.components.AdminCalendarDateBar
+import com.example.ui.components.AdminLeagueHideBarSection
 import com.example.ui.components.BrandLogoAvatar
+import com.example.ui.components.ConfirmAutoSyncDialog
 import com.example.ui.components.FullScreenReceiptDialog
 import com.example.ui.components.HideBarSectionHeader
 import com.example.ui.components.LeagueHideBarHeader
@@ -160,15 +166,15 @@ private enum class AdminTabKey {
     LOTTERY_2D3D_ROOM,
     MINI_GAMES,
     CUSTOMERS,
-    FINANCE,
+    CHAT,
     SUB_ADMINS,
+    FINANCE,
     MY_PROFILE,
     BRANDING,
     SYSTEM_SETTINGS,
     SECURITY,
-    AUDIT_LOGS,
-    CHAT,
-    UPDATE_QUALITY
+    UPDATE_QUALITY,
+    AUDIT_LOGS
 }
 
 private fun maskEmailForSubAdmin(email: String): String {
@@ -255,12 +261,12 @@ fun AdminDashboardScreen(
     onDeleteLotteryDraw: (String) -> Unit,
     onSeedSampleBoard: () -> Unit,
     onSeedSampleExpressBoard: (String) -> Unit = {},
-    onSyncDailyMatchesNow: () -> Unit,
+    onSyncDailyMatchesNow: (String?) -> Unit,
     onSyncLiveResultsNow: () -> Unit,
     onToggleAutoDailyMatches: (Boolean) -> Unit,
     onToggleAutoLiveResults: (Boolean) -> Unit,
-    onSyncOneExpressNow: () -> Unit = {},
-    onSync555Now: () -> Unit = {},
+    onSyncOneExpressNow: (String?) -> Unit = {},
+    onSync555Now: (String?) -> Unit = {},
     onToggleAutoOneExpress: (Boolean) -> Unit = {},
     onToggleAuto555: (Boolean) -> Unit = {},
     onSaveAllowedLeagues: (List<String>) -> Unit = {},
@@ -271,6 +277,7 @@ fun AdminDashboardScreen(
     onPushToGoogleSheetWebhook: () -> Unit = {},
     onSaveActiveMatchDateFilter: (String) -> Unit = {},
     onAllocateAdminFloat: (String, String, Long) -> Unit = { _, _, _ -> },
+    onTransferUserBalanceToAdminFloat: (String, String, Long) -> Unit = { _, _, _ -> },
     onSaveNewMatchWithDate: ((String, String, String, String, String, String, Double, Double, String, String, String, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null,
     onUpdateMatchDetailsWithDate: ((String, String, String, String, String, String, String, Double, Double, String, Long, Long, String?, String?, com.example.data.model.OneXBetOddsSpec?, String) -> Unit)? = null,
     onImportCsvText: (String, String) -> Unit = { _, _ -> },
@@ -332,9 +339,12 @@ fun AdminDashboardScreen(
             if (isOwnerAdmin || permissions.canViewUsers) {
                 add(AdminTabKey.CUSTOMERS)
             }
+            if (isOwnerAdmin || permissions.canChat) {
+                add(AdminTabKey.CHAT)
+            }
             if (isOwnerAdmin) {
-                add(AdminTabKey.FINANCE)
                 add(AdminTabKey.SUB_ADMINS)
+                add(AdminTabKey.FINANCE)
             }
             add(AdminTabKey.MY_PROFILE)
             if (isOwnerAdmin) {
@@ -342,13 +352,10 @@ fun AdminDashboardScreen(
                 add(AdminTabKey.SYSTEM_SETTINGS)
                 add(AdminTabKey.SECURITY)
             }
-            add(AdminTabKey.AUDIT_LOGS)
-            if (isOwnerAdmin || permissions.canChat) {
-                add(AdminTabKey.CHAT)
-            }
             if (isOwnerAdmin || permissions.canEditGameConfig) {
                 add(AdminTabKey.UPDATE_QUALITY)
             }
+            add(AdminTabKey.AUDIT_LOGS)
         }
     }
 
@@ -393,6 +400,7 @@ fun AdminDashboardScreen(
     val miniGameRounds = (allMiniGameRoundsState as? UiState.Success)?.data ?: emptyList()
     val allTransactions = (allTransactionsState as? UiState.Success)?.data ?: emptyList()
     val usersById = remember(users) { users.associateBy { it.userId } }
+    val adminsById = remember(admins) { admins.associateBy { it.userId } }
     val matchesById = remember(matches) { matches.associateBy { it.id } }
 
     val pendingOrderCount = orders.count { it.status == "pending" }
@@ -402,6 +410,7 @@ fun AdminDashboardScreen(
 
     Scaffold(
         containerColor = DeepPitchBg,
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             Column(
                 modifier = Modifier
@@ -411,8 +420,8 @@ fun AdminDashboardScreen(
                             colors = listOf(Color(0xFF3E0E12), Color(0xFF1F1612))
                         )
                     )
-                    .safeDrawingPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -420,39 +429,41 @@ fun AdminDashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        BrandLogoAvatar(brandingConfig = brandingConfig, size = 40.dp)
-                        Spacer(Modifier.width(10.dp))
+                        BrandLogoAvatar(brandingConfig = brandingConfig, size = 30.dp)
+                        Spacer(Modifier.width(8.dp))
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text(
                                     "${brandingConfig.appName.ifBlank { "လိုတရ" }} Admin",
                                     color = ChampionshipGold,
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Surface(
                                     color = if (isOwnerAdmin) ChampionshipGold else Color(0xFF0284C7),
-                                    shape = RoundedCornerShape(6.dp)
+                                    shape = RoundedCornerShape(5.dp)
                                 ) {
                                     Text(
-                                        text = if (isOwnerAdmin) "MAIN ADMIN" else "SECOND ADMIN",
+                                        text = if (isOwnerAdmin) "MAIN" else "SECOND",
                                         color = if (isOwnerAdmin) InkDark else Color.White,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                     )
                                 }
                             }
-                            Text(
-                                if (isOwnerAdmin) "စနစ်တစ်ခုလုံး စီမံခန့်ခွဲမှု Dashboard"
-                                else "ခွင့်ပြုထားသော ကဏ္ဍများ (Scoped Dashboard)",
-                                color = Color(0xFFE5D2D4),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            if (!isOwnerAdmin && adminMember != null) {
+                                Text(
+                                    text = "Float: ${formatKs(adminMember.walletBalanceKs)}",
+                                    color = Color(0xFF38BDF8),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
 
@@ -460,24 +471,24 @@ fun AdminDashboardScreen(
                         IconButton(
                             onClick = onRefreshAll,
                             enabled = !busy,
-                            modifier = Modifier.testTag("admin_refresh_button")
+                            modifier = Modifier.size(38.dp).testTag("admin_refresh_button")
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = ChampionshipGold)
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = ChampionshipGold, modifier = Modifier.size(20.dp))
                         }
                         Surface(
                             color = PitchEmeraldDark,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .clickable(onClick = onSwitchToCustomer)
                                 .testTag("switch_to_customer_button")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Storefront, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Customer", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                                Icon(Icons.Default.Storefront, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Customer", color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -488,7 +499,9 @@ fun AdminDashboardScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .navigationBarsPadding()
+                .imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             ScrollableTabRow(
@@ -717,6 +730,8 @@ fun AdminDashboardScreen(
                     )
                     AdminTabKey.CUSTOMERS -> AdminCustomersTab(
                         users = users,
+                        adminsById = adminsById,
+                        isOwnerAdmin = isOwnerAdmin,
                         orders = orders,
                         busy = busy,
                         maskCustomerPii = maskCustomerPii,
@@ -917,10 +932,20 @@ fun AdminDashboardScreen(
     adjustingUser?.let { target ->
         AdjustUserBalanceDialog(
             user = target,
+            matchedAdminMember = adminsById[target.userId],
+            isOwnerAdmin = isOwnerAdmin,
             onDismiss = { adjustingUser = null },
             onAdjust = { delta, note ->
                 adjustingUser = null
                 onAdjustUserBalance(target.userId, delta, note)
+            },
+            onAdjustFloat = { delta ->
+                adjustingUser = null
+                onAllocateAdminFloat(target.userId, target.displayName.ifBlank { "Second Admin" }, delta)
+            },
+            onTransferPlayBalanceToFloat = { amt ->
+                adjustingUser = null
+                onTransferUserBalanceToAdminFloat(target.userId, target.displayName.ifBlank { "Second Admin" }, amt)
             }
         )
     }
@@ -971,7 +996,6 @@ private fun AdminOrdersTab(
     var filter by remember { mutableStateOf("pending") }
     var groupByCustomer by remember { mutableStateOf(true) }
     var showHiddenOrders by remember { mutableStateOf(false) }
-    var showExpressShortcuts by remember { mutableStateOf(true) }
     var showAutoAcceptCard by remember { mutableStateOf(true) }
     var showOrderFilters by remember { mutableStateOf(true) }
     var showCommissionSettings by remember { mutableStateOf(false) }
@@ -1024,104 +1048,6 @@ private fun AdminOrdersTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (canManageBoard) {
-            item {
-                HideBarSectionHeader(
-                    title = "1xBET / 555 Mix အမြန်ဝင်ခလုတ်များ",
-                    countBadge = "2",
-                    isVisible = showExpressShortcuts,
-                    onToggle = { showExpressShortcuts = !showExpressShortcuts },
-                    testTag = "hide_bar_admin_orders_express_shortcuts"
-                )
-            }
-            if (showExpressShortcuts) {
-                item {
-                    val oneExpressOpenCount = remember(matches) {
-                        matches.count { it.boardSource == "one_express" && it.status == "open" }
-                    }
-                    val fffOpenCount = remember(matches) {
-                        matches.count { it.boardSource == "five_five_five" && it.status == "open" }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Card(
-                            onClick = onOpenOneExpressBoard,
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3B)),
-                            border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.7f)),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.weight(1f).testTag("admin_box_one_express")
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        "1xBET ကြေး",
-                                        color = Color(0xFF38BDF8),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Text(
-                                    text = "$oneExpressOpenCount ပွဲဖွင့် • Auto ${if (boardConfig.autoSyncOneExpress) "ON" else "OFF"}",
-                                    color = Color(0xFFE0F2FE),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                Text(
-                                    text = "နှိပ်၍ ပြုပြင်/Sync မည် ->",
-                                    color = Color(0xFF7DD3FC),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                        Card(
-                            onClick = onOpen555Board,
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B210B)),
-                            border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.weight(1f).testTag("admin_box_five_five_five")
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ChampionshipGold, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        "555 Mix ဘောလုံးကြေး",
-                                        color = ChampionshipGold,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Text(
-                                    text = "$fffOpenCount ပွဲဖွင့် • Auto ${if (boardConfig.autoSyncFiveFiveFive) "ON" else "OFF"}",
-                                    color = Color(0xFFFEF3C7),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                Text(
-                                    text = "နှိပ်၍ ပြုပြင်/Sync မည် ->",
-                                    color = ChampionshipGold,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
         if (canEditGameConfig) {
             item {
                 Card(
@@ -2124,7 +2050,7 @@ private fun AdminBoardTab(
     onUpdateLotteryDraw: (String, String, String, Double, String, String) -> Unit,
     onDeleteLotteryDraw: (String) -> Unit,
     onSeedSampleBoard: () -> Unit,
-    onSyncDailyMatchesNow: () -> Unit,
+    onSyncDailyMatchesNow: (String?) -> Unit,
     onSyncLiveResultsNow: () -> Unit,
     onToggleAutoDailyMatches: (Boolean) -> Unit,
     onToggleAutoLiveResults: (Boolean) -> Unit,
@@ -2142,14 +2068,10 @@ private fun AdminBoardTab(
         matches.filter { it.boardSource.isBlank() || it.boardSource == "standard" }
     }
     var adminSearchQuery by remember { mutableStateOf("") }
+    val todayIsoInit = remember { MyanmarTimeUtil.todayIsoDate() }
     var adminDateFilter by remember(boardConfig.activeMatchDateFilter) {
-        mutableStateOf(boardConfig.activeMatchDateFilter.trim())
-    }
-    val adminAvailableDates = remember(standardMatches) {
-        standardMatches.map { it.matchDate.trim() }
-            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
-            .distinct()
-            .sorted()
+        val raw = boardConfig.activeMatchDateFilter.trim()
+        mutableStateOf(if (raw.isNotBlank() && raw < todayIsoInit) "" else raw)
     }
     val filteredStandardMatches = remember(standardMatches, adminSearchQuery, adminDateFilter) {
         val q = adminSearchQuery.trim().lowercase(java.util.Locale.US)
@@ -2164,6 +2086,7 @@ private fun AdminBoardTab(
     }
     var showAddMatch by remember { mutableStateOf(false) }
     var showSheetDialog by remember { mutableStateOf(false) }
+    var showSyncConfirm by remember { mutableStateOf(false) }
     var editingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var deletingMatch by remember { mutableStateOf<SportMatch?>(null) }
     var showAddDraw by remember { mutableStateOf(false) }
@@ -2184,9 +2107,6 @@ private fun AdminBoardTab(
         filteredStandardMatches
             .groupBy { FootballFeedService.canonicalLeagueName(it.league) }
             .toSortedMap(compareBy({ FootballFeedService.leagueSortOrderIndex(it) }, { it }))
-    }
-    var selectedLeagues by remember(boardConfig.allowedLeagues) {
-        mutableStateOf(boardConfig.allowedLeagues.toSet())
     }
 
     LazyColumn(
@@ -2245,14 +2165,15 @@ private fun AdminBoardTab(
 
                     if (showAutoSyncCard) {
                         Button(
-                            onClick = onSyncDailyMatchesNow,
+                            onClick = { showSyncConfirm = true },
                             enabled = !busy,
                             colors = ButtonDefaults.buttonColors(containerColor = PitchEmeraldDark),
                             modifier = Modifier.fillMaxWidth().testTag("sync_daily_matches_button")
                         ) {
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("ယနေ့ ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်")
+                            val dateTag = if (adminDateFilter.isBlank()) "ယနေ့" else adminDateFilter
+                            Text("$dateTag ပွဲစဉ်များ အလိုအလျောက်ထည့်မည်", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Button(
                             onClick = onSyncLiveResultsNow,
@@ -2302,38 +2223,13 @@ private fun AdminBoardTab(
                             )
                         }
                         HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-                        Text(
-                            text = if (selectedLeagues.isEmpty()) "ဖွင့်လှစ်မည့် ဖလား/လိဂ်: အားလုံး (All)"
-                            else "ရွေးချယ်ထားသော လိဂ် (${selectedLeagues.size})",
-                            color = ChampionshipGold,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                        AdminLeagueHideBarSection(
+                            selectedLeagues = boardConfig.allowedLeagues,
+                            busy = busy,
+                            accentColor = ChampionshipGold,
+                            testTagPrefix = "admin_leagues_standard",
+                            onSaveAllowedLeagues = onSaveAllowedLeagues
                         )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            FilterChip(
-                                selected = selectedLeagues.isEmpty(),
-                                onClick = { selectedLeagues = emptySet() },
-                                label = { Text("အားလုံး (All)") }
-                            )
-                            FootballFeedService.DEFAULT_LEAGUE_OPTIONS.forEach { leagueName ->
-                                val picked = selectedLeagues.contains(leagueName)
-                                FilterChip(
-                                    selected = picked,
-                                    onClick = {
-                                        selectedLeagues = if (picked) selectedLeagues - leagueName else selectedLeagues + leagueName
-                                    },
-                                    label = { Text(leagueName) }
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = { onSaveAllowedLeagues(selectedLeagues.toList()) },
-                            enabled = !busy,
-                            colors = ButtonDefaults.buttonColors(containerColor = ChampionshipGold, contentColor = InkDark),
-                            modifier = Modifier.fillMaxWidth().testTag("save_allowed_leagues_button")
-                        ) {
-                            Text("ဖလား/လိဂ် ရွေးချယ်မှု သိမ်းဆည်းမည်", fontWeight = FontWeight.Bold)
-                        }
                         OutlinedButton(
                             onClick = onSeedSampleBoard,
                             modifier = Modifier.fillMaxWidth().testTag("seed_sample_board_button")
@@ -2493,46 +2389,15 @@ private fun AdminBoardTab(
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("admin_search_standard")
                     )
-                    if (adminAvailableDates.isNotEmpty()) {
-                        val todayIso = remember { MyanmarTimeUtil.todayIsoDate() }
-                        val tomorrowIso = remember { MyanmarTimeUtil.formatMatchDateIso(adminNowMs + 86_400_000L) }
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            item {
-                                FilterChip(
-                                    selected = adminDateFilter.isBlank(),
-                                    onClick = { adminDateFilter = "" },
-                                    label = { Text("အားလုံး") }
-                                )
-                            }
-                            items(adminAvailableDates) { d ->
-                                val label = when (d) {
-                                    todayIso -> "ယနေ့ ($d)"
-                                    tomorrowIso -> "မနက်ဖြန် ($d)"
-                                    else -> d
-                                }
-                                FilterChip(
-                                    selected = adminDateFilter == d,
-                                    onClick = { adminDateFilter = d },
-                                    label = { Text(label) }
-                                )
-                            }
-                            item {
-                                OutlinedButton(
-                                    onClick = { onSaveActiveMatchDateFilter(adminDateFilter) },
-                                    enabled = !busy,
-                                    border = BorderStroke(1.dp, ChampionshipGold.copy(alpha = 0.7f)),
-                                    modifier = Modifier.testTag("pin_active_date_standard")
-                                ) {
-                                    Text(
-                                        text = if (adminDateFilter.isBlank()) "Customer အားလုံးပြ Pin" else "Pin ရက်",
-                                        color = ChampionshipGold,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    AdminCalendarDateBar(
+                        selectedDateIso = adminDateFilter,
+                        pinnedDateIso = boardConfig.activeMatchDateFilter,
+                        busy = busy,
+                        accentColor = ChampionshipGold,
+                        testTagPrefix = "standard_date",
+                        onSelectDate = { adminDateFilter = it },
+                        onPinDate = onSaveActiveMatchDateFilter
+                    )
                 }
             }
         }
@@ -2735,6 +2600,18 @@ private fun AdminBoardTab(
             }
         )
     }
+    if (showSyncConfirm) {
+        ConfirmAutoSyncDialog(
+            boardTitle = "Standard ဘောလုံးပွဲစဉ်များ",
+            targetDateIso = adminDateFilter.ifBlank { null },
+            onDismiss = { showSyncConfirm = false },
+            onConfirm = {
+                showSyncConfirm = false
+                onSyncDailyMatchesNow(adminDateFilter.ifBlank { null })
+            }
+        )
+    }
+
     if (showSheetDialog) {
         MatchSheetSyncDialog(
             boardMode = "standard",
@@ -2760,6 +2637,8 @@ private fun AdminBoardTab(
 @Composable
 private fun AdminCustomersTab(
     users: List<UserAccount>,
+    adminsById: Map<String, AdminMember> = emptyMap(),
+    isOwnerAdmin: Boolean = true,
     orders: List<BetOrder>,
     busy: Boolean,
     maskCustomerPii: Boolean = false,
@@ -2872,6 +2751,8 @@ private fun AdminCustomersTab(
             items(filteredUsers, key = { it.userId }) { user ->
                 val userOrders = ordersByUser[user.userId].orEmpty()
                 val activeCount = userOrders.count { it.status in listOf("pending", "accepted") }
+                val matchedAdmin = adminsById[user.userId]
+                val isSecondAdminUser = matchedAdmin != null && matchedAdmin.role != "owner"
                 val custSummary = remember(user, userOrders) {
                     SettlementCalculator.summarizeCustomer(user.userId, user, userOrders)
                 }
@@ -2906,6 +2787,17 @@ private fun AdminCustomersTab(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         OnlineStatusDot(isOnline = user.isOnline, lastSeenTs = user.lastSeenAt)
+                                        if (isSecondAdminUser) {
+                                            Surface(color = Color(0xFF0284C7), shape = RoundedCornerShape(4.dp)) {
+                                                Text(
+                                                    "2ND ADMIN",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
                                         if (user.isLocked) {
                                             Surface(color = AdminCrimson, shape = RoundedCornerShape(4.dp)) {
                                                 Text(
@@ -2926,6 +2818,17 @@ private fun AdminCustomersTab(
                                                 )
                                             }
                                         }
+                                    }
+                                    if (isSecondAdminUser && matchedAdmin != null) {
+                                        Text(
+                                            text = "Second Admin Float: ${formatKs(matchedAdmin.walletBalanceKs)}",
+                                            color = Color(0xFF0369A1),
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
                                     if (!isExpanded) {
                                         Text(
@@ -3051,7 +2954,12 @@ private fun AdminCustomersTab(
                                             .weight(1f)
                                             .testTag("adjust_balance_${user.userId}")
                                     ) {
-                                        Text("ငွေ (+/-)", color = InkDark, maxLines = 1)
+                                        Text(
+                                            if (isOwnerAdmin && isSecondAdminUser) "Float / ငွေ (+/-)" else "ငွေ (+/-)",
+                                            color = if (isOwnerAdmin && isSecondAdminUser) Color(0xFF0369A1) else InkDark,
+                                            fontWeight = if (isOwnerAdmin && isSecondAdminUser) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                                 Button(

@@ -2102,17 +2102,24 @@ class MainViewModel(
         res.map { }
     }
 
-    fun syncDailyMatchesNow() {
+    fun syncDailyMatchesNow(targetDateIso: String? = null) {
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.syncDailyMatchesFromFeed(feedService, listOf(0, 1), boardConfig.value)
+                val cleanDate = targetDateIso?.trim()?.takeIf { it.isNotBlank() }
+                val res = repository.syncDailyMatchesFromFeed(
+                    feedService = feedService,
+                    dayOffsets = listOf(0, 1),
+                    currentConfig = boardConfig.value,
+                    targetDateIso = cleanDate
+                )
                 res.onSuccess { count ->
+                    val label = cleanDate ?: "ယနေ့/မနက်ဖြန်"
                     if (count > 0) {
-                        _events.emit("ယနေ့/မနက်ဖြန် ဘောလုံးပွဲစဉ် $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
-                        logAuditAsync("Synced daily matches", "board", "matches", "", "Count=$count")
+                        _events.emit("$label ဘောလုံးပွဲစဉ် $count ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced daily matches", "board", "matches", "", "Date=$label Count=$count")
                     } else {
-                        _events.emit("ယနေ့အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                        _events.emit("$label အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
@@ -2124,23 +2131,31 @@ class MainViewModel(
         }
     }
 
-    fun syncOneExpressMatchesNow() {
+    fun syncOneExpressMatchesNow(targetDateIso: String? = null) {
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.syncBoardMatchesFromFeed("one_express", feedService, listOf(0, 1), boardConfig.value)
+                val cleanDate = targetDateIso?.trim()?.takeIf { it.isNotBlank() }
+                val res = repository.syncBoardMatchesFromFeed(
+                    boardSource = "one_express",
+                    feedService = feedService,
+                    dayOffsets = listOf(0, 1),
+                    currentConfig = boardConfig.value,
+                    targetDateIso = cleanDate
+                )
                 res.onSuccess { outcome ->
+                    val label = cleanDate ?: "ယနေ့/မနက်ဖြန်"
                     if (outcome.syncedCount > 0) {
-                        _events.emit("1xBET ပွဲကြေး ${outcome.syncedCount} ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ (လိုတရ APK ကြေး x1.90)")
+                        _events.emit("$label 1xBET ပွဲကြေး ${outcome.syncedCount} ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ (လိုတရ APK ကြေး x1.90)")
                         logAuditAsync(
                             "Synced 1xBET board",
                             "board",
                             "one_express",
                             "",
-                            "Count=${outcome.syncedCount}"
+                            "Date=$label Count=${outcome.syncedCount}"
                         )
                     } else {
-                        _events.emit("1xBET အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                        _events.emit("$label 1xBET အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
@@ -2152,17 +2167,25 @@ class MainViewModel(
         }
     }
 
-    fun sync555MatchesNow() {
+    fun sync555MatchesNow(targetDateIso: String? = null) {
         viewModelScope.launch {
             _busy.value = true
             try {
-                val res = repository.syncBoardMatchesFromFeed("five_five_five", feedService, listOf(0, 1), boardConfig.value)
+                val cleanDate = targetDateIso?.trim()?.takeIf { it.isNotBlank() }
+                val res = repository.syncBoardMatchesFromFeed(
+                    boardSource = "five_five_five",
+                    feedService = feedService,
+                    dayOffsets = listOf(0, 1),
+                    currentConfig = boardConfig.value,
+                    targetDateIso = cleanDate
+                )
                 res.onSuccess { outcome ->
+                    val label = cleanDate ?: "ယနေ့/မနက်ဖြန်"
                     if (outcome.syncedCount > 0) {
-                        _events.emit("555 Mix ပွဲကြေး ${outcome.syncedCount} ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
-                        logAuditAsync("Synced 555 Mix board", "board", "five_five_five", "", "Count=${outcome.syncedCount}")
+                        _events.emit("$label 555 Mix ပွဲကြေး ${outcome.syncedCount} ပွဲ အလိုအလျောက်ထည့်သွင်းပြီးပါပြီ")
+                        logAuditAsync("Synced 555 Mix board", "board", "five_five_five", "", "Date=$label Count=${outcome.syncedCount}")
                     } else {
-                        _events.emit("555 Mix အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
+                        _events.emit("$label 555 Mix အတွက် ပွဲစဉ်အသစ် မတွေ့ရှိသေးပါ")
                     }
                     refreshLiveFootballFeed()
                 }.onFailure { err ->
@@ -2579,6 +2602,15 @@ class MainViewModel(
                 logAuditAsync("Allocated Second Admin float", "wallet", targetAdminUid, adminName, "$deltaKs Ks")
             }
             res.map { }
+        }
+
+    fun transferUserBalanceToAdminFloat(targetUid: String, displayName: String, amountKs: Long) =
+        runAction("$displayName ၏ Play Balance မှ Second Admin Float သို့ $amountKs Ks ပြောင်းရွှေ့ပြီးပါပြီ") {
+            val res = repository.transferUserBalanceToAdminFloat(targetUid, amountKs)
+            if (res.isSuccess) {
+                logAuditAsync("Transferred user balance to admin float", "wallet", targetUid, displayName, "$amountKs Ks")
+            }
+            res
         }
 
     fun giftRewardPoints(targetUid: String, targetName: String, deltaPoints: Long, note: String) =
